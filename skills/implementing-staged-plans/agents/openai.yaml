@@ -1,0 +1,4 @@
+interface:
+  display_name: "Implementing Staged Plans"
+  short_description: "Advance approved plans in reviewable increments."
+  default_prompt: "Use $implementing-staged-plans to advance the next approved implementation increment."
