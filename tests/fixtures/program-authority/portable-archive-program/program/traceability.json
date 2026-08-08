@@ -1,1 +1,2081 @@
-{}
+{
+  "atomic_requirements": [
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Record a stable identifier for every received object."
+      ],
+      "assigned_increments": [
+        "Intake foundation"
+      ],
+      "assigned_parts": [
+        "Inventory intake"
+      ],
+      "assigned_tasks": [
+        "Establish inventory intake controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "INVENTORY-INTAKE",
+      "id": "INVENTORY-INTAKE-RECORD-A-STABLE-IDENTIFIER-FOR-EVERY-RECEIVED-OBJECT",
+      "implementation_evidence": [],
+      "normalized_requirement": "Record a stable identifier for every received object.",
+      "source_locator": "Inventory intake, line 5",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-005"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Reject duplicate object identifiers."
+      ],
+      "assigned_increments": [
+        "Intake foundation"
+      ],
+      "assigned_parts": [
+        "Inventory intake"
+      ],
+      "assigned_tasks": [
+        "Establish inventory intake controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "INVENTORY-INTAKE",
+      "id": "INVENTORY-INTAKE-REJECT-DUPLICATE-OBJECT-IDENTIFIERS",
+      "implementation_evidence": [],
+      "normalized_requirement": "Reject duplicate object identifiers.",
+      "source_locator": "Inventory intake, line 6",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-006"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Record the received byte count for every object."
+      ],
+      "assigned_increments": [
+        "Intake foundation"
+      ],
+      "assigned_parts": [
+        "Inventory intake"
+      ],
+      "assigned_tasks": [
+        "Establish inventory intake controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "INVENTORY-INTAKE",
+      "id": "INVENTORY-INTAKE-RECORD-THE-RECEIVED-BYTE-COUNT-FOR-EVERY-OBJECT",
+      "implementation_evidence": [],
+      "normalized_requirement": "Record the received byte count for every object.",
+      "source_locator": "Inventory intake, line 7",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-007"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Preserve the original media-type declaration."
+      ],
+      "assigned_increments": [
+        "Intake foundation"
+      ],
+      "assigned_parts": [
+        "Inventory intake"
+      ],
+      "assigned_tasks": [
+        "Establish inventory intake controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "INVENTORY-INTAKE",
+      "id": "INVENTORY-INTAKE-PRESERVE-THE-ORIGINAL-MEDIA-TYPE-DECLARATION",
+      "implementation_evidence": [],
+      "normalized_requirement": "Preserve the original media-type declaration.",
+      "source_locator": "Inventory intake, line 8",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-008"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Compute a SHA-256 checksum for every received object."
+      ],
+      "assigned_increments": [
+        "Integrity foundation"
+      ],
+      "assigned_parts": [
+        "Checksum verification"
+      ],
+      "assigned_tasks": [
+        "Establish checksum verification controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "CHECKSUM-VERIFICATION",
+      "id": "CHECKSUM-VERIFICATION-COMPUTE-A-SHA-256-CHECKSUM-FOR-EVERY-RECEIVED-OBJECT",
+      "implementation_evidence": [],
+      "normalized_requirement": "Compute a SHA-256 checksum for every received object.",
+      "source_locator": "Checksum verification, line 12",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-012"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Compare each received checksum with the supplier declaration."
+      ],
+      "assigned_increments": [
+        "Integrity foundation"
+      ],
+      "assigned_parts": [
+        "Checksum verification"
+      ],
+      "assigned_tasks": [
+        "Establish checksum verification controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "CHECKSUM-VERIFICATION",
+      "id": "CHECKSUM-VERIFICATION-COMPARE-EACH-RECEIVED-CHECKSUM-WITH-THE-SUPPLIER-DECLARATION",
+      "implementation_evidence": [],
+      "normalized_requirement": "Compare each received checksum with the supplier declaration.",
+      "source_locator": "Checksum verification, line 13",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-013"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Quarantine every checksum mismatch."
+      ],
+      "assigned_increments": [
+        "Integrity foundation"
+      ],
+      "assigned_parts": [
+        "Checksum verification"
+      ],
+      "assigned_tasks": [
+        "Establish checksum verification controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "CHECKSUM-VERIFICATION",
+      "id": "CHECKSUM-VERIFICATION-QUARANTINE-EVERY-CHECKSUM-MISMATCH",
+      "implementation_evidence": [],
+      "normalized_requirement": "Quarantine every checksum mismatch.",
+      "source_locator": "Checksum verification, line 14",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-014"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Record the checksum verification result."
+      ],
+      "assigned_increments": [
+        "Integrity foundation"
+      ],
+      "assigned_parts": [
+        "Checksum verification"
+      ],
+      "assigned_tasks": [
+        "Establish checksum verification controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "CHECKSUM-VERIFICATION",
+      "id": "CHECKSUM-VERIFICATION-RECORD-THE-CHECKSUM-VERIFICATION-RESULT",
+      "implementation_evidence": [],
+      "normalized_requirement": "Record the checksum verification result.",
+      "source_locator": "Checksum verification, line 15",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-015"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Assign every accepted object to a retention class."
+      ],
+      "assigned_increments": [
+        "Preservation safeguards"
+      ],
+      "assigned_parts": [
+        "Retention"
+      ],
+      "assigned_tasks": [
+        "Establish retention controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "RETENTION",
+      "id": "RETENTION-ASSIGN-EVERY-ACCEPTED-OBJECT-TO-A-RETENTION-CLASS",
+      "implementation_evidence": [],
+      "normalized_requirement": "Assign every accepted object to a retention class.",
+      "source_locator": "Retention, line 19",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-019"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Prevent deletion before the retention period expires."
+      ],
+      "assigned_increments": [
+        "Preservation safeguards"
+      ],
+      "assigned_parts": [
+        "Retention"
+      ],
+      "assigned_tasks": [
+        "Establish retention controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "RETENTION",
+      "id": "RETENTION-PREVENT-DELETION-BEFORE-THE-RETENTION-PERIOD-EXPIRES",
+      "implementation_evidence": [],
+      "normalized_requirement": "Prevent deletion before the retention period expires.",
+      "source_locator": "Retention, line 20",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-020"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Record every approved retention exception."
+      ],
+      "assigned_increments": [
+        "Preservation safeguards"
+      ],
+      "assigned_parts": [
+        "Retention"
+      ],
+      "assigned_tasks": [
+        "Establish retention controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "RETENTION",
+      "id": "RETENTION-RECORD-EVERY-APPROVED-RETENTION-EXCEPTION",
+      "implementation_evidence": [],
+      "normalized_requirement": "Record every approved retention exception.",
+      "source_locator": "Retention, line 21",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-021"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Re-evaluate retention when governing policy changes."
+      ],
+      "assigned_increments": [
+        "Preservation safeguards"
+      ],
+      "assigned_parts": [
+        "Retention"
+      ],
+      "assigned_tasks": [
+        "Establish retention controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "RETENTION",
+      "id": "RETENTION-RE-EVALUATE-RETENTION-WHEN-GOVERNING-POLICY-CHANGES",
+      "implementation_evidence": [],
+      "normalized_requirement": "Re-evaluate retention when governing policy changes.",
+      "source_locator": "Retention, line 22",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-022"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Classify each object for privacy sensitivity."
+      ],
+      "assigned_increments": [
+        "Preservation safeguards"
+      ],
+      "assigned_parts": [
+        "Privacy"
+      ],
+      "assigned_tasks": [
+        "Establish privacy controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "PRIVACY",
+      "id": "PRIVACY-CLASSIFY-EACH-OBJECT-FOR-PRIVACY-SENSITIVITY",
+      "implementation_evidence": [],
+      "normalized_requirement": "Classify each object for privacy sensitivity.",
+      "source_locator": "Privacy, line 26",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-026"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Restrict sensitive objects to authorized operators."
+      ],
+      "assigned_increments": [
+        "Preservation safeguards"
+      ],
+      "assigned_parts": [
+        "Privacy"
+      ],
+      "assigned_tasks": [
+        "Establish privacy controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "PRIVACY",
+      "id": "PRIVACY-RESTRICT-SENSITIVE-OBJECTS-TO-AUTHORIZED-OPERATORS",
+      "implementation_evidence": [],
+      "normalized_requirement": "Restrict sensitive objects to authorized operators.",
+      "source_locator": "Privacy, line 27",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-027"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Redact sensitive values from operational logs."
+      ],
+      "assigned_increments": [
+        "Preservation safeguards"
+      ],
+      "assigned_parts": [
+        "Privacy"
+      ],
+      "assigned_tasks": [
+        "Establish privacy controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "PRIVACY",
+      "id": "PRIVACY-REDACT-SENSITIVE-VALUES-FROM-OPERATIONAL-LOGS",
+      "implementation_evidence": [],
+      "normalized_requirement": "Redact sensitive values from operational logs.",
+      "source_locator": "Privacy, line 28",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-028"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Record every access to a sensitive object."
+      ],
+      "assigned_increments": [
+        "Preservation safeguards"
+      ],
+      "assigned_parts": [
+        "Privacy"
+      ],
+      "assigned_tasks": [
+        "Establish privacy controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "PRIVACY",
+      "id": "PRIVACY-RECORD-EVERY-ACCESS-TO-A-SENSITIVE-OBJECT",
+      "implementation_evidence": [],
+      "normalized_requirement": "Record every access to a sensitive object.",
+      "source_locator": "Privacy, line 29",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-029"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Maintain two independently stored recovery copies."
+      ],
+      "assigned_increments": [
+        "Recovery readiness"
+      ],
+      "assigned_parts": [
+        "Recovery"
+      ],
+      "assigned_tasks": [
+        "Establish recovery controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "RECOVERY",
+      "id": "RECOVERY-MAINTAIN-TWO-INDEPENDENTLY-STORED-RECOVERY-COPIES",
+      "implementation_evidence": [],
+      "normalized_requirement": "Maintain two independently stored recovery copies.",
+      "source_locator": "Recovery, line 33",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-033"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Verify each recovery copy on a defined schedule."
+      ],
+      "assigned_increments": [
+        "Recovery readiness"
+      ],
+      "assigned_parts": [
+        "Recovery"
+      ],
+      "assigned_tasks": [
+        "Establish recovery controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "RECOVERY",
+      "id": "RECOVERY-VERIFY-EACH-RECOVERY-COPY-ON-A-DEFINED-SCHEDULE",
+      "implementation_evidence": [],
+      "normalized_requirement": "Verify each recovery copy on a defined schedule.",
+      "source_locator": "Recovery, line 34",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-034"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Exercise restoration using a representative object set."
+      ],
+      "assigned_increments": [
+        "Recovery readiness"
+      ],
+      "assigned_parts": [
+        "Recovery"
+      ],
+      "assigned_tasks": [
+        "Establish recovery controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "RECOVERY",
+      "id": "RECOVERY-EXERCISE-RESTORATION-USING-A-REPRESENTATIVE-OBJECT-SET",
+      "implementation_evidence": [],
+      "normalized_requirement": "Exercise restoration using a representative object set.",
+      "source_locator": "Recovery, line 35",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-035"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Record restoration duration and outcome."
+      ],
+      "assigned_increments": [
+        "Recovery readiness"
+      ],
+      "assigned_parts": [
+        "Recovery"
+      ],
+      "assigned_tasks": [
+        "Establish recovery controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "RECOVERY",
+      "id": "RECOVERY-RECORD-RESTORATION-DURATION-AND-OUTCOME",
+      "implementation_evidence": [],
+      "normalized_requirement": "Record restoration duration and outcome.",
+      "source_locator": "Recovery, line 36",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-036"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Provide text alternatives for visual archive summaries."
+      ],
+      "assigned_increments": [
+        "Operator experience"
+      ],
+      "assigned_parts": [
+        "Accessibility"
+      ],
+      "assigned_tasks": [
+        "Establish accessibility controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "ACCESSIBILITY",
+      "id": "ACCESSIBILITY-PROVIDE-TEXT-ALTERNATIVES-FOR-VISUAL-ARCHIVE-SUMMARIES",
+      "implementation_evidence": [],
+      "normalized_requirement": "Provide text alternatives for visual archive summaries.",
+      "source_locator": "Accessibility, line 40",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-040"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Preserve keyboard access to every operator action."
+      ],
+      "assigned_increments": [
+        "Operator experience"
+      ],
+      "assigned_parts": [
+        "Accessibility"
+      ],
+      "assigned_tasks": [
+        "Establish accessibility controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "ACCESSIBILITY",
+      "id": "ACCESSIBILITY-PRESERVE-KEYBOARD-ACCESS-TO-EVERY-OPERATOR-ACTION",
+      "implementation_evidence": [],
+      "normalized_requirement": "Preserve keyboard access to every operator action.",
+      "source_locator": "Accessibility, line 41",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-041"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Expose validation errors with programmatic labels."
+      ],
+      "assigned_increments": [
+        "Operator experience"
+      ],
+      "assigned_parts": [
+        "Accessibility"
+      ],
+      "assigned_tasks": [
+        "Establish accessibility controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "ACCESSIBILITY",
+      "id": "ACCESSIBILITY-EXPOSE-VALIDATION-ERRORS-WITH-PROGRAMMATIC-LABELS",
+      "implementation_evidence": [],
+      "normalized_requirement": "Expose validation errors with programmatic labels.",
+      "source_locator": "Accessibility, line 42",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-042"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Publish the supported assistive-technology baseline."
+      ],
+      "assigned_increments": [
+        "Operator experience"
+      ],
+      "assigned_parts": [
+        "Accessibility"
+      ],
+      "assigned_tasks": [
+        "Establish accessibility controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "ACCESSIBILITY",
+      "id": "ACCESSIBILITY-PUBLISH-THE-SUPPORTED-ASSISTIVE-TECHNOLOGY-BASELINE",
+      "implementation_evidence": [],
+      "normalized_requirement": "Publish the supported assistive-technology baseline.",
+      "source_locator": "Accessibility, line 43",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-043"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Declare every supported archive package version."
+      ],
+      "assigned_increments": [
+        "Compatibility assurance"
+      ],
+      "assigned_parts": [
+        "Compatibility"
+      ],
+      "assigned_tasks": [
+        "Establish compatibility controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "COMPATIBILITY",
+      "id": "COMPATIBILITY-DECLARE-EVERY-SUPPORTED-ARCHIVE-PACKAGE-VERSION",
+      "implementation_evidence": [],
+      "normalized_requirement": "Declare every supported archive package version.",
+      "source_locator": "Compatibility, line 47",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-047"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Reject unsupported package versions before ingest."
+      ],
+      "assigned_increments": [
+        "Compatibility assurance"
+      ],
+      "assigned_parts": [
+        "Compatibility"
+      ],
+      "assigned_tasks": [
+        "Establish compatibility controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "COMPATIBILITY",
+      "id": "COMPATIBILITY-REJECT-UNSUPPORTED-PACKAGE-VERSIONS-BEFORE-INGEST",
+      "implementation_evidence": [],
+      "normalized_requirement": "Reject unsupported package versions before ingest.",
+      "source_locator": "Compatibility, line 48",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-048"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Preserve documented behavior across compatible revisions."
+      ],
+      "assigned_increments": [
+        "Compatibility assurance"
+      ],
+      "assigned_parts": [
+        "Compatibility"
+      ],
+      "assigned_tasks": [
+        "Establish compatibility controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "COMPATIBILITY",
+      "id": "COMPATIBILITY-PRESERVE-DOCUMENTED-BEHAVIOR-ACROSS-COMPATIBLE-REVISIONS",
+      "implementation_evidence": [],
+      "normalized_requirement": "Preserve documented behavior across compatible revisions.",
+      "source_locator": "Compatibility, line 49",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-049"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Record the compatibility decision for every package."
+      ],
+      "assigned_increments": [
+        "Compatibility assurance"
+      ],
+      "assigned_parts": [
+        "Compatibility"
+      ],
+      "assigned_tasks": [
+        "Establish compatibility controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "COMPATIBILITY",
+      "id": "COMPATIBILITY-RECORD-THE-COMPATIBILITY-DECISION-FOR-EVERY-PACKAGE",
+      "implementation_evidence": [],
+      "normalized_requirement": "Record the compatibility decision for every package.",
+      "source_locator": "Compatibility, line 50",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-050"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Emit a stable event identifier for every ingest attempt."
+      ],
+      "assigned_increments": [
+        "Operational assurance"
+      ],
+      "assigned_parts": [
+        "Observability"
+      ],
+      "assigned_tasks": [
+        "Establish observability controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "OBSERVABILITY",
+      "id": "OBSERVABILITY-EMIT-A-STABLE-EVENT-IDENTIFIER-FOR-EVERY-INGEST-ATTEMPT",
+      "implementation_evidence": [],
+      "normalized_requirement": "Emit a stable event identifier for every ingest attempt.",
+      "source_locator": "Observability, line 54",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-054"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Record validation duration without source content."
+      ],
+      "assigned_increments": [
+        "Operational assurance"
+      ],
+      "assigned_parts": [
+        "Observability"
+      ],
+      "assigned_tasks": [
+        "Establish observability controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "OBSERVABILITY",
+      "id": "OBSERVABILITY-RECORD-VALIDATION-DURATION-WITHOUT-SOURCE-CONTENT",
+      "implementation_evidence": [],
+      "normalized_requirement": "Record validation duration without source content.",
+      "source_locator": "Observability, line 55",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-055"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Alert when the quarantine rate exceeds its threshold."
+      ],
+      "assigned_increments": [
+        "Operational assurance"
+      ],
+      "assigned_parts": [
+        "Observability"
+      ],
+      "assigned_tasks": [
+        "Establish observability controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "OBSERVABILITY",
+      "id": "OBSERVABILITY-ALERT-WHEN-THE-QUARANTINE-RATE-EXCEEDS-ITS-THRESHOLD",
+      "implementation_evidence": [],
+      "normalized_requirement": "Alert when the quarantine rate exceeds its threshold.",
+      "source_locator": "Observability, line 56",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-056"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Preserve diagnostic events for the approved interval."
+      ],
+      "assigned_increments": [
+        "Operational assurance"
+      ],
+      "assigned_parts": [
+        "Observability"
+      ],
+      "assigned_tasks": [
+        "Establish observability controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "OBSERVABILITY",
+      "id": "OBSERVABILITY-PRESERVE-DIAGNOSTIC-EVENTS-FOR-THE-APPROVED-INTERVAL",
+      "implementation_evidence": [],
+      "normalized_requirement": "Preserve diagnostic events for the approved interval.",
+      "source_locator": "Observability, line 57",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-057"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Present checksum mismatches for operator review."
+      ],
+      "assigned_increments": [
+        "Governed operations"
+      ],
+      "assigned_parts": [
+        "Operator review"
+      ],
+      "assigned_tasks": [
+        "Establish operator review controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "OPERATOR-REVIEW",
+      "id": "OPERATOR-REVIEW-PRESENT-CHECKSUM-MISMATCHES-FOR-OPERATOR-REVIEW",
+      "implementation_evidence": [],
+      "normalized_requirement": "Present checksum mismatches for operator review.",
+      "source_locator": "Operator review, line 61",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-061"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Require a rationale for every quarantine release."
+      ],
+      "assigned_increments": [
+        "Governed operations"
+      ],
+      "assigned_parts": [
+        "Operator review"
+      ],
+      "assigned_tasks": [
+        "Establish operator review controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "OPERATOR-REVIEW",
+      "id": "OPERATOR-REVIEW-REQUIRE-A-RATIONALE-FOR-EVERY-QUARANTINE-RELEASE",
+      "implementation_evidence": [],
+      "normalized_requirement": "Require a rationale for every quarantine release.",
+      "source_locator": "Operator review, line 62",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-062"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Separate the reviewer from the original releaser."
+      ],
+      "assigned_increments": [
+        "Governed operations"
+      ],
+      "assigned_parts": [
+        "Operator review"
+      ],
+      "assigned_tasks": [
+        "Establish operator review controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "OPERATOR-REVIEW",
+      "id": "OPERATOR-REVIEW-SEPARATE-THE-REVIEWER-FROM-THE-ORIGINAL-RELEASER",
+      "implementation_evidence": [],
+      "normalized_requirement": "Separate the reviewer from the original releaser.",
+      "source_locator": "Operator review, line 63",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-063"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Record the final operator disposition."
+      ],
+      "assigned_increments": [
+        "Governed operations"
+      ],
+      "assigned_parts": [
+        "Operator review"
+      ],
+      "assigned_tasks": [
+        "Establish operator review controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "OPERATOR-REVIEW",
+      "id": "OPERATOR-REVIEW-RECORD-THE-FINAL-OPERATOR-DISPOSITION",
+      "implementation_evidence": [],
+      "normalized_requirement": "Record the final operator disposition.",
+      "source_locator": "Operator review, line 64",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-064"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Bind approval to the exact source digest."
+      ],
+      "assigned_increments": [
+        "Authority controls"
+      ],
+      "assigned_parts": [
+        "Approval"
+      ],
+      "assigned_tasks": [
+        "Establish approval controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "APPROVAL",
+      "id": "APPROVAL-BIND-APPROVAL-TO-THE-EXACT-SOURCE-DIGEST",
+      "implementation_evidence": [],
+      "normalized_requirement": "Bind approval to the exact source digest.",
+      "source_locator": "Approval, line 68",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-068"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Bind approval to the exact program digest."
+      ],
+      "assigned_increments": [
+        "Authority controls"
+      ],
+      "assigned_parts": [
+        "Approval"
+      ],
+      "assigned_tasks": [
+        "Establish approval controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "APPROVAL",
+      "id": "APPROVAL-BIND-APPROVAL-TO-THE-EXACT-PROGRAM-DIGEST",
+      "implementation_evidence": [],
+      "normalized_requirement": "Bind approval to the exact program digest.",
+      "source_locator": "Approval, line 69",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-069"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Invalidate approval when either bound digest changes."
+      ],
+      "assigned_increments": [
+        "Authority controls"
+      ],
+      "assigned_parts": [
+        "Approval"
+      ],
+      "assigned_tasks": [
+        "Establish approval controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "APPROVAL",
+      "id": "APPROVAL-INVALIDATE-APPROVAL-WHEN-EITHER-BOUND-DIGEST-CHANGES",
+      "implementation_evidence": [],
+      "normalized_requirement": "Invalidate approval when either bound digest changes.",
+      "source_locator": "Approval, line 70",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-070"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Reject conflicting approval records."
+      ],
+      "assigned_increments": [
+        "Authority controls"
+      ],
+      "assigned_parts": [
+        "Approval"
+      ],
+      "assigned_tasks": [
+        "Establish approval controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "APPROVAL",
+      "id": "APPROVAL-REJECT-CONFLICTING-APPROVAL-RECORDS",
+      "implementation_evidence": [],
+      "normalized_requirement": "Reject conflicting approval records.",
+      "source_locator": "Approval, line 71",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-071"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Deliver intake before recovery automation."
+      ],
+      "assigned_increments": [
+        "Reviewable delivery"
+      ],
+      "assigned_parts": [
+        "Staged delivery"
+      ],
+      "assigned_tasks": [
+        "Establish staged delivery controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "STAGED-DELIVERY",
+      "id": "STAGED-DELIVERY-DELIVER-INTAKE-BEFORE-RECOVERY-AUTOMATION",
+      "implementation_evidence": [],
+      "normalized_requirement": "Deliver intake before recovery automation.",
+      "source_locator": "Staged delivery, line 75",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-075"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Verify each delivery stage before the next begins."
+      ],
+      "assigned_increments": [
+        "Reviewable delivery"
+      ],
+      "assigned_parts": [
+        "Staged delivery"
+      ],
+      "assigned_tasks": [
+        "Establish staged delivery controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "STAGED-DELIVERY",
+      "id": "STAGED-DELIVERY-VERIFY-EACH-DELIVERY-STAGE-BEFORE-THE-NEXT-BEGINS",
+      "implementation_evidence": [],
+      "normalized_requirement": "Verify each delivery stage before the next begins.",
+      "source_locator": "Staged delivery, line 76",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-076"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Keep distant implementation files provisional."
+      ],
+      "assigned_increments": [
+        "Reviewable delivery"
+      ],
+      "assigned_parts": [
+        "Staged delivery"
+      ],
+      "assigned_tasks": [
+        "Establish staged delivery controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "STAGED-DELIVERY",
+      "id": "STAGED-DELIVERY-KEEP-DISTANT-IMPLEMENTATION-FILES-PROVISIONAL",
+      "implementation_evidence": [],
+      "normalized_requirement": "Keep distant implementation files provisional.",
+      "source_locator": "Staged delivery, line 77",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-077"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Stop at every required human acceptance boundary."
+      ],
+      "assigned_increments": [
+        "Reviewable delivery"
+      ],
+      "assigned_parts": [
+        "Staged delivery"
+      ],
+      "assigned_tasks": [
+        "Establish staged delivery controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "STAGED-DELIVERY",
+      "id": "STAGED-DELIVERY-STOP-AT-EVERY-REQUIRED-HUMAN-ACCEPTANCE-BOUNDARY",
+      "implementation_evidence": [],
+      "normalized_requirement": "Stop at every required human acceptance boundary.",
+      "source_locator": "Staged delivery, line 78",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-078"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Reconcile every requirement before closure."
+      ],
+      "assigned_increments": [
+        "Program closure"
+      ],
+      "assigned_parts": [
+        "Closure"
+      ],
+      "assigned_tasks": [
+        "Establish closure controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "CLOSURE",
+      "id": "CLOSURE-RECONCILE-EVERY-REQUIREMENT-BEFORE-CLOSURE",
+      "implementation_evidence": [],
+      "normalized_requirement": "Reconcile every requirement before closure.",
+      "source_locator": "Closure, line 82",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-082"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Preserve accepted evidence from prior revisions."
+      ],
+      "assigned_increments": [
+        "Program closure"
+      ],
+      "assigned_parts": [
+        "Closure"
+      ],
+      "assigned_tasks": [
+        "Establish closure controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "CLOSURE",
+      "id": "CLOSURE-PRESERVE-ACCEPTED-EVIDENCE-FROM-PRIOR-REVISIONS",
+      "implementation_evidence": [],
+      "normalized_requirement": "Preserve accepted evidence from prior revisions.",
+      "source_locator": "Closure, line 83",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-083"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Record unresolved risk with an accountable owner."
+      ],
+      "assigned_increments": [
+        "Program closure"
+      ],
+      "assigned_parts": [
+        "Closure"
+      ],
+      "assigned_tasks": [
+        "Establish closure controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "CLOSURE",
+      "id": "CLOSURE-RECORD-UNRESOLVED-RISK-WITH-AN-ACCOUNTABLE-OWNER",
+      "implementation_evidence": [],
+      "normalized_requirement": "Record unresolved risk with an accountable owner.",
+      "source_locator": "Closure, line 84",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-084"
+      ],
+      "verification_evidence": []
+    },
+    {
+      "acceptance_criteria": [
+        "Recorded verification demonstrates: Require explicit closure approval."
+      ],
+      "assigned_increments": [
+        "Program closure"
+      ],
+      "assigned_parts": [
+        "Closure"
+      ],
+      "assigned_tasks": [
+        "Establish closure controls"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "CLOSURE",
+      "id": "CLOSURE-REQUIRE-EXPLICIT-CLOSURE-APPROVAL",
+      "implementation_evidence": [],
+      "normalized_requirement": "Require explicit closure approval.",
+      "source_locator": "Closure, line 85",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-085"
+      ],
+      "verification_evidence": []
+    }
+  ],
+  "coverage_assertion": {
+    "approval_event_id": "PORTABLE-ARCHIVE-APPROVAL",
+    "machine_complete": true,
+    "semantic_requirements_sha256": "351f8ae6af72673287a5f1016bfd9173b936f9f21bd1e9ef3b795675f7f18e1f",
+    "source_line_count": 85,
+    "status": "complete"
+  },
+  "program_id": "PORTABLE-ARCHIVE",
+  "program_revision": 1,
+  "requirement_groups": [
+    {
+      "id": "INVENTORY-INTAKE",
+      "title": "Inventory intake"
+    },
+    {
+      "id": "CHECKSUM-VERIFICATION",
+      "title": "Checksum verification"
+    },
+    {
+      "id": "RETENTION",
+      "title": "Retention"
+    },
+    {
+      "id": "PRIVACY",
+      "title": "Privacy"
+    },
+    {
+      "id": "RECOVERY",
+      "title": "Recovery"
+    },
+    {
+      "id": "ACCESSIBILITY",
+      "title": "Accessibility"
+    },
+    {
+      "id": "COMPATIBILITY",
+      "title": "Compatibility"
+    },
+    {
+      "id": "OBSERVABILITY",
+      "title": "Observability"
+    },
+    {
+      "id": "OPERATOR-REVIEW",
+      "title": "Operator review"
+    },
+    {
+      "id": "APPROVAL",
+      "title": "Approval"
+    },
+    {
+      "id": "STAGED-DELIVERY",
+      "title": "Staged delivery"
+    },
+    {
+      "id": "CLOSURE",
+      "title": "Closure"
+    }
+  ],
+  "schema_version": "implementation-traceability/v2",
+  "source_id": "PORTABLE-ARCHIVE-SOURCE",
+  "source_sha256": "c17450e8e18866f537277965da08f604b6cb31645fa29db3f4cd7d9906cd1327",
+  "source_units": [
+    {
+      "classification": "context",
+      "context_rationale": "Document title establishing source context.",
+      "end_line": 1,
+      "id": "SOURCE-UNIT-LINE-001",
+      "requirement_ids": [],
+      "source_text_sha256": "1db2d3f3206b9dc267052ed0c093ef5d8ab8a7a0023ea9f424386c6e1f2af3ad",
+      "start_line": 1
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 2,
+      "id": "SOURCE-UNIT-LINE-002",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 2
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Section heading grouping the following obligations.",
+      "end_line": 3,
+      "id": "SOURCE-UNIT-LINE-003",
+      "requirement_ids": [],
+      "source_text_sha256": "4b5674b0aa5c9270edafabf48ab066e9762a46bdb250317f1ac7d27c89d22713",
+      "start_line": 3
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 4,
+      "id": "SOURCE-UNIT-LINE-004",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 4
+    },
+    {
+      "classification": "requirement",
+      "end_line": 5,
+      "id": "SOURCE-UNIT-LINE-005",
+      "requirement_ids": [
+        "INVENTORY-INTAKE-RECORD-A-STABLE-IDENTIFIER-FOR-EVERY-RECEIVED-OBJECT"
+      ],
+      "source_text_sha256": "75a7aebdfadcbb8bb6852c91c0d12353c14d26d1f7722d95545bdd3000b03b5b",
+      "start_line": 5
+    },
+    {
+      "classification": "requirement",
+      "end_line": 6,
+      "id": "SOURCE-UNIT-LINE-006",
+      "requirement_ids": [
+        "INVENTORY-INTAKE-REJECT-DUPLICATE-OBJECT-IDENTIFIERS"
+      ],
+      "source_text_sha256": "6fc6350586e7e25e019e6e19a2d619f82096d321758d17a49a99d12a68c2b9b8",
+      "start_line": 6
+    },
+    {
+      "classification": "requirement",
+      "end_line": 7,
+      "id": "SOURCE-UNIT-LINE-007",
+      "requirement_ids": [
+        "INVENTORY-INTAKE-RECORD-THE-RECEIVED-BYTE-COUNT-FOR-EVERY-OBJECT"
+      ],
+      "source_text_sha256": "50da085a9e23654ad78a15fdb5c0ea4b05f289393d8fd1835e46820ed3bb0b9a",
+      "start_line": 7
+    },
+    {
+      "classification": "requirement",
+      "end_line": 8,
+      "id": "SOURCE-UNIT-LINE-008",
+      "requirement_ids": [
+        "INVENTORY-INTAKE-PRESERVE-THE-ORIGINAL-MEDIA-TYPE-DECLARATION"
+      ],
+      "source_text_sha256": "51006301af529d4691247a6d550346dad47b9aaa52f941189398b6d64a485f37",
+      "start_line": 8
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 9,
+      "id": "SOURCE-UNIT-LINE-009",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 9
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Section heading grouping the following obligations.",
+      "end_line": 10,
+      "id": "SOURCE-UNIT-LINE-010",
+      "requirement_ids": [],
+      "source_text_sha256": "f6a24166ff41d720a6da42315535d7329f464d734d92af7c5966185e1b48b958",
+      "start_line": 10
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 11,
+      "id": "SOURCE-UNIT-LINE-011",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 11
+    },
+    {
+      "classification": "requirement",
+      "end_line": 12,
+      "id": "SOURCE-UNIT-LINE-012",
+      "requirement_ids": [
+        "CHECKSUM-VERIFICATION-COMPUTE-A-SHA-256-CHECKSUM-FOR-EVERY-RECEIVED-OBJECT"
+      ],
+      "source_text_sha256": "91ea180ada2a382c072761a235c554979b42a2cec43a8d29f2cd924061c2d185",
+      "start_line": 12
+    },
+    {
+      "classification": "requirement",
+      "end_line": 13,
+      "id": "SOURCE-UNIT-LINE-013",
+      "requirement_ids": [
+        "CHECKSUM-VERIFICATION-COMPARE-EACH-RECEIVED-CHECKSUM-WITH-THE-SUPPLIER-DECLARATION"
+      ],
+      "source_text_sha256": "6c3400d1de00397563bf40ce94bcdddc45765afcdc6e221f4febd9a17452f87a",
+      "start_line": 13
+    },
+    {
+      "classification": "requirement",
+      "end_line": 14,
+      "id": "SOURCE-UNIT-LINE-014",
+      "requirement_ids": [
+        "CHECKSUM-VERIFICATION-QUARANTINE-EVERY-CHECKSUM-MISMATCH"
+      ],
+      "source_text_sha256": "8e98782cde3f3db64202a19224941879a20bfe87f81cac0df0faf86a1040e7a8",
+      "start_line": 14
+    },
+    {
+      "classification": "requirement",
+      "end_line": 15,
+      "id": "SOURCE-UNIT-LINE-015",
+      "requirement_ids": [
+        "CHECKSUM-VERIFICATION-RECORD-THE-CHECKSUM-VERIFICATION-RESULT"
+      ],
+      "source_text_sha256": "fdaf6ebd25e1f79e0e2d08446fa5ca154954a5d032cf3ca5350c8768555b39fb",
+      "start_line": 15
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 16,
+      "id": "SOURCE-UNIT-LINE-016",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 16
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Section heading grouping the following obligations.",
+      "end_line": 17,
+      "id": "SOURCE-UNIT-LINE-017",
+      "requirement_ids": [],
+      "source_text_sha256": "ec04ff0f889e771f364c11420e653ac0930d66ae66c21825f26f69d556261cb0",
+      "start_line": 17
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 18,
+      "id": "SOURCE-UNIT-LINE-018",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 18
+    },
+    {
+      "classification": "requirement",
+      "end_line": 19,
+      "id": "SOURCE-UNIT-LINE-019",
+      "requirement_ids": [
+        "RETENTION-ASSIGN-EVERY-ACCEPTED-OBJECT-TO-A-RETENTION-CLASS"
+      ],
+      "source_text_sha256": "a689af6b0e708bd077e01c37156cefff0ab27bbfc73eb5b95b562fd0e61dbbd7",
+      "start_line": 19
+    },
+    {
+      "classification": "requirement",
+      "end_line": 20,
+      "id": "SOURCE-UNIT-LINE-020",
+      "requirement_ids": [
+        "RETENTION-PREVENT-DELETION-BEFORE-THE-RETENTION-PERIOD-EXPIRES"
+      ],
+      "source_text_sha256": "d5827ab0be61225697e81035ec49435fc1843b4dd454bc06ea20d59ec6b3c829",
+      "start_line": 20
+    },
+    {
+      "classification": "requirement",
+      "end_line": 21,
+      "id": "SOURCE-UNIT-LINE-021",
+      "requirement_ids": [
+        "RETENTION-RECORD-EVERY-APPROVED-RETENTION-EXCEPTION"
+      ],
+      "source_text_sha256": "dff0057a7fa4dad4118510aa6a9e3f5227a204a9ebcaedd2f6b44fb81e4df2ce",
+      "start_line": 21
+    },
+    {
+      "classification": "requirement",
+      "end_line": 22,
+      "id": "SOURCE-UNIT-LINE-022",
+      "requirement_ids": [
+        "RETENTION-RE-EVALUATE-RETENTION-WHEN-GOVERNING-POLICY-CHANGES"
+      ],
+      "source_text_sha256": "8eae1f41e0787a03fae3b7c61aaa520834f257357103da22a52e25c0304941b7",
+      "start_line": 22
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 23,
+      "id": "SOURCE-UNIT-LINE-023",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 23
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Section heading grouping the following obligations.",
+      "end_line": 24,
+      "id": "SOURCE-UNIT-LINE-024",
+      "requirement_ids": [],
+      "source_text_sha256": "1a9e9f457ab83742836f35f15d26ebb9aac3184fe3d441f81ec65be91bc16077",
+      "start_line": 24
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 25,
+      "id": "SOURCE-UNIT-LINE-025",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 25
+    },
+    {
+      "classification": "requirement",
+      "end_line": 26,
+      "id": "SOURCE-UNIT-LINE-026",
+      "requirement_ids": [
+        "PRIVACY-CLASSIFY-EACH-OBJECT-FOR-PRIVACY-SENSITIVITY"
+      ],
+      "source_text_sha256": "045bf865cc4df717b2965d6386c3c79643107f0b434dc42762f24911e1869c91",
+      "start_line": 26
+    },
+    {
+      "classification": "requirement",
+      "end_line": 27,
+      "id": "SOURCE-UNIT-LINE-027",
+      "requirement_ids": [
+        "PRIVACY-RESTRICT-SENSITIVE-OBJECTS-TO-AUTHORIZED-OPERATORS"
+      ],
+      "source_text_sha256": "fb8283e849836ad2d0f63e0495a417e48e768195cb678c9484683c2f7978fdde",
+      "start_line": 27
+    },
+    {
+      "classification": "requirement",
+      "end_line": 28,
+      "id": "SOURCE-UNIT-LINE-028",
+      "requirement_ids": [
+        "PRIVACY-REDACT-SENSITIVE-VALUES-FROM-OPERATIONAL-LOGS"
+      ],
+      "source_text_sha256": "8520b1157cb3e968fa5c8f2e8ae68be67b5f797e1c228191142bb12f49348a90",
+      "start_line": 28
+    },
+    {
+      "classification": "requirement",
+      "end_line": 29,
+      "id": "SOURCE-UNIT-LINE-029",
+      "requirement_ids": [
+        "PRIVACY-RECORD-EVERY-ACCESS-TO-A-SENSITIVE-OBJECT"
+      ],
+      "source_text_sha256": "6deef5fbedfcbac162ae0ab6ed5a3d04666b2f7a2a7aefcd1241d4fadbf544bc",
+      "start_line": 29
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 30,
+      "id": "SOURCE-UNIT-LINE-030",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 30
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Section heading grouping the following obligations.",
+      "end_line": 31,
+      "id": "SOURCE-UNIT-LINE-031",
+      "requirement_ids": [],
+      "source_text_sha256": "f79ce0ec1bcb212d4ad3163809c2ed34dcdf44cf60ba26da6cd02a54b20f556b",
+      "start_line": 31
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 32,
+      "id": "SOURCE-UNIT-LINE-032",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 32
+    },
+    {
+      "classification": "requirement",
+      "end_line": 33,
+      "id": "SOURCE-UNIT-LINE-033",
+      "requirement_ids": [
+        "RECOVERY-MAINTAIN-TWO-INDEPENDENTLY-STORED-RECOVERY-COPIES"
+      ],
+      "source_text_sha256": "f373cd17ca6fb99f4f695311b965137e4dabe29300fc8a5f6434e9c8c58f7a45",
+      "start_line": 33
+    },
+    {
+      "classification": "requirement",
+      "end_line": 34,
+      "id": "SOURCE-UNIT-LINE-034",
+      "requirement_ids": [
+        "RECOVERY-VERIFY-EACH-RECOVERY-COPY-ON-A-DEFINED-SCHEDULE"
+      ],
+      "source_text_sha256": "7afcb5194cfa10405971905726392744df62f21c97f6d9f42222d34871b06c7e",
+      "start_line": 34
+    },
+    {
+      "classification": "requirement",
+      "end_line": 35,
+      "id": "SOURCE-UNIT-LINE-035",
+      "requirement_ids": [
+        "RECOVERY-EXERCISE-RESTORATION-USING-A-REPRESENTATIVE-OBJECT-SET"
+      ],
+      "source_text_sha256": "1418a4ad56b69079f94a116a0b39c612b47c2a43538f0fd315d100f3e826d2c8",
+      "start_line": 35
+    },
+    {
+      "classification": "requirement",
+      "end_line": 36,
+      "id": "SOURCE-UNIT-LINE-036",
+      "requirement_ids": [
+        "RECOVERY-RECORD-RESTORATION-DURATION-AND-OUTCOME"
+      ],
+      "source_text_sha256": "816a3a077007ff27d8d45010fad869d09c1a3150546e09a121bc3669057fd6c1",
+      "start_line": 36
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 37,
+      "id": "SOURCE-UNIT-LINE-037",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 37
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Section heading grouping the following obligations.",
+      "end_line": 38,
+      "id": "SOURCE-UNIT-LINE-038",
+      "requirement_ids": [],
+      "source_text_sha256": "7a235f3b6064dcf103491d494aa140d10d9eac8918ae5b95ced1ffde5f806b62",
+      "start_line": 38
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 39,
+      "id": "SOURCE-UNIT-LINE-039",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 39
+    },
+    {
+      "classification": "requirement",
+      "end_line": 40,
+      "id": "SOURCE-UNIT-LINE-040",
+      "requirement_ids": [
+        "ACCESSIBILITY-PROVIDE-TEXT-ALTERNATIVES-FOR-VISUAL-ARCHIVE-SUMMARIES"
+      ],
+      "source_text_sha256": "ccb4770def00e4f2e616d886aa753871087f77225fac5ca34ae56d4cf8bb2562",
+      "start_line": 40
+    },
+    {
+      "classification": "requirement",
+      "end_line": 41,
+      "id": "SOURCE-UNIT-LINE-041",
+      "requirement_ids": [
+        "ACCESSIBILITY-PRESERVE-KEYBOARD-ACCESS-TO-EVERY-OPERATOR-ACTION"
+      ],
+      "source_text_sha256": "9b29c17041738d7f41162c2067de13db94595962b32f859a0471150e90e72690",
+      "start_line": 41
+    },
+    {
+      "classification": "requirement",
+      "end_line": 42,
+      "id": "SOURCE-UNIT-LINE-042",
+      "requirement_ids": [
+        "ACCESSIBILITY-EXPOSE-VALIDATION-ERRORS-WITH-PROGRAMMATIC-LABELS"
+      ],
+      "source_text_sha256": "622271ad29af5865db2d9e323a8d693080c78242f2edd4794778dac4a1933c60",
+      "start_line": 42
+    },
+    {
+      "classification": "requirement",
+      "end_line": 43,
+      "id": "SOURCE-UNIT-LINE-043",
+      "requirement_ids": [
+        "ACCESSIBILITY-PUBLISH-THE-SUPPORTED-ASSISTIVE-TECHNOLOGY-BASELINE"
+      ],
+      "source_text_sha256": "a9d31423f5b78bd7bb82a70b4c5f5469cbf413617f2c1285900efc1f3c585005",
+      "start_line": 43
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 44,
+      "id": "SOURCE-UNIT-LINE-044",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 44
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Section heading grouping the following obligations.",
+      "end_line": 45,
+      "id": "SOURCE-UNIT-LINE-045",
+      "requirement_ids": [],
+      "source_text_sha256": "a935297f51ccca7e6b7d41c424656280f80020a89d20454fe0e746b801b1acb5",
+      "start_line": 45
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 46,
+      "id": "SOURCE-UNIT-LINE-046",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 46
+    },
+    {
+      "classification": "requirement",
+      "end_line": 47,
+      "id": "SOURCE-UNIT-LINE-047",
+      "requirement_ids": [
+        "COMPATIBILITY-DECLARE-EVERY-SUPPORTED-ARCHIVE-PACKAGE-VERSION"
+      ],
+      "source_text_sha256": "94704374f8b113994c62f84c4a812bfe96d28663c23dcae3fee879c8f7f22744",
+      "start_line": 47
+    },
+    {
+      "classification": "requirement",
+      "end_line": 48,
+      "id": "SOURCE-UNIT-LINE-048",
+      "requirement_ids": [
+        "COMPATIBILITY-REJECT-UNSUPPORTED-PACKAGE-VERSIONS-BEFORE-INGEST"
+      ],
+      "source_text_sha256": "0f990bb74c113a1bb5e7fc080e5fecafdeac0ae93df3e2a52e3378c39c36e8b9",
+      "start_line": 48
+    },
+    {
+      "classification": "requirement",
+      "end_line": 49,
+      "id": "SOURCE-UNIT-LINE-049",
+      "requirement_ids": [
+        "COMPATIBILITY-PRESERVE-DOCUMENTED-BEHAVIOR-ACROSS-COMPATIBLE-REVISIONS"
+      ],
+      "source_text_sha256": "ece46affc45e08a62a0872d6dd6223f705cc20af5b95731a1cf51b9afee071d3",
+      "start_line": 49
+    },
+    {
+      "classification": "requirement",
+      "end_line": 50,
+      "id": "SOURCE-UNIT-LINE-050",
+      "requirement_ids": [
+        "COMPATIBILITY-RECORD-THE-COMPATIBILITY-DECISION-FOR-EVERY-PACKAGE"
+      ],
+      "source_text_sha256": "a4cdf1b7cd78d42a15da986dbeceb621ca886c8c39176a9586e8ca88c47ac369",
+      "start_line": 50
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 51,
+      "id": "SOURCE-UNIT-LINE-051",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 51
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Section heading grouping the following obligations.",
+      "end_line": 52,
+      "id": "SOURCE-UNIT-LINE-052",
+      "requirement_ids": [],
+      "source_text_sha256": "cca093267f9279df1772d23d951fc78de2e05a67d434dcb41cdbde376ed4c6cc",
+      "start_line": 52
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 53,
+      "id": "SOURCE-UNIT-LINE-053",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 53
+    },
+    {
+      "classification": "requirement",
+      "end_line": 54,
+      "id": "SOURCE-UNIT-LINE-054",
+      "requirement_ids": [
+        "OBSERVABILITY-EMIT-A-STABLE-EVENT-IDENTIFIER-FOR-EVERY-INGEST-ATTEMPT"
+      ],
+      "source_text_sha256": "e06f15dbdb8d540d0f25325e523bd19a5800f7c36142cc0d75abe9b17c74b57d",
+      "start_line": 54
+    },
+    {
+      "classification": "requirement",
+      "end_line": 55,
+      "id": "SOURCE-UNIT-LINE-055",
+      "requirement_ids": [
+        "OBSERVABILITY-RECORD-VALIDATION-DURATION-WITHOUT-SOURCE-CONTENT"
+      ],
+      "source_text_sha256": "04ce2cfb5943f43f4e3d0fcb4043742bbe7f42df7a5e3c463ef936d2ae2c6170",
+      "start_line": 55
+    },
+    {
+      "classification": "requirement",
+      "end_line": 56,
+      "id": "SOURCE-UNIT-LINE-056",
+      "requirement_ids": [
+        "OBSERVABILITY-ALERT-WHEN-THE-QUARANTINE-RATE-EXCEEDS-ITS-THRESHOLD"
+      ],
+      "source_text_sha256": "392efc3f7925dae3cbfa4138b04ddeaecdc698454aba998f3b5e0939ef45af6a",
+      "start_line": 56
+    },
+    {
+      "classification": "requirement",
+      "end_line": 57,
+      "id": "SOURCE-UNIT-LINE-057",
+      "requirement_ids": [
+        "OBSERVABILITY-PRESERVE-DIAGNOSTIC-EVENTS-FOR-THE-APPROVED-INTERVAL"
+      ],
+      "source_text_sha256": "d7259cc4c91cc8b8618ee43264b4c6548337fe60d341384c8ec60cd33981fa0e",
+      "start_line": 57
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 58,
+      "id": "SOURCE-UNIT-LINE-058",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 58
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Section heading grouping the following obligations.",
+      "end_line": 59,
+      "id": "SOURCE-UNIT-LINE-059",
+      "requirement_ids": [],
+      "source_text_sha256": "89f3c32e77a02275addb9fe8f8673ca82d5ed890f2a2e55c65cf30c02f3d53fe",
+      "start_line": 59
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 60,
+      "id": "SOURCE-UNIT-LINE-060",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 60
+    },
+    {
+      "classification": "requirement",
+      "end_line": 61,
+      "id": "SOURCE-UNIT-LINE-061",
+      "requirement_ids": [
+        "OPERATOR-REVIEW-PRESENT-CHECKSUM-MISMATCHES-FOR-OPERATOR-REVIEW"
+      ],
+      "source_text_sha256": "5d28b1d2809cfde81e98738c844a2645d6566f950ef6bef1c8827878fa0cb1f3",
+      "start_line": 61
+    },
+    {
+      "classification": "requirement",
+      "end_line": 62,
+      "id": "SOURCE-UNIT-LINE-062",
+      "requirement_ids": [
+        "OPERATOR-REVIEW-REQUIRE-A-RATIONALE-FOR-EVERY-QUARANTINE-RELEASE"
+      ],
+      "source_text_sha256": "e4f396a044f46b717585a33993d595b82ceb6d4df00300266f8f9154704cd016",
+      "start_line": 62
+    },
+    {
+      "classification": "requirement",
+      "end_line": 63,
+      "id": "SOURCE-UNIT-LINE-063",
+      "requirement_ids": [
+        "OPERATOR-REVIEW-SEPARATE-THE-REVIEWER-FROM-THE-ORIGINAL-RELEASER"
+      ],
+      "source_text_sha256": "3965db1aceaf22a733926352dd9edd6f55be9de2161611705a039b0ae0ad5606",
+      "start_line": 63
+    },
+    {
+      "classification": "requirement",
+      "end_line": 64,
+      "id": "SOURCE-UNIT-LINE-064",
+      "requirement_ids": [
+        "OPERATOR-REVIEW-RECORD-THE-FINAL-OPERATOR-DISPOSITION"
+      ],
+      "source_text_sha256": "5e87ceac1d8f9d5f16b3d00ed8d44b01e917681a37d1d542ece6f609dc3480cd",
+      "start_line": 64
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 65,
+      "id": "SOURCE-UNIT-LINE-065",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 65
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Section heading grouping the following obligations.",
+      "end_line": 66,
+      "id": "SOURCE-UNIT-LINE-066",
+      "requirement_ids": [],
+      "source_text_sha256": "1efa5330c95afaa5b7a4de72c9b104d962a889120b3284e19f878dff43f17dba",
+      "start_line": 66
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 67,
+      "id": "SOURCE-UNIT-LINE-067",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 67
+    },
+    {
+      "classification": "requirement",
+      "end_line": 68,
+      "id": "SOURCE-UNIT-LINE-068",
+      "requirement_ids": [
+        "APPROVAL-BIND-APPROVAL-TO-THE-EXACT-SOURCE-DIGEST"
+      ],
+      "source_text_sha256": "a202678b84495631ef6e4e7a84c9ce6e14a8cee99570d13e40accff0709540ed",
+      "start_line": 68
+    },
+    {
+      "classification": "requirement",
+      "end_line": 69,
+      "id": "SOURCE-UNIT-LINE-069",
+      "requirement_ids": [
+        "APPROVAL-BIND-APPROVAL-TO-THE-EXACT-PROGRAM-DIGEST"
+      ],
+      "source_text_sha256": "13f1bc8ae72e50acd3868223cecae2d011b5aa8b0c29d0624244b1b839d2a6a8",
+      "start_line": 69
+    },
+    {
+      "classification": "requirement",
+      "end_line": 70,
+      "id": "SOURCE-UNIT-LINE-070",
+      "requirement_ids": [
+        "APPROVAL-INVALIDATE-APPROVAL-WHEN-EITHER-BOUND-DIGEST-CHANGES"
+      ],
+      "source_text_sha256": "6b8b2223a404f02a5e951d25f5a561bf50cd0223ae11361cdca6233dd061f796",
+      "start_line": 70
+    },
+    {
+      "classification": "requirement",
+      "end_line": 71,
+      "id": "SOURCE-UNIT-LINE-071",
+      "requirement_ids": [
+        "APPROVAL-REJECT-CONFLICTING-APPROVAL-RECORDS"
+      ],
+      "source_text_sha256": "98830044211b8fc4ff661887d953937fff0e7131b5ae7ca65702466bfe92b3cd",
+      "start_line": 71
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 72,
+      "id": "SOURCE-UNIT-LINE-072",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 72
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Section heading grouping the following obligations.",
+      "end_line": 73,
+      "id": "SOURCE-UNIT-LINE-073",
+      "requirement_ids": [],
+      "source_text_sha256": "9fa6da4ba04d3954318e39d5bd2871ce71bdf87147744c8dd974be6637472b8e",
+      "start_line": 73
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 74,
+      "id": "SOURCE-UNIT-LINE-074",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 74
+    },
+    {
+      "classification": "requirement",
+      "end_line": 75,
+      "id": "SOURCE-UNIT-LINE-075",
+      "requirement_ids": [
+        "STAGED-DELIVERY-DELIVER-INTAKE-BEFORE-RECOVERY-AUTOMATION"
+      ],
+      "source_text_sha256": "67ba263db66e8f7769194f172f7fbc006993334f2fd2e3cfa9b46b0cc4b3a0bd",
+      "start_line": 75
+    },
+    {
+      "classification": "requirement",
+      "end_line": 76,
+      "id": "SOURCE-UNIT-LINE-076",
+      "requirement_ids": [
+        "STAGED-DELIVERY-VERIFY-EACH-DELIVERY-STAGE-BEFORE-THE-NEXT-BEGINS"
+      ],
+      "source_text_sha256": "1cc3103684066a8c110ce4e49df07fbf8d95885049bfce99581fb75d6a3e4944",
+      "start_line": 76
+    },
+    {
+      "classification": "requirement",
+      "end_line": 77,
+      "id": "SOURCE-UNIT-LINE-077",
+      "requirement_ids": [
+        "STAGED-DELIVERY-KEEP-DISTANT-IMPLEMENTATION-FILES-PROVISIONAL"
+      ],
+      "source_text_sha256": "1d66a41d28f17c7bfd8c0c61672cffe74c2cb08bdaf48f0ba6f6995ea17c4eff",
+      "start_line": 77
+    },
+    {
+      "classification": "requirement",
+      "end_line": 78,
+      "id": "SOURCE-UNIT-LINE-078",
+      "requirement_ids": [
+        "STAGED-DELIVERY-STOP-AT-EVERY-REQUIRED-HUMAN-ACCEPTANCE-BOUNDARY"
+      ],
+      "source_text_sha256": "a4f93fa2ebeec06b0828077e1a2abef9d89587e10c8c7c40c291a74c343e740a",
+      "start_line": 78
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 79,
+      "id": "SOURCE-UNIT-LINE-079",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 79
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Section heading grouping the following obligations.",
+      "end_line": 80,
+      "id": "SOURCE-UNIT-LINE-080",
+      "requirement_ids": [],
+      "source_text_sha256": "f995e08f018f59825eb55339367f9a886bca887813f50a10fa8317467f494171",
+      "start_line": 80
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Structural blank line separating source units.",
+      "end_line": 81,
+      "id": "SOURCE-UNIT-LINE-081",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 81
+    },
+    {
+      "classification": "requirement",
+      "end_line": 82,
+      "id": "SOURCE-UNIT-LINE-082",
+      "requirement_ids": [
+        "CLOSURE-RECONCILE-EVERY-REQUIREMENT-BEFORE-CLOSURE"
+      ],
+      "source_text_sha256": "0645c0ff996247cfedb1cc49737297a94d823bb8bf4696dc0c1e3997f3f7f55a",
+      "start_line": 82
+    },
+    {
+      "classification": "requirement",
+      "end_line": 83,
+      "id": "SOURCE-UNIT-LINE-083",
+      "requirement_ids": [
+        "CLOSURE-PRESERVE-ACCEPTED-EVIDENCE-FROM-PRIOR-REVISIONS"
+      ],
+      "source_text_sha256": "90c4713e8025871e5a0aa17c6adf3ce8a20f213035ba617fd6ec5791d59b57b3",
+      "start_line": 83
+    },
+    {
+      "classification": "requirement",
+      "end_line": 84,
+      "id": "SOURCE-UNIT-LINE-084",
+      "requirement_ids": [
+        "CLOSURE-RECORD-UNRESOLVED-RISK-WITH-AN-ACCOUNTABLE-OWNER"
+      ],
+      "source_text_sha256": "d2a389b8d3584ce805c10eb10c75715877af3149cc4a3b072879462e789f5cbd",
+      "start_line": 84
+    },
+    {
+      "classification": "requirement",
+      "end_line": 85,
+      "id": "SOURCE-UNIT-LINE-085",
+      "requirement_ids": [
+        "CLOSURE-REQUIRE-EXPLICIT-CLOSURE-APPROVAL"
+      ],
+      "source_text_sha256": "fc5c363fc9330a2c680c319cb97ad735f2acb5758b87f361579f551785173660",
+      "start_line": 85
+    }
+  ]
+}

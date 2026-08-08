@@ -1,1 +1,1 @@
-
+{"approval_mode": "approval:standard", "decision": "approved", "event_id": "PORTABLE-ARCHIVE-APPROVAL", "program_id": "PORTABLE-ARCHIVE", "program_revision": 1, "program_sha256": "3702df1a6c7e863a829dd0e00b78f4116a444fc6ef43b362c5a941b3c0131bc3", "semantic_requirements_sha256": "351f8ae6af72673287a5f1016bfd9173b936f9f21bd1e9ef3b795675f7f18e1f", "source_id": "PORTABLE-ARCHIVE-SOURCE", "source_sha256": "c17450e8e18866f537277965da08f604b6cb31645fa29db3f4cd7d9906cd1327", "type": "program-approval"}

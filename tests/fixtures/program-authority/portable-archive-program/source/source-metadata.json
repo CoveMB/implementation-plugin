@@ -1,1 +1,9 @@
-{}
+{
+  "byte_count": 2673,
+  "immutable": true,
+  "line_count": 85,
+  "schema_version": "implementation-source-metadata/v1",
+  "sha256": "c17450e8e18866f537277965da08f604b6cb31645fa29db3f4cd7d9906cd1327",
+  "snapshot_path": "source/implementation-plan.md",
+  "source_id": "PORTABLE-ARCHIVE-SOURCE"
+}

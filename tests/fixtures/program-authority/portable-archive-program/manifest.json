@@ -1,1 +1,24 @@
-{}
+{
+  "approval_mode": "approval:standard",
+  "logical_roles": {
+    "approvals": "state/approvals.jsonl",
+    "approved_program": "program/implementation-program.md",
+    "canonical_source_snapshot": "source/implementation-plan.md",
+    "source_metadata": "source/source-metadata.json",
+    "traceability": "program/traceability.json"
+  },
+  "program_binding": {
+    "machine_complete_traceability": true,
+    "path": "program/implementation-program.md",
+    "sha256": "3702df1a6c7e863a829dd0e00b78f4116a444fc6ef43b362c5a941b3c0131bc3",
+    "traceability_path": "program/traceability.json",
+    "traceability_sha256": "3a17203357a188024dcd60adf98b114c35ca69269d0530fa4af231e7ff885463"
+  },
+  "program_id": "PORTABLE-ARCHIVE",
+  "program_revision": 1,
+  "schema_version": "implementation-program-manifest/v1",
+  "source_binding": {
+    "sha256": "c17450e8e18866f537277965da08f604b6cb31645fa29db3f4cd7d9906cd1327",
+    "source_id": "PORTABLE-ARCHIVE-SOURCE"
+  }
+}

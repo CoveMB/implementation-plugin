@@ -4,6 +4,8 @@ import importlib.util
 import io
 import json
 import os
+import re
+import shutil
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -23,6 +25,14 @@ if SPEC is None or SPEC.loader is None:
     raise RuntimeError(f"Unable to load program authority module from {MODULE_PATH}")
 AUTHORITY = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(AUTHORITY)
+PILOT_ROOT = (
+    REPOSITORY_ROOT
+    / "tests"
+    / "fixtures"
+    / "program-authority"
+    / "portable-archive-program"
+)
+CURRENT_PROGRAM_ROOT = REPOSITORY_ROOT / "implementation-programs" / "ISP-001"
 
 
 def digest_bytes(value: bytes) -> str:
@@ -497,6 +507,144 @@ class SourceCaptureAndCliTests(ProgramAuthorityTestCase):
             result = AUTHORITY.main(["unknown-command"])
         self.assertEqual(result, 2)
         self.assertIn("usage:", output.getvalue())
+
+
+class LargePilotTests(unittest.TestCase):
+    def copy_pilot(self) -> tempfile.TemporaryDirectory:
+        temporary_directory = tempfile.TemporaryDirectory()
+        shutil.copytree(PILOT_ROOT, Path(temporary_directory.name), dirs_exist_ok=True)
+        return temporary_directory
+
+    def test_neutral_pilot_has_twelve_sections_and_forty_eight_requirements(self) -> None:
+        source = (PILOT_ROOT / "source/implementation-plan.md").read_text(
+            encoding="utf-8"
+        )
+        traceability = json.loads(
+            (PILOT_ROOT / "program/traceability.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(sum(line.startswith("## ") for line in source.splitlines()), 12)
+        self.assertEqual(len(traceability["atomic_requirements"]), 48)
+        self.assertEqual(AUTHORITY.validate_program_authority(PILOT_ROOT), [])
+
+    def test_neutral_pilot_fails_on_one_changed_byte_or_missing_atomic_record(self) -> None:
+        temporary_directory = self.copy_pilot()
+        try:
+            root = Path(temporary_directory.name)
+            source_path = root / "source/implementation-plan.md"
+            source_path.write_bytes(source_path.read_bytes() + b"x")
+            self.assertNotEqual(AUTHORITY.validate_program_authority(root), [])
+        finally:
+            temporary_directory.cleanup()
+
+        temporary_directory = self.copy_pilot()
+        try:
+            root = Path(temporary_directory.name)
+            traceability_path = root / "program/traceability.json"
+            traceability = json.loads(traceability_path.read_text(encoding="utf-8"))
+            del traceability["atomic_requirements"][0]
+            traceability["coverage_assertion"][
+                "semantic_requirements_sha256"
+            ] = AUTHORITY.compute_semantic_requirements_digest(
+                traceability["atomic_requirements"]
+            )
+            traceability_path.write_text(
+                json.dumps(traceability, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            issues = AUTHORITY.validate_program_authority(root, allow_incomplete=True)
+            self.assertTrue(any("atomic requirement" in issue for issue in issues), issues)
+        finally:
+            temporary_directory.cleanup()
+
+    def test_neutral_pilot_contains_no_roadmap_identifiers(self) -> None:
+        pattern = re.compile(r"\b(?:INC-\d{3,}|ISP-\d{3,}|P-\d{3,}|REQ-[A-Z0-9-]+)\b")
+        for path in sorted(PILOT_ROOT.rglob("*")):
+            if path.is_file():
+                self.assertIsNone(pattern.search(path.read_text(encoding="utf-8")), path)
+
+
+class CurrentProgramTraceabilityTests(unittest.TestCase):
+    def test_current_source_has_complete_pending_atomic_inventory(self) -> None:
+        traceability = json.loads(
+            (
+                CURRENT_PROGRAM_ROOT
+                / "program/revisions/revision-2/traceability.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            traceability["schema_version"], "implementation-traceability/v2"
+        )
+        self.assertEqual(traceability["coverage_assertion"]["source_line_count"], 1362)
+        self.assertFalse(traceability["coverage_assertion"]["machine_complete"])
+        self.assertEqual(
+            traceability["coverage_assertion"]["status"],
+            "awaiting-inc-002-diff-approval",
+        )
+        self.assertGreater(len(traceability["atomic_requirements"]), 100)
+        self.assertEqual(
+            AUTHORITY.validate_program_authority(
+                CURRENT_PROGRAM_ROOT, allow_incomplete=True
+            ),
+            [],
+        )
+
+    def test_every_normative_or_list_line_is_requirement_classified(self) -> None:
+        source_path = (
+            CURRENT_PROGRAM_ROOT
+            / "source/revisions/SOURCE-002/implementation-plan.md"
+        )
+        traceability = json.loads(
+            (
+                CURRENT_PROGRAM_ROOT
+                / "program/revisions/revision-2/traceability.json"
+            ).read_text(encoding="utf-8")
+        )
+        classification_by_line = {
+            unit["start_line"]: unit["classification"]
+            for unit in traceability["source_units"]
+            if unit["start_line"] == unit["end_line"]
+        }
+        normative = re.compile(
+            r"\b(?:must|must not|should|should not|shall|required?|requires?|never|"
+            r"do not|cannot|may not|only|rejects?|prevents?|enforces?|blocks?|"
+            r"authoritative|immutable|approval|authorization|hard stop|fails? closed)\b",
+            re.IGNORECASE,
+        )
+        source_lines = source_path.read_text(encoding="utf-8").splitlines()
+        table_header_lines = {
+            index + 1
+            for index, line in enumerate(source_lines[:-1])
+            if line.startswith("|")
+            and re.match(r"^\|?\s*:?-{3,}", source_lines[index + 1])
+        }
+        inside_fence = False
+        for line_number, line in enumerate(
+            source_lines, start=1
+        ):
+            if line.startswith("```"):
+                inside_fence = not inside_fence
+                continue
+            stripped = line.lstrip()
+            is_list_contract = bool(
+                re.match(r"(?:[-*+] |\d+\. )", stripped)
+            )
+            is_explicit_context = (
+                stripped.startswith("#")
+                or (line_number <= 7 and stripped.startswith("**"))
+                or (stripped.endswith(":") and not is_list_contract)
+                or bool(re.match(r"^\|?\s*:?-{3,}", stripped))
+                or line_number in table_header_lines
+            )
+            if (
+                not inside_fence
+                and not is_explicit_context
+                and (is_list_contract or normative.search(line))
+            ):
+                self.assertEqual(
+                    classification_by_line[line_number],
+                    "requirement",
+                    f"line {line_number}: {line}",
+                )
 
 
 if __name__ == "__main__":
