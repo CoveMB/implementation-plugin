@@ -205,7 +205,7 @@ After explicit INC-008 acceptance:
 
 ## Repository-specific risks
 
-- The implementation worktree is under /private/tmp; uncommitted artifacts require an intentional durability decision before long-term continuation.
+- DEC-007 selects the main checkout for the remaining ISP-001 implementation only. Preserve its pre-existing modified canonical-plan file and observed untracked `.DS_Store` files; the canonical-plan digest mismatch blocks INC-002 until source/program revision approval.
 - The repository has no pre-existing runtime, package manager, CI, or documentation conventions.
 - The current bundled plugin validator requires identity metadata excluded by the approved scope; it is not an authoritative completion gate for INC-001.
 - Bootstrap safeguards remain manual until their implementing increments are accepted.

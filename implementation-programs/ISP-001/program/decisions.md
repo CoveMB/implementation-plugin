@@ -35,3 +35,11 @@ Use branch implementing-staged-plans from exact base commit 456a5ae26b4136cd9f6b
 Accepted on 2026-08-08.
 
 Persist this program under implementation-programs/ISP-001/. Its manifest maps logical roles to physical paths.
+
+## DEC-007 — Main-checkout continuation for ISP-001
+
+Accepted on 2026-08-08 and applied as a bounded implementation detail.
+
+After fast-forward integration of accepted INC-001, use `/Users/CoveMB/Code/CoveMB/implementation-plugin` on branch `main` as the implementation workspace for the remaining ISP-001 increments. This decision applies only to this repository-specific implementation program. It does not alter the reusable `implementing-staged-plans` skill, its generic workspace-selection contract, or the canonical workflow's default recommendation.
+
+The selected main checkout contains user-owned pre-existing changes to `implementing-staged-plans-consolidated-design-plan-final.md` and untracked `.DS_Store` files at the repository root, `implementation-programs/`, and `implementation-programs/ISP-001/`. Preserve them. The amended canonical-plan path has SHA-256 `f4d4bca12706170210be202444df0d4c6d0bbb382143c5a0d0c8da2616eb9c57`, which differs from ISP-001 revision 1's approved source digest. Reconcile and approve that source/program revision before INC-002 preparation or implementation.
