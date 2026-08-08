@@ -1,6 +1,7 @@
 # Implementing Staged Plans — Consolidated Design Plan
 
 **Date:** 2026-08-07  
+**Last amended:** 2026-08-08 — semantic implementation naming boundary  
 **Status:** Proposed consolidated design for approval  
 **Scope:** Architecture and behavior of the `implementing-staged-plans` skill. This is not an exact-file implementation plan for a specific repository.  
 **Source basis:** Consolidates the strongest elements of the prior proposed design and copy-ready increment prompts, with a revised lean-prompt model.
@@ -148,7 +149,7 @@ Supporting capabilities may assist the workflow but cannot change its approval, 
 13. **Testing claims require observed evidence.** Passing tests written after implementation cannot be represented as prior failing-test evidence.
 14. **The smallest sufficient implementation is preferred.** Avoid speculative architecture and unrelated cleanup.
 15. **State exists only to enforce real invariants.** Avoid ornamental workflow machinery.
-16. **Project-facing artifacts use generic role names.** Internal tool or capability names do not leak into them.
+16. **Implementation-owned names express stable context and intention.** Names describe domain responsibility, behavior, or contract rather than merely copying roadmap coordinates, sequencing labels, or internal capability names. Planning vocabulary remains valid when the implementation workflow itself is the subject, as defined by the semantic naming boundary in Section 9.3.
 17. **Closure is separate from accepting the final increment.**
 18. **Draft pull requests and later actions require separate, timely authorization.**
 
@@ -321,6 +322,7 @@ The exact-file plan normally contains:
 - current acceptance criteria;
 - files to create, modify, move, or delete;
 - responsibilities and interfaces;
+- a semantic naming inventory for proposed files, symbols, tests, headings, identifiers, and generated paths, including the context or intention each name communicates and the basis for any implementation-governance term;
 - test-first slices or alternative verification contracts;
 - commands and expected evidence;
 - relevant documentation and evidence updates;
@@ -346,7 +348,7 @@ For behavior changes, the normal loop is:
 
 For documentation, packaging, configuration, or declarative changes where a failing behavioral test is artificial, the plan defines an alternative verification contract.
 
-The controller searches for reusable code before adding abstractions, preserves ownership boundaries, avoids unrelated cleanup, and records deviations immediately.
+The controller searches for reusable code before adding abstractions, preserves ownership boundaries, avoids unrelated cleanup, and records deviations immediately. It applies the Section 9.3 naming boundary to every created or renamed implementation surface and rejects names justified only by their position in the source plan or implementation sequence.
 
 ### 7.9 Amendment, drift, and recovery classifier
 
@@ -530,6 +532,28 @@ Without changing the program revision, preparation may:
 - separate a risky portion and propose it as the next increment when the current unit is not safely reviewable.
 
 A change becomes a program amendment when it materially affects requirements, acceptance, scope, externally visible behavior, protected contracts, risk posture, dependencies, sequencing, or user review cadence.
+
+### 9.3 Semantic implementation naming boundary
+
+Every implementation-owned name must communicate its stable context and intention without requiring the reader to know the source plan. This applies to, at minimum:
+
+- file and directory names;
+- packages, modules, functions, classes, types, variables, constants, and configuration keys;
+- commands, scripts, jobs, and workflow names;
+- test, fixture, scenario, and snapshot names or titles;
+- schema, API, event, error, log, metric, and generated-output identifiers;
+- headings and section names that describe current project or product behavior.
+
+A proposed name is semantically valid when it describes a durable responsibility, behavior, domain concept, or contract. A name is a roadmap leak when its meaning comes only from a phase, part, task, step, milestone, wave, sprint, priority, ticket, or similar planning coordinate and would become misleading if the implementation sequence changed.
+
+Planning vocabulary is valid in either of these contexts:
+
+1. the artifact’s purpose is to plan, govern, trace, review, hand off, or evidence implementation, such as a source plan, implementation program, exact-file plan, implementation-evidence record, approval state, review packet, or handoff; or
+2. the term names a real durable concept in the implemented domain rather than the position of work on a roadmap.
+
+This is a context-and-intention rule, not a global banned-word list. Mechanical validation may flag likely sequencing-shaped names, but the workflow must classify them against the two allowed contexts. Any exception recorded by a validator must identify the owning artifact or durable domain concept; a generic allowlist entry is insufficient.
+
+During preparation, existing roadmap-derived names in the touched scope are inventoried. Private names that can be corrected without broadening the approved outcome are included in the exact-file plan. Public, persisted, generated, or externally consumed names require compatibility and migration analysis and follow the amendment and approval rules; the workflow must not silently preserve, alias, or rename them.
 
 ---
 
@@ -902,7 +926,7 @@ For high-risk work, unavailable current official evidence blocks progress. For l
 Every increment receives separate review for:
 
 1. requirements and accepted-scope compliance;
-2. architecture, boundaries, simplicity, and unnecessary complexity;
+2. architecture, boundaries, semantic naming, simplicity, and unnecessary complexity;
 3. test adequacy and evidence validity.
 
 ### 18.2 Specialist predicates
@@ -1071,6 +1095,8 @@ Verify:
 - internal links resolve;
 - logical artifact roles map to actual paths;
 - internal capability names do not leak into project-facing artifacts;
+- the semantic naming boundary covers paths, symbols, commands, test and fixture titles, schema and observable identifiers, generated paths, and current-behavior headings;
+- likely roadmap-derived names fail unless they are bound to a specific implementation-governance artifact role or justified durable domain concept;
 - lean prompts do not duplicate the workflow or omit required semantic fields.
 
 ### 23.3 State and approval tests
@@ -1108,7 +1134,10 @@ Exercise:
 - generated or managed paths;
 - reusable existing code;
 - changed manifests and dependency versions;
-- provisional increment assumptions invalidated by repository reality.
+- provisional increment assumptions invalidated by repository reality;
+- source-plan labels copied into product-facing filenames, symbols, test titles, headings, commands, and identifiers;
+- valid implementation-governance artifacts and durable domain concepts that use otherwise similar planning vocabulary;
+- existing private naming leakage versus public, persisted, generated, or externally consumed names that require compatibility or migration treatment.
 
 ### 23.6 Pressure scenarios
 
@@ -1121,6 +1150,7 @@ Use adversarial prompts that encourage:
 - unrelated cleanup;
 - silent dependency upgrades;
 - rigid adherence to a poor provisional approach;
+- mirroring phase, part, task, step, priority, or other roadmap coordinates into implementation-owned names instead of selecting names from context and intention;
 - unjustified broadening because the prompt is lean;
 - misclassified program amendments;
 - fake reviewer independence;
@@ -1173,7 +1203,7 @@ The implementation should remain incremental because the workflow is stateful an
 
 **Outcome:** Establish control failures and add the smallest valid entry point, invariant gates, capability discovery, and stage routing.
 
-**Key evidence:** Baseline scenarios are preserved; the package is discoverable; illegal early actions are refused; no later subsystem is simulated as complete.
+**Key evidence:** Baseline scenarios, including representative roadmap-name leakage, are preserved; the package is discoverable; illegal early actions are refused; no later subsystem is simulated as complete.
 
 ### Increment 2 — Immutable source capture, decomposition, and traceability
 
@@ -1189,21 +1219,21 @@ The implementation should remain incremental because the workflow is stateful an
 
 ### Increment 4 — Repository preparation, evidence, increment shaping, and exact-file planning
 
-**Outcome:** Revalidate repository truth, protect user work, classify drift, collect applicable evidence, refine provisional increment shape, and create just-in-time exact-file plans.
+**Outcome:** Revalidate repository truth, protect user work, classify drift, collect applicable evidence, refine provisional increment shape, and create just-in-time exact-file plans with semantic naming inventories.
 
-**Key evidence:** Dirty-state and drift fixtures, evidence-applicability records, reusable-code discovery, plan amendments, and reviewability checks.
+**Key evidence:** Dirty-state and drift fixtures, evidence-applicability records, reusable-code discovery, plan amendments, reviewability checks, and proposed names justified by stable context and intention.
 
 ### Increment 5 — Execution discipline, amendments, focused commits, and recovery
 
-**Outcome:** Implement test-first slices and alternative verification, bounded approach autonomy, ownership boundaries, focused commits, amendment classification, and distinct recovery domains.
+**Outcome:** Implement test-first slices and alternative verification, bounded approach autonomy, semantic naming enforcement, ownership boundaries, focused commits, amendment classification, and distinct recovery domains.
 
-**Key evidence:** Observed-red tests where applicable, accurate non-TDD verification, no unrelated cleanup, and correct distinction between technical amendment and program amendment.
+**Key evidence:** Observed-red tests where applicable, accurate non-TDD verification, context-aware rejection of roadmap-derived implementation names without false positives for implementation-governance artifacts or durable domain concepts, no unrelated cleanup, and correct distinction between technical amendment and program amendment.
 
 ### Increment 6 — Reviews, remediation, verification, and review packets
 
-**Outcome:** Implement required review scopes, specialist predicates, truthful independence handling, material-finding contracts, remediation loops, final verification, and packet validation.
+**Outcome:** Implement required review scopes, including contextual semantic naming review, specialist predicates, truthful independence handling, material-finding contracts, remediation loops, final verification, and packet validation.
 
-**Key evidence:** Raw review preservation, repaired material findings, rerun evidence, and packets that support efficient human review.
+**Key evidence:** Raw review preservation, semantic-name dispositions for flagged candidates, repaired material findings, rerun evidence, and packets that support efficient human review.
 
 ### Increment 7 — Lean prompt generation, continuity, closure, and authority gates
 
@@ -1215,7 +1245,7 @@ The implementation should remain incremental because the workflow is stateful an
 
 **Outcome:** Run combined pressure, crash/resume, schema-evolution, repository-backed pilot, packaging, documentation, and concision checks; fix only demonstrated material gaps.
 
-**Key evidence:** Full suite results, pilot artifacts, absence of duplicated prompt policy, no broken references, and closure-readiness evidence.
+**Key evidence:** Full suite results, pilot artifacts, semantic naming coverage across all required surfaces and contexts, absence of duplicated prompt policy, no broken references, and closure-readiness evidence.
 
 Each increment should use the accepted portions of the workflow already implemented, without pretending later controls exist.
 
@@ -1229,6 +1259,8 @@ The design is successfully implemented only when:
 - source evidence remains immutable;
 - no implementation begins before program approval and workspace selection;
 - exact-file plans are created from current repository truth before production changes;
+- created and renamed implementation surfaces use context- and intention-based semantic names, while roadmap vocabulary is confined to implementation-governance artifacts or justified durable domain concepts;
+- naming enforcement covers filenames, symbols, tests, headings, commands, schemas and observable identifiers, fixtures, and generated paths without relying on a global banned-word list;
 - prompts remain lean and do not duplicate the canonical workflow;
 - prompts still preserve the current outcome, requirements, acceptance criteria, mode, and navigation context;
 - the agent can choose or amend the internal implementation approach without silently changing program semantics;
@@ -1263,6 +1295,7 @@ The design is successfully implemented only when:
 10. **State authority:** persisted repository state is authoritative; prompts and handoffs are navigation evidence.
 11. **Schema evolution:** record workflow and schema versions; incompatible state requires migration or a clear unsupported-version stop.
 12. **State minimization:** retain only states and artifacts that enforce a real invariant or materially improve recovery, review, or traceability.
+13. **Naming enforcement:** combine a context-aware semantic naming contract, deterministic candidate detection across implementation surfaces, and explicit justification for permitted implementation-governance or durable-domain uses.
 
 ---
 
@@ -1307,6 +1340,10 @@ Automatic continuation is useful only while context remains coherent. The workfl
 ### 27.10 Repository-specific implementation remains unknown
 
 No target skill repository was inspected for this consolidated design. Exact package paths, scripts, schema technology, and test harness remain provisional until repository inspection.
+
+### 27.11 Semantic naming validation may become a word blacklist
+
+Planning vocabulary can legitimately describe implementation-governance artifacts or durable domain concepts. A global denylist would create false positives and encourage cosmetic renames that preserve the same leak. The mitigation is the Section 9.3 context-and-intention contract, deterministic candidate detection, explicit exception ownership, and paired negative and positive fixtures.
 
 ---
 
