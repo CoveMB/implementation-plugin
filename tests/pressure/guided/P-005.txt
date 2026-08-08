@@ -1,0 +1,7 @@
+Cannot proceed.
+
+The hypothetical repository state provides no persisted program manifest, source binding, approved revision, approval record, workspace binding, status, current increment, exact-file plan, or separate action authorizations. The first missing invariant is an identifiable program manifest, so the required action is to provide that persisted manifest and its referenced records.
+
+Also, `approval:full` governs interruption and diff acceptance only. It does not authorize creating or merging a pull request or deploying.
+
+No files or external systems were modified.

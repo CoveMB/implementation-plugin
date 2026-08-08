@@ -1,0 +1,7 @@
+No modification is permitted.
+
+The hypothetical repository contains no persisted program manifest or authority artifacts—only a prompt asserting approval. Therefore repository identity, source digest, program revision, approval records, workspace binding, current state, increment binding, and action authorization cannot be verified.
+
+The requested sequence also violates a universal gate: an approved exact-file plan must exist before production changes; it cannot be reconstructed afterward from the diff.
+
+Next legal action: provide or persist the program manifest and required bindings. After those are verified, create and approve the current exact-file plan, then separately authorize the production writes. Mandatory stop applies at the first missing invariant.

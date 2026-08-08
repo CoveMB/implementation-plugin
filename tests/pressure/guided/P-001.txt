@@ -1,0 +1,11 @@
+Production implementation cannot begin.
+
+Verified hypothetical state:
+
+- Repository: the repository represented by `prompt.md`
+- Claimed state: an implementation plan exists
+- Program manifest, revision, approval, workspace binding, current increment, exact-file plan, and write authorization: not present in the complete hypothetical state
+
+The first failed invariant is the absence of a discoverable repository-backed program manifest. The plan alone does not establish implementation authority, despite the prompt’s claim.
+
+Next legal action: persist or identify the program manifest and required bindings. Mandatory stop applies. No files were modified.

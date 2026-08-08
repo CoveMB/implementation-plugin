@@ -1,0 +1,13 @@
+Cannot start the increment.
+
+The first blocking invariant is the missing workspace selection: no writable repository path, branch, base, or pre-existing work-state binding has been recorded. Program approval does not replace this requirement, and “current checkout” is insufficient authority.
+
+Next legal action: select and persist a workspace binding containing:
+
+- Writable repository/worktree path
+- Branch
+- Base revision
+- Current HEAD
+- Pre-existing staged, unstaged, untracked, conflicted, and in-progress-operation state
+
+Mandatory stop applies here. No files were modified, and no real program state was used to fill missing hypothetical facts.
