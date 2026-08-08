@@ -1,0 +1,37 @@
+{
+  "schema_version": "implementation-program-status/v1",
+  "state_sequence": 3,
+  "program_id": "ISP-001",
+  "program_revision": 1,
+  "program_state": "active",
+  "current_increment_id": "INC-001",
+  "current_increment_state": "authorized",
+  "approved_exact_file_plan_sha256": "c9fc55af3a8076eaab846114d2363580697c97a801418e2a377db69c262fb2a1",
+  "approval_mode": "approval:standard",
+  "updated_at": "2026-08-08T18:40:13Z",
+  "previous_state": {
+    "state_sequence": 2,
+    "program_state": "active",
+    "current_increment_state": "awaiting-plan-approval",
+    "transition_event_id": "APR-003"
+  },
+  "blocked": null,
+  "next_legal_actions": [
+    "commit the governing ISP-001 artifacts",
+    "execute INC-001 Tasks 1 through 6 within AUTH-002"
+  ],
+  "prohibited_without_new_authorization": [
+    "modify files outside the approved INC-001 exact-file plan",
+    "use roadmap-specific details in package-facing names",
+    "install a plugin",
+    "modify a marketplace",
+    "push",
+    "create a pull request",
+    "publish",
+    "release",
+    "deploy",
+    "migrate",
+    "perform destructive operations",
+    "modify consequential external state"
+  ]
+}

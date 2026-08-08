@@ -1,0 +1,36 @@
+{
+  "schema_version": "implementation-program-manifest/v1",
+  "program_id": "ISP-001",
+  "program_revision": 1,
+  "program_status": "active",
+  "approval_mode": "approval:standard",
+  "logical_roles": {
+    "canonical_source_snapshot": "source/implementation-plan.md",
+    "source_metadata": "source/source-metadata.json",
+    "approved_program": "program/implementation-program.md",
+    "traceability": "program/traceability.json",
+    "decisions": "program/decisions.md",
+    "amendments": "program/amendments.md",
+    "status": "state/status.json",
+    "approvals": "state/approvals.jsonl",
+    "action_authorizations": "state/action-authorizations.jsonl",
+    "workspace": "state/workspace.json",
+    "current_increment_brief": "increments/INC-001/brief.md",
+    "current_exact_file_plan": "increments/INC-001/exact-file-plan.md",
+    "current_preparation": "increments/INC-001/preparation.md"
+  },
+  "current_increment": {
+    "increment_id": "INC-001",
+    "state": "awaiting-plan-approval",
+    "exact_file_plan_sha256": "c9fc55af3a8076eaab846114d2363580697c97a801418e2a377db69c262fb2a1"
+  },
+  "source_binding": {
+    "source_id": "SOURCE-001",
+    "sha256": "3f31c011961368a6b8c6808d9542b3b24cbc2afa82a2ca5291c062d51dc917a8"
+  },
+  "workspace_binding": {
+    "branch": "implementing-staged-plans",
+    "base_commit": "456a5ae26b4136cd9f6b6136e36830cbff478083",
+    "path": "/private/tmp/implementation-plugin-worktree.7CBpFf"
+  }
+}

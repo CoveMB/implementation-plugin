@@ -1,0 +1,24 @@
+{
+  "schema_version": "implementation-source-metadata/v1",
+  "source_id": "SOURCE-001",
+  "program_id": "ISP-001",
+  "captured_at": "2026-08-08T15:15:05Z",
+  "canonical_repository_path": "implementing-staged-plans-consolidated-design-plan-final.md",
+  "snapshot_path": "source/implementation-plan.md",
+  "sha256": "3f31c011961368a6b8c6808d9542b3b24cbc2afa82a2ca5291c062d51dc917a8",
+  "line_count": 1325,
+  "byte_count": 59587,
+  "immutable": true,
+  "confirmation": {
+    "authority": "explicit user confirmation",
+    "date": "2026-08-08",
+    "confirmed_previous_filename": "implementing-staged-plans-consolidated-design-plan-final (2).md",
+    "authorized_canonical_filename": "implementing-staged-plans-consolidated-design-plan-final.md"
+  },
+  "base_commit": "456a5ae26b4136cd9f6b6136e36830cbff478083",
+  "supplemental_source": {
+    "path": "implementing-staged-plans-bootstrap-execution-review-runbook.md",
+    "sha256": "7443254dcf48db50f96f5ef55192c0352b712ce9b7dcd80ee66af1e7341bbe3b",
+    "authority": "operational companion; canonical design and approved program control conflicts"
+  }
+}

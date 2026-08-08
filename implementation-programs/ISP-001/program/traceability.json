@@ -1,0 +1,142 @@
+{
+  "schema_version": "implementation-traceability/v1",
+  "program_id": "ISP-001",
+  "program_revision": 1,
+  "source_id": "SOURCE-001",
+  "source_sha256": "3f31c011961368a6b8c6808d9542b3b24cbc2afa82a2ca5291c062d51dc917a8",
+  "coverage_assertion": {
+    "source_sections": "1-28",
+    "status": "fully allocated at approved program-group granularity",
+    "individual_requirement_expansion": "INC-002 must expand these approved groups into source-located atomic records before machine completeness may be claimed"
+  },
+  "requirements": [
+    {
+      "id": "REQ-AUTHORITY",
+      "source_sections": ["1", "2", "3", "4", "5", "6", "25"],
+      "normalized_requirement": "Preserve source authority, repository truth, persisted operational state, evidence-bounded implementation discretion, universal safety gates, and every design acceptance criterion.",
+      "assigned_increments": ["INC-001", "INC-002", "INC-003", "INC-004", "INC-005", "INC-006", "INC-007", "INC-008", "CLOSURE"],
+      "acceptance_reference": "implementation-program.md#global-dependencies-and-gates",
+      "current_disposition": "allocated"
+    },
+    {
+      "id": "REQ-ROUTER",
+      "source_sections": ["7.1", "16", "21"],
+      "normalized_requirement": "Route only legal lifecycle actions, enforce explicit hard stops, discover relevant capabilities, prevent recursive or authority-bypassing support, and provide honest fallbacks.",
+      "assigned_increments": ["INC-001", "INC-003", "INC-008"],
+      "acceptance_reference": "implementation-program.md#inc-001--baseline-pressure-suite-and-minimal-front-door",
+      "current_disposition": "allocated"
+    },
+    {
+      "id": "REQ-SOURCE-PROGRAM",
+      "source_sections": ["7.2", "7.3", "10.2", "13.1"],
+      "normalized_requirement": "Capture immutable source evidence, extract complete stable requirements, create revisioned outcome programs, and prevent partial or unallocated traceability from passing approval or closure.",
+      "assigned_increments": ["INC-002", "CLOSURE"],
+      "acceptance_reference": "implementation-program.md#inc-002--immutable-source-capture-decomposition-and-traceability",
+      "current_disposition": "allocated"
+    },
+    {
+      "id": "REQ-STATE-AUTHORIZATION",
+      "source_sections": ["7.4", "11", "12", "20"],
+      "normalized_requirement": "Maintain distinct program and increment state, bind approvals to current source, program, workspace and scope, implement all five modes, and separate consequential-action authorization.",
+      "assigned_increments": ["INC-003", "INC-007", "CLOSURE"],
+      "acceptance_reference": "implementation-program.md#inc-003--durable-state-approval-modes-and-action-authorization",
+      "current_disposition": "allocated"
+    },
+    {
+      "id": "REQ-WORKSPACE-DRIFT",
+      "source_sections": ["7.5", "13.2", "13.3", "13.4", "15"],
+      "normalized_requirement": "Select and bind a writable workspace, protect all user work, revalidate repository truth before each increment, and distinguish benign, reconcilable, and base-invalidating drift.",
+      "assigned_increments": ["INC-003", "INC-004", "INC-008"],
+      "acceptance_reference": "implementation-program.md#inc-004--repository-preparation-evidence-shaping-and-exact-file-planning",
+      "current_disposition": "allocated"
+    },
+    {
+      "id": "REQ-EVIDENCE-PLANNING",
+      "source_sections": ["7.6", "7.7", "8", "9", "17"],
+      "normalized_requirement": "Collect applicability-bound evidence, preserve lean semantic briefs, shape reviewable increments, and create current just-in-time exact-file plans without freezing distant technical assumptions.",
+      "assigned_increments": ["INC-004", "INC-007", "INC-008"],
+      "acceptance_reference": "implementation-program.md#inc-004--repository-preparation-evidence-shaping-and-exact-file-planning",
+      "current_disposition": "allocated"
+    },
+    {
+      "id": "REQ-EXECUTION-AMENDMENT",
+      "source_sections": ["7.8", "7.9", "13.5", "14"],
+      "normalized_requirement": "Execute the authorized outcome in meaningful verifiable slices, preserve ownership, record deviations, classify amendments correctly, and distinguish source rollback from data, deployment, and provider recovery.",
+      "assigned_increments": ["INC-005", "INC-008"],
+      "acceptance_reference": "implementation-program.md#inc-005--execution-discipline-amendments-commits-and-recovery",
+      "current_disposition": "allocated"
+    },
+    {
+      "id": "REQ-REVIEW-PACKET",
+      "source_sections": ["7.10", "7.11", "13.6", "18", "19"],
+      "normalized_requirement": "Run separate required and risk-triggered reviews, represent independence truthfully, remediate evidence-backed material findings, verify the final diff, and produce a complete human review packet.",
+      "assigned_increments": ["INC-006", "INC-008", "CLOSURE"],
+      "acceptance_reference": "implementation-program.md#inc-006--reviews-remediation-verification-and-review-packets",
+      "current_disposition": "allocated"
+    },
+    {
+      "id": "REQ-CONTINUITY-CLOSURE",
+      "source_sections": ["7.12", "13.7", "13.8"],
+      "normalized_requirement": "Generate durable handoffs and lean briefs, revalidate on resume, stop when conversational context is unreliable, reconcile the full program, and separate final increment acceptance from closure.",
+      "assigned_increments": ["INC-007", "INC-008", "CLOSURE"],
+      "acceptance_reference": "implementation-program.md#inc-007--lean-prompts-continuity-closure-and-authority-gates",
+      "current_disposition": "allocated"
+    },
+    {
+      "id": "REQ-ARTIFACT-INVARIANTS",
+      "source_sections": ["10.1"],
+      "normalized_requirement": "Map logical roles through a manifest, keep source and accepted packets immutable, append decisions and authority records, update mutable status atomically, detect stale bindings, and never persist secrets.",
+      "assigned_increments": ["INC-002", "INC-003", "INC-006", "INC-007", "INC-008"],
+      "acceptance_reference": "implementation-program.md#approved-architecture",
+      "current_disposition": "allocated"
+    },
+    {
+      "id": "REQ-PACKAGE",
+      "source_sections": ["22"],
+      "normalized_requirement": "Provide a concise layered skill package with focused references, deterministic validators where justified, generic project-facing role names, and no unnecessary component or policy duplication.",
+      "assigned_increments": ["INC-001", "INC-008"],
+      "acceptance_reference": "implementation-program.md#inc-001--baseline-pressure-suite-and-minimal-front-door",
+      "current_disposition": "allocated"
+    },
+    {
+      "id": "REQ-VALIDATION",
+      "source_sections": ["23"],
+      "normalized_requirement": "Validate structural, state, approval, traceability, repository-fixture, pressure, resume, crash, schema-evolution, and repository-backed pilot behavior with observed evidence.",
+      "assigned_increments": ["INC-001", "INC-002", "INC-003", "INC-004", "INC-005", "INC-006", "INC-007", "INC-008", "CLOSURE"],
+      "acceptance_reference": "implementation-program.md#inc-008--integrated-pressure-hardening-and-release-pilot",
+      "current_disposition": "allocated"
+    },
+    {
+      "id": "REQ-SEQUENCE",
+      "source_sections": ["24"],
+      "normalized_requirement": "Retain all eight approved outcome increments, let each use accepted prior controls without pretending later controls exist, and keep closure separate.",
+      "assigned_increments": ["INC-001", "INC-002", "INC-003", "INC-004", "INC-005", "INC-006", "INC-007", "INC-008", "CLOSURE"],
+      "acceptance_reference": "implementation-program.md#global-dependencies-and-gates",
+      "current_disposition": "allocated"
+    },
+    {
+      "id": "REQ-DEFAULTS",
+      "source_sections": ["26"],
+      "normalized_requirement": "Apply the approved layered architecture, human Markdown plus machine JSON, repository-discovered artifact mapping, lean briefs, provisional increments, bounded amendments, five modes with standard default, separate PR timing, persisted-state authority, schema evolution, and state minimization.",
+      "assigned_increments": ["INC-001", "INC-002", "INC-003", "INC-004", "INC-005", "INC-007", "INC-008"],
+      "acceptance_reference": "implementation-program.md#approved-architecture",
+      "current_disposition": "allocated"
+    },
+    {
+      "id": "REQ-DESIGN-RISKS",
+      "source_sections": ["27"],
+      "normalized_requirement": "Test and mitigate underspecified briefs, context overload, overconstrained plans, disguised program changes, state failure, non-independent review, performative evidence, premature frozen assumptions, and degraded long-conversation continuation.",
+      "assigned_increments": ["INC-004", "INC-005", "INC-006", "INC-007", "INC-008"],
+      "acceptance_reference": "implementation-program.md#repository-specific-risks",
+      "current_disposition": "allocated"
+    },
+    {
+      "id": "REQ-ADOPTION",
+      "source_sections": ["28"],
+      "normalized_requirement": "Treat the canonical design, accepted program, focused procedures, validators, generated briefs, packets, and handoffs as the normative workflow without reviving copy-ready prompts as competing policy.",
+      "assigned_increments": ["INC-001", "INC-007", "INC-008", "CLOSURE"],
+      "acceptance_reference": "implementation-program.md#approved-architecture",
+      "current_disposition": "allocated"
+    }
+  ]
+}
