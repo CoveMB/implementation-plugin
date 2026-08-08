@@ -407,6 +407,7 @@ class BindingAndRevisionTests(ProgramAuthorityTestCase):
                 }
             ],
         }
+        traceability["program_revision"] = 2
         self.fixture.write_json("program/traceability.json", traceability)
         manifest = self.fixture.load_json("manifest.json")
         manifest["program_revision"] = 2
