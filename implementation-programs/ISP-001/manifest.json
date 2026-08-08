@@ -3,7 +3,7 @@
   "program_id": "ISP-001",
   "program_revision": 1,
   "program_status": "active",
-  "approval_mode": "approval:standard",
+  "approval_mode": "approval:full-increment",
   "logical_roles": {
     "canonical_source_snapshot": "source/implementation-plan.md",
     "source_metadata": "source/source-metadata.json",
@@ -17,11 +17,13 @@
     "workspace": "state/workspace.json",
     "current_increment_brief": "increments/INC-001/brief.md",
     "current_exact_file_plan": "increments/INC-001/exact-file-plan.md",
-    "current_preparation": "increments/INC-001/preparation.md"
+    "current_preparation": "increments/INC-001/preparation.md",
+    "current_review_packet": "increments/INC-001/review-packet.md",
+    "current_handoff": "increments/INC-001/handoff.md"
   },
   "current_increment": {
     "increment_id": "INC-001",
-    "state": "awaiting-plan-approval",
+    "state": "awaiting-diff-approval",
     "exact_file_plan_sha256": "c9fc55af3a8076eaab846114d2363580697c97a801418e2a377db69c262fb2a1"
   },
   "source_binding": {

@@ -1,28 +1,30 @@
 {
   "schema_version": "implementation-program-status/v1",
-  "state_sequence": 3,
+  "state_sequence": 9,
   "program_id": "ISP-001",
   "program_revision": 1,
   "program_state": "active",
   "current_increment_id": "INC-001",
-  "current_increment_state": "authorized",
+  "current_increment_state": "awaiting-diff-approval",
   "approved_exact_file_plan_sha256": "c9fc55af3a8076eaab846114d2363580697c97a801418e2a377db69c262fb2a1",
-  "approval_mode": "approval:standard",
-  "updated_at": "2026-08-08T18:40:13Z",
+  "approval_mode": "approval:full-increment",
+  "updated_at": "2026-08-08T20:12:31Z",
   "previous_state": {
-    "state_sequence": 2,
+    "state_sequence": 8,
     "program_state": "active",
-    "current_increment_state": "awaiting-plan-approval",
-    "transition_event_id": "APR-003"
+    "current_increment_state": "verified",
+    "transition_event_id": "DIFF-APPROVAL-GATE-001"
   },
   "blocked": null,
   "next_legal_actions": [
-    "commit the governing ISP-001 artifacts",
-    "execute INC-001 Tasks 1 through 6 within AUTH-002"
+    "inspect the completed INC-001 review packet and base-to-head diff",
+    "explicitly approve the INC-001 diff or request a bounded INC-001 change"
   ],
   "prohibited_without_new_authorization": [
     "modify files outside the approved INC-001 exact-file plan",
     "use roadmap-specific details in package-facing names",
+    "accept INC-001 without explicit diff approval",
+    "begin INC-002",
     "install a plugin",
     "modify a marketplace",
     "push",

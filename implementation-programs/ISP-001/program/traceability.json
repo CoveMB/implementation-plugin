@@ -16,6 +16,15 @@
       "normalized_requirement": "Preserve source authority, repository truth, persisted operational state, evidence-bounded implementation discretion, universal safety gates, and every design acceptance criterion.",
       "assigned_increments": ["INC-001", "INC-002", "INC-003", "INC-004", "INC-005", "INC-006", "INC-007", "INC-008", "CLOSURE"],
       "acceptance_reference": "implementation-program.md#global-dependencies-and-gates",
+      "increment_evidence": [
+        {
+          "increment_id": "INC-001",
+          "status": "verified-awaiting-diff-approval",
+          "implementation": ["skills/implementing-staged-plans/SKILL.md#establish-current-authority", "skills/implementing-staged-plans/SKILL.md#apply-universal-gates"],
+          "verification": ["tests/test_front_door_contract.py", "tests/pressure/verdicts.json", "implementation-programs/ISP-001/increments/INC-001/reviews/requirements.md"],
+          "scope_note": "Evidence covers the INC-001 front-door slice only; the group remains allocated across later increments and closure."
+        }
+      ],
       "current_disposition": "allocated"
     },
     {
@@ -24,6 +33,15 @@
       "normalized_requirement": "Route only legal lifecycle actions, enforce explicit hard stops, discover relevant capabilities, prevent recursive or authority-bypassing support, and provide honest fallbacks.",
       "assigned_increments": ["INC-001", "INC-003", "INC-008"],
       "acceptance_reference": "implementation-program.md#inc-001--baseline-pressure-suite-and-minimal-front-door",
+      "increment_evidence": [
+        {
+          "increment_id": "INC-001",
+          "status": "verified-awaiting-diff-approval",
+          "implementation": ["skills/implementing-staged-plans/SKILL.md#discover-supporting-capabilities", "skills/implementing-staged-plans/SKILL.md#route-or-fall-back-honestly", "skills/implementing-staged-plans/SKILL.md#return-a-bounded-result"],
+          "verification": ["tests/test_front_door_contract.py", "tests/pressure/guided", "implementation-programs/ISP-001/increments/INC-001/reviews/architecture.md"],
+          "scope_note": "Later mechanical lifecycle procedures remain assigned to INC-003 and INC-008."
+        }
+      ],
       "current_disposition": "allocated"
     },
     {
@@ -96,6 +114,15 @@
       "normalized_requirement": "Provide a concise layered skill package with focused references, deterministic validators where justified, generic project-facing role names, and no unnecessary component or policy duplication.",
       "assigned_increments": ["INC-001", "INC-008"],
       "acceptance_reference": "implementation-program.md#inc-001--baseline-pressure-suite-and-minimal-front-door",
+      "increment_evidence": [
+        {
+          "increment_id": "INC-001",
+          "status": "verified-awaiting-diff-approval",
+          "implementation": [".codex-plugin/plugin.json", "skills/implementing-staged-plans/SKILL.md", "skills/implementing-staged-plans/agents/openai.yaml", "skills/implementing-staged-plans/scripts/validate_package.py"],
+          "verification": ["tests/test_package_validation.py", "tests/test_front_door_contract.py", "implementation-programs/ISP-001/increments/INC-001/reviews/architecture.md"],
+          "scope_note": "INC-001 establishes the minimal package; integrated hardening remains assigned to INC-008."
+        }
+      ],
       "current_disposition": "allocated"
     },
     {
@@ -104,6 +131,15 @@
       "normalized_requirement": "Validate structural, state, approval, traceability, repository-fixture, pressure, resume, crash, schema-evolution, and repository-backed pilot behavior with observed evidence.",
       "assigned_increments": ["INC-001", "INC-002", "INC-003", "INC-004", "INC-005", "INC-006", "INC-007", "INC-008", "CLOSURE"],
       "acceptance_reference": "implementation-program.md#inc-008--integrated-pressure-hardening-and-release-pilot",
+      "increment_evidence": [
+        {
+          "increment_id": "INC-001",
+          "status": "verified-awaiting-diff-approval",
+          "implementation": ["tests/pressure/scenarios.json", "tests/pressure/baseline", "tests/pressure/guided", "tests/pressure/verdicts.json"],
+          "verification": ["tests/test_pressure_evidence.py", "tests/test_package_validation.py", "tests/test_front_door_contract.py", "implementation-programs/ISP-001/increments/INC-001/reviews/test-evidence.md"],
+          "scope_note": "Static structure and bounded pressure evidence do not prove installed runtime behavior or later state, resume, crash, schema, and pilot obligations."
+        }
+      ],
       "current_disposition": "allocated"
     },
     {
@@ -112,6 +148,15 @@
       "normalized_requirement": "Retain all eight approved outcome increments, let each use accepted prior controls without pretending later controls exist, and keep closure separate.",
       "assigned_increments": ["INC-001", "INC-002", "INC-003", "INC-004", "INC-005", "INC-006", "INC-007", "INC-008", "CLOSURE"],
       "acceptance_reference": "implementation-program.md#global-dependencies-and-gates",
+      "increment_evidence": [
+        {
+          "increment_id": "INC-001",
+          "status": "verified-awaiting-diff-approval",
+          "implementation": ["skills/implementing-staged-plans/SKILL.md#route-or-fall-back-honestly"],
+          "verification": ["tests/pressure/guided/P-004.txt", "implementation-programs/ISP-001/increments/INC-001/reviews/requirements.md"],
+          "scope_note": "No later increment or closure subsystem was implemented or accepted."
+        }
+      ],
       "current_disposition": "allocated"
     },
     {
@@ -120,6 +165,15 @@
       "normalized_requirement": "Apply the approved layered architecture, human Markdown plus machine JSON, repository-discovered artifact mapping, lean briefs, provisional increments, bounded amendments, five modes with standard default, separate PR timing, persisted-state authority, schema evolution, and state minimization.",
       "assigned_increments": ["INC-001", "INC-002", "INC-003", "INC-004", "INC-005", "INC-007", "INC-008"],
       "acceptance_reference": "implementation-program.md#approved-architecture",
+      "increment_evidence": [
+        {
+          "increment_id": "INC-001",
+          "status": "verified-awaiting-diff-approval",
+          "implementation": ["skills/implementing-staged-plans/SKILL.md#establish-current-authority", "skills/implementing-staged-plans/SKILL.md#apply-universal-gates", "implementation-programs/ISP-001/manifest.json"],
+          "verification": ["tests/test_front_door_contract.py", "tests/pressure/guided/P-005.txt", "implementation-programs/ISP-001/increments/INC-001/reviews/requirements.md"],
+          "scope_note": "The default mode and later durable state behavior remain allocated beyond the minimal front door."
+        }
+      ],
       "current_disposition": "allocated"
     },
     {
@@ -136,6 +190,15 @@
       "normalized_requirement": "Treat the canonical design, accepted program, focused procedures, validators, generated briefs, packets, and handoffs as the normative workflow without reviving copy-ready prompts as competing policy.",
       "assigned_increments": ["INC-001", "INC-007", "INC-008", "CLOSURE"],
       "acceptance_reference": "implementation-program.md#approved-architecture",
+      "increment_evidence": [
+        {
+          "increment_id": "INC-001",
+          "status": "verified-awaiting-diff-approval",
+          "implementation": ["skills/implementing-staged-plans/SKILL.md", "implementation-programs/ISP-001/manifest.json"],
+          "verification": ["tests/test_front_door_contract.py", "implementation-programs/ISP-001/increments/INC-001/reviews/requirements.md"],
+          "scope_note": "The front door defers to persisted repository records; later focused procedures, handoff automation, integration, and closure remain allocated."
+        }
+      ],
       "current_disposition": "allocated"
     }
   ]
