@@ -13,6 +13,12 @@ from pathlib import Path
 PLUGIN_MANIFEST = Path(".codex-plugin/plugin.json")
 SKILL_MARKDOWN = Path("skills/implementing-staged-plans/SKILL.md")
 OPENAI_METADATA = Path("skills/implementing-staged-plans/agents/openai.yaml")
+PROGRAM_AUTHORITY_REFERENCE = Path(
+    "skills/implementing-staged-plans/references/program-authority.md"
+)
+PROGRAM_AUTHORITY_SCRIPT = Path(
+    "skills/implementing-staged-plans/scripts/program_authority.py"
+)
 
 EXPECTED_MANIFEST: dict[str, object] = {
     "name": "implementation-plugin",
@@ -277,11 +283,24 @@ def validate_forbidden_components(repository_root: Path) -> list[str]:
     return issues
 
 
+def validate_authority_assets(repository_root: Path) -> list[str]:
+    """Require the accepted focused procedure and mechanical authority boundary."""
+    issues: list[str] = []
+    for relative_path in (PROGRAM_AUTHORITY_REFERENCE, PROGRAM_AUTHORITY_SCRIPT):
+        path = repository_root / relative_path
+        if not path.is_file() or path.is_symlink():
+            issues.append(
+                f"{relative_path.as_posix()} must be a regular non-symlink file"
+            )
+    return issues
+
+
 def validate_package(repository_root: Path) -> list[str]:
     """Return all deterministic package validation issues."""
     issues = [
         *validate_plugin_manifest(repository_root),
         *validate_skill_contract(repository_root),
+        *validate_authority_assets(repository_root),
         *validate_markdown_links(repository_root),
         *validate_forbidden_components(repository_root),
     ]

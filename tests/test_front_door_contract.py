@@ -74,6 +74,14 @@ OBLIGATION_PATTERNS = {
         r"next legal action",
         r"stop",
     ),
+    "route program authority workflow": (
+        r"\[Program authority\]\(references/program-authority\.md\)",
+        r"source (?:capture|registration)",
+        r"decomposition",
+        r"traceability",
+        r"program revision",
+        r"initial (?:program )?approval",
+    ),
 }
 
 

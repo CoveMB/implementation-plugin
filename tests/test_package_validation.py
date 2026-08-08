@@ -21,6 +21,11 @@ if SPEC is None or SPEC.loader is None:
 VALIDATOR = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(VALIDATOR)
 
+AUTHORITY_REFERENCE = (
+    "skills/implementing-staged-plans/references/program-authority.md"
+)
+AUTHORITY_SCRIPT = "skills/implementing-staged-plans/scripts/program_authority.py"
+
 
 VALID_MANIFEST = {
     "name": "implementation-plugin",
@@ -73,6 +78,8 @@ class PackageFixture:
             "skills/implementing-staged-plans/agents/openai.yaml",
             VALID_OPENAI_YAML,
         )
+        self.write(AUTHORITY_REFERENCE, "# Program Authority\n")
+        self.write(AUTHORITY_SCRIPT, "# reusable authority validator\n")
 
 
 class PackageValidationTestCase(unittest.TestCase):
@@ -276,6 +283,16 @@ class ForbiddenSurfaceTests(PackageValidationTestCase):
 
 
 class CompletePackageTests(PackageValidationTestCase):
+    def test_required_authority_assets_are_regular_files(self) -> None:
+        for missing_path in (AUTHORITY_REFERENCE, AUTHORITY_SCRIPT):
+            with self.subTest(missing_path=missing_path):
+                self.fixture.write_valid_package()
+                (self.fixture.root / missing_path).unlink()
+                self.assert_issue_contains(
+                    VALIDATOR.validate_authority_assets(self.fixture.root),
+                    missing_path,
+                )
+
     def test_valid_minimal_package_returns_no_issues(self) -> None:
         self.fixture.write_valid_package()
 

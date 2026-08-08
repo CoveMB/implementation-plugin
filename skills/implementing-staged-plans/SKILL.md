@@ -59,6 +59,10 @@ Discover only capabilities relevant to the current stage and requested action.
 
 Capability discovery does not create authority.
 
+## Route Program Authority Work
+
+For authorized source capture or registration, complete requirement decomposition, source-located traceability, program revision, or initial program approval, follow [Program authority](references/program-authority.md). Apply only that procedure's current legal step; its mechanical coverage checks do not replace human semantic review.
+
 ## Route or Fall Back Honestly
 
 If a relevant implemented procedure exists, verify that its inputs and authority match the persisted state, then route only the current legal action to it.
