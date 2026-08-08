@@ -1,29 +1,28 @@
 {
   "schema_version": "implementation-program-status/v1",
-  "state_sequence": 9,
+  "state_sequence": 10,
   "program_id": "ISP-001",
   "program_revision": 1,
   "program_state": "active",
   "current_increment_id": "INC-001",
-  "current_increment_state": "awaiting-diff-approval",
+  "current_increment_state": "accepted",
   "approved_exact_file_plan_sha256": "c9fc55af3a8076eaab846114d2363580697c97a801418e2a377db69c262fb2a1",
   "approval_mode": "approval:full-increment",
-  "updated_at": "2026-08-08T20:12:31Z",
+  "updated_at": "2026-08-08T20:24:42Z",
   "previous_state": {
-    "state_sequence": 8,
+    "state_sequence": 9,
     "program_state": "active",
-    "current_increment_state": "verified",
-    "transition_event_id": "DIFF-APPROVAL-GATE-001"
+    "current_increment_state": "awaiting-diff-approval",
+    "transition_event_id": "APR-006"
   },
   "blocked": null,
   "next_legal_actions": [
-    "inspect the completed INC-001 review packet and base-to-head diff",
-    "explicitly approve the INC-001 diff or request a bounded INC-001 change"
+    "stop at the accepted INC-001 boundary",
+    "await a separate explicit instruction before preparing or beginning INC-002"
   ],
   "prohibited_without_new_authorization": [
     "modify files outside the approved INC-001 exact-file plan",
     "use roadmap-specific details in package-facing names",
-    "accept INC-001 without explicit diff approval",
     "begin INC-002",
     "install a plugin",
     "modify a marketplace",

@@ -23,7 +23,7 @@
   },
   "current_increment": {
     "increment_id": "INC-001",
-    "state": "awaiting-diff-approval",
+    "state": "accepted",
     "exact_file_plan_sha256": "c9fc55af3a8076eaab846114d2363580697c97a801418e2a377db69c262fb2a1"
   },
   "source_binding": {

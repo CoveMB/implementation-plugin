@@ -19,7 +19,7 @@
       "increment_evidence": [
         {
           "increment_id": "INC-001",
-          "status": "verified-awaiting-diff-approval",
+          "status": "accepted",
           "implementation": ["skills/implementing-staged-plans/SKILL.md#establish-current-authority", "skills/implementing-staged-plans/SKILL.md#apply-universal-gates"],
           "verification": ["tests/test_front_door_contract.py", "tests/pressure/verdicts.json", "implementation-programs/ISP-001/increments/INC-001/reviews/requirements.md"],
           "scope_note": "Evidence covers the INC-001 front-door slice only; the group remains allocated across later increments and closure."
@@ -36,7 +36,7 @@
       "increment_evidence": [
         {
           "increment_id": "INC-001",
-          "status": "verified-awaiting-diff-approval",
+          "status": "accepted",
           "implementation": ["skills/implementing-staged-plans/SKILL.md#discover-supporting-capabilities", "skills/implementing-staged-plans/SKILL.md#route-or-fall-back-honestly", "skills/implementing-staged-plans/SKILL.md#return-a-bounded-result"],
           "verification": ["tests/test_front_door_contract.py", "tests/pressure/guided", "implementation-programs/ISP-001/increments/INC-001/reviews/architecture.md"],
           "scope_note": "Later mechanical lifecycle procedures remain assigned to INC-003 and INC-008."
@@ -117,7 +117,7 @@
       "increment_evidence": [
         {
           "increment_id": "INC-001",
-          "status": "verified-awaiting-diff-approval",
+          "status": "accepted",
           "implementation": [".codex-plugin/plugin.json", "skills/implementing-staged-plans/SKILL.md", "skills/implementing-staged-plans/agents/openai.yaml", "skills/implementing-staged-plans/scripts/validate_package.py"],
           "verification": ["tests/test_package_validation.py", "tests/test_front_door_contract.py", "implementation-programs/ISP-001/increments/INC-001/reviews/architecture.md"],
           "scope_note": "INC-001 establishes the minimal package; integrated hardening remains assigned to INC-008."
@@ -134,7 +134,7 @@
       "increment_evidence": [
         {
           "increment_id": "INC-001",
-          "status": "verified-awaiting-diff-approval",
+          "status": "accepted",
           "implementation": ["tests/pressure/scenarios.json", "tests/pressure/baseline", "tests/pressure/guided", "tests/pressure/verdicts.json"],
           "verification": ["tests/test_pressure_evidence.py", "tests/test_package_validation.py", "tests/test_front_door_contract.py", "implementation-programs/ISP-001/increments/INC-001/reviews/test-evidence.md"],
           "scope_note": "Static structure and bounded pressure evidence do not prove installed runtime behavior or later state, resume, crash, schema, and pilot obligations."
@@ -151,7 +151,7 @@
       "increment_evidence": [
         {
           "increment_id": "INC-001",
-          "status": "verified-awaiting-diff-approval",
+          "status": "accepted",
           "implementation": ["skills/implementing-staged-plans/SKILL.md#route-or-fall-back-honestly"],
           "verification": ["tests/pressure/guided/P-004.txt", "implementation-programs/ISP-001/increments/INC-001/reviews/requirements.md"],
           "scope_note": "No later increment or closure subsystem was implemented or accepted."
@@ -168,7 +168,7 @@
       "increment_evidence": [
         {
           "increment_id": "INC-001",
-          "status": "verified-awaiting-diff-approval",
+          "status": "accepted",
           "implementation": ["skills/implementing-staged-plans/SKILL.md#establish-current-authority", "skills/implementing-staged-plans/SKILL.md#apply-universal-gates", "implementation-programs/ISP-001/manifest.json"],
           "verification": ["tests/test_front_door_contract.py", "tests/pressure/guided/P-005.txt", "implementation-programs/ISP-001/increments/INC-001/reviews/requirements.md"],
           "scope_note": "The default mode and later durable state behavior remain allocated beyond the minimal front door."
@@ -193,7 +193,7 @@
       "increment_evidence": [
         {
           "increment_id": "INC-001",
-          "status": "verified-awaiting-diff-approval",
+          "status": "accepted",
           "implementation": ["skills/implementing-staged-plans/SKILL.md", "implementation-programs/ISP-001/manifest.json"],
           "verification": ["tests/test_front_door_contract.py", "implementation-programs/ISP-001/increments/INC-001/reviews/requirements.md"],
           "scope_note": "The front door defers to persisted repository records; later focused procedures, handoff automation, integration, and closure remain allocated."
