@@ -1,8 +1,8 @@
 {
   "schema_version": "implementation-workspace/v1",
   "program_id": "ISP-001",
-  "program_revision": 1,
-  "selected_at": "2026-08-08T20:37:49Z",
+  "program_revision": 2,
+  "selected_at": "2026-08-08T21:09:33Z",
   "repository": {
     "identity": "/Users/CoveMB/Code/CoveMB/implementation-plugin",
     "remote": null,
@@ -13,30 +13,26 @@
     "path": "/Users/CoveMB/Code/CoveMB/implementation-plugin",
     "branch": "main",
     "base_commit": "f14449b8808574c720927aedab5b64871cc63858",
-    "head_commit_at_selection": "f14449b8808574c720927aedab5b64871cc63858",
-    "creation_mechanism": "user-selected main checkout after local fast-forward",
+    "head_commit_at_revision_activation": "62cf3fb444919c8ee2cc0eb97ee1e8ff8d28b53d",
+    "creation_mechanism": "DEC-007 user-selected main checkout retained for ISP-001 revision 2",
     "temporary_filesystem": false
   },
-  "pre_existing_work_at_selection": {
+  "pre_existing_work_at_revision_activation": {
     "staged_paths": [],
-    "modified_paths": ["implementing-staged-plans-consolidated-design-plan-final.md"],
-    "untracked_paths": [
-      ".DS_Store",
-      "implementation-programs/.DS_Store",
-      "implementation-programs/ISP-001/.DS_Store"
-    ],
+    "modified_paths": [],
+    "untracked_paths": [],
     "conflicted_paths": [],
     "active_git_operation": null
   },
   "source_binding_observation": {
-    "approved_snapshot_sha256": "3f31c011961368a6b8c6808d9542b3b24cbc2afa82a2ca5291c062d51dc917a8",
+    "approved_snapshot_sha256": "f4d4bca12706170210be202444df0d4c6d0bbb382143c5a0d0c8da2616eb9c57",
     "current_canonical_path_sha256": "f4d4bca12706170210be202444df0d4c6d0bbb382143c5a0d0c8da2616eb9c57",
-    "status": "mismatch-requires-source-and-program-revision-approval"
+    "status": "match"
   },
   "workspace_constraints": {
     "scope": "Use main only for the remaining ISP-001 implementation; do not convert this decision into a reusable skill instruction.",
     "preserve_user_owned_work": true,
-    "continuity_risk": "Future implementation shares the main checkout with the recorded modified and untracked user-owned paths.",
-    "recovery": "Never clean, reset, stash, stage, commit, or overwrite the recorded pre-existing paths without separate explicit authority. Revalidate overlap before every exact-file plan and commit."
+    "continuity_risk": "Future user work may share main with ISP-001 and must be revalidated before every plan, write, or commit.",
+    "recovery": "Never clean, reset, stash, stage, commit, or overwrite unrelated or pre-existing paths. Revalidate overlap before every exact-file plan and commit."
   }
 }

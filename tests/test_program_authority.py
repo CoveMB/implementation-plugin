@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path, PurePosixPath
+from unittest.mock import patch
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -405,7 +406,7 @@ class BindingAndRevisionTests(ProgramAuthorityTestCase):
         prior_evidence = self.fixture.write_text("history/evidence.md", "accepted\n")
         traceability = self.fixture.load_json("program/traceability.json")
         traceability["revision_history"] = {
-            "supersedes_program_revision": 0,
+            "supersedes_program_revision": 1,
             "prior_source_path": "history/source.md",
             "prior_source_sha256": AUTHORITY.sha256_file(prior_source),
             "prior_program_path": "history/program.md",
@@ -430,6 +431,20 @@ class BindingAndRevisionTests(ProgramAuthorityTestCase):
         self.assertEqual(self.validate(), [])
         prior_evidence.write_text("mutated\n", encoding="utf-8")
         self.assert_issue(self.validate(), "prior evidence")
+
+    def test_later_revision_without_preservation_record_fails(self) -> None:
+        traceability = self.fixture.load_json("program/traceability.json")
+        traceability["program_revision"] = 2
+        self.fixture.write_json("program/traceability.json", traceability)
+        manifest = self.fixture.load_json("manifest.json")
+        manifest["program_revision"] = 2
+        manifest["program_binding"]["traceability_sha256"] = AUTHORITY.sha256_file(
+            self.fixture.path("program/traceability.json")
+        )
+        self.fixture.write_json("manifest.json", manifest)
+        self.fixture.write_approval()
+
+        self.assert_issue(self.validate(), "revision_history")
 
 
 class SourceCaptureAndCliTests(ProgramAuthorityTestCase):
@@ -486,6 +501,33 @@ class SourceCaptureAndCliTests(ProgramAuthorityTestCase):
                 snapshot_path=PurePosixPath("linked-capture/source.bin"),
                 metadata_path=PurePosixPath("linked-capture/metadata.json"),
             )
+
+    def test_capture_fails_closed_when_hard_links_are_unsupported(self) -> None:
+        source = self.fixture.write_bytes("hard-link-source.bin", b"source\n")
+        with patch.object(
+            AUTHORITY.os, "link", side_effect=OSError("hard links unsupported")
+        ):
+            with self.assertRaises(OSError):
+                self.capture(source)
+
+        self.assertFalse(self.fixture.path("capture/source.bin").exists())
+        self.assertFalse(self.fixture.path("capture/source-metadata.json").exists())
+
+    def test_existing_metadata_blocks_capture_before_snapshot_creation(self) -> None:
+        source = self.fixture.write_bytes("metadata-source.bin", b"source\n")
+        self.fixture.path("capture").mkdir(exist_ok=True)
+        self.fixture.write_text("capture/source-metadata.json", "preserve\n")
+
+        with self.assertRaises(FileExistsError):
+            self.capture(source)
+
+        self.assertFalse(self.fixture.path("capture/source.bin").exists())
+        self.assertEqual(
+            self.fixture.path("capture/source-metadata.json").read_text(
+                encoding="utf-8"
+            ),
+            "preserve\n",
+        )
 
     def test_cli_returns_zero_one_two_and_sorts_issues(self) -> None:
         output = io.StringIO()

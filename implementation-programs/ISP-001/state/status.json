@@ -1,36 +1,50 @@
 {
   "schema_version": "implementation-program-status/v1",
-  "state_sequence": 11,
+  "state_sequence": 16,
   "program_id": "ISP-001",
-  "program_revision": 1,
-  "program_state": "blocked",
-  "current_increment_id": "INC-001",
-  "current_increment_state": "accepted",
-  "approved_exact_file_plan_sha256": "c9fc55af3a8076eaab846114d2363580697c97a801418e2a377db69c262fb2a1",
+  "program_revision": 2,
+  "program_state": "active",
+  "current_increment_id": "INC-002",
+  "current_increment_state": "awaiting-diff-approval",
+  "approved_exact_file_plan_sha256": "955f8da03250aa5d10c068ffd1f617673dc556b4e9612daffdca78d57a724641",
+  "pending_exact_file_plan_sha256": null,
   "approval_mode": "approval:full-increment",
-  "updated_at": "2026-08-08T20:37:49Z",
-  "previous_state": {
-    "state_sequence": 10,
-    "program_state": "active",
-    "current_increment_state": "accepted",
-    "transition_event_id": "APR-007"
+  "updated_at": "2026-08-08T22:17:57Z",
+  "source_binding": {
+    "source_id": "SOURCE-002",
+    "sha256": "f4d4bca12706170210be202444df0d4c6d0bbb382143c5a0d0c8da2616eb9c57"
   },
-  "blocked": {
-    "violated_invariant": "The current canonical source path must match the approved immutable source binding before the next increment is prepared or implemented.",
-    "evidence": "The main-checkout canonical plan has SHA-256 f4d4bca12706170210be202444df0d4c6d0bbb382143c5a0d0c8da2616eb9c57 while ISP-001 revision 1 is bound to 3f31c011961368a6b8c6808d9542b3b24cbc2afa82a2ca5291c062d51dc917a8.",
-    "required_decision": "Review the semantic-naming source amendment and approve or reject a revised source snapshot and ISP-001 program revision before INC-002.",
-    "legal_resume_transition": "blocked to active after the revised source and program approval are persisted"
+  "program_binding": {
+    "sha256": "1ed05a86525f9801b593f71272e15fe7ea8ef2088ea3e62e44686824728ba253",
+    "traceability_sha256": "e69b124d616ecc6bb5c7ede3b7009a3221ed649913377f99e016456bc87cd200",
+    "semantic_requirements_sha256": "151cbe6731fe012b92f2d6138745465bec9b548e89b00d2538fdb706bbe0c10f",
+    "machine_complete_traceability": false
+  },
+  "previous_state": {
+    "state_sequence": 15,
+    "program_revision": 2,
+    "program_state": "active",
+    "current_increment_id": "INC-002",
+    "current_increment_state": "reviewing",
+    "transition_event_id": "VERIFICATION-INC-002-FINAL"
+  },
+  "verification_binding": {
+    "completed_at": "2026-08-08T22:17:57Z",
+    "unittest_count": 49,
+    "package_validation": "passed",
+    "neutral_program_validation": "passed",
+    "current_program_validation": "passed with incomplete-approval allowance and explicit completeness withholding",
+    "skill_validation": "passed",
+    "diff_check": "passed"
   },
   "next_legal_actions": [
-    "review and disposition the canonical source amendment",
-    "if approved, create and approve the corresponding source snapshot and ISP-001 program revision",
-    "then prepare INC-002 on main under a separately selected approval mode"
+    "review the INC-002 packet and complete diff",
+    "explicitly accept the diff and semantic digest or request changes",
+    "do not begin INC-003"
   ],
   "prohibited_without_new_authorization": [
-    "prepare or implement INC-002 before source and program revision approval",
-    "stage, commit, overwrite, stash, clean, or discard the recorded user-owned main-checkout changes",
-    "use roadmap-specific details in package-facing names",
-    "begin INC-002",
+    "claim machine-complete atomic traceability",
+    "begin INC-003",
     "install a plugin",
     "modify a marketplace",
     "push",

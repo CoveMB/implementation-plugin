@@ -8,7 +8,7 @@ import os
 import re
 import sys
 import tempfile
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -157,13 +157,6 @@ def load_json_lines(path: Path) -> tuple[list[dict[str, Any]] | None, list[str]]
     if issues:
         return None, issues
     return records, []
-
-
-def _path_components(path: Path) -> Iterable[Path]:
-    current = Path(path.anchor)
-    for part in path.parts[1:] if path.is_absolute() else path.parts:
-        current = current / part
-        yield current
 
 
 def _contains_symlink(path: Path, stop_at: Path) -> bool:
@@ -494,11 +487,33 @@ def _validate_prior_revision(
     program_root: Path, traceability: dict[str, Any]
 ) -> list[str]:
     history = traceability.get("revision_history")
+    revision = traceability.get("program_revision")
     if history is None:
+        if isinstance(revision, int) and not isinstance(revision, bool) and revision > 1:
+            return ["later program revision requires revision_history preservation bindings"]
         return []
     if not isinstance(history, dict):
         return ["revision_history must be an object"]
     issues: list[str] = []
+    if isinstance(revision, int) and not isinstance(revision, bool) and revision > 1:
+        superseded_revision = history.get("supersedes_program_revision")
+        if (
+            not isinstance(superseded_revision, int)
+            or isinstance(superseded_revision, bool)
+            or superseded_revision < 1
+            or superseded_revision >= revision
+        ):
+            issues.append(
+                "revision_history supersedes_program_revision must name an earlier positive revision"
+            )
+        for required_field in (
+            "prior_source_path",
+            "prior_source_sha256",
+            "prior_program_path",
+            "prior_program_sha256",
+        ):
+            if required_field not in history:
+                issues.append(f"revision_history is missing {required_field}")
     path_pairs = (
         ("prior_source_path", "prior_source_sha256", "prior source"),
         ("prior_program_path", "prior_program_sha256", "prior program"),
@@ -518,6 +533,8 @@ def _validate_prior_revision(
     evidence = history.get("prior_evidence", [])
     if not isinstance(evidence, list):
         issues.append("prior_evidence must be a list")
+    elif isinstance(revision, int) and revision > 1 and not evidence:
+        issues.append("later program revision requires prior evidence bindings")
     else:
         for index, record in enumerate(evidence):
             label = f"prior evidence {index}"

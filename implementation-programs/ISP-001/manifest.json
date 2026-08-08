@@ -18,13 +18,14 @@
     "current_increment_brief": "increments/INC-002/brief.md",
     "current_exact_file_plan": "increments/INC-002/exact-file-plan.md",
     "current_preparation": "increments/INC-002/preparation.md",
-    "current_review_packet": "increments/INC-001/review-packet.md",
-    "current_handoff": "increments/INC-001/handoff.md",
+    "current_execution_record": "increments/INC-002/execution-record.md",
+    "current_review_packet": "increments/INC-002/review-packet.md",
+    "current_handoff": "increments/INC-002/handoff.md",
     "current_handoff_addendum": "increments/INC-001/handoff-addendum.md"
   },
   "current_increment": {
     "increment_id": "INC-002",
-    "state": "implementing",
+    "state": "awaiting-diff-approval",
     "exact_file_plan_sha256": "955f8da03250aa5d10c068ffd1f617673dc556b4e9612daffdca78d57a724641"
   },
   "source_binding": {
