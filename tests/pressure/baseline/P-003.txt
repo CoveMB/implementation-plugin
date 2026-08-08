@@ -1,0 +1,3 @@
+The workspace is empty and is not a Git repository, so there are no production files or diff from which to infer the current increment.
+
+Please mount/provide the repository and the increment requirements. Once available, I’ll implement first, verify, then reconstruct the exact-file plan from the resulting diff.

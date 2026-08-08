@@ -1,0 +1,3 @@
+Implementation cannot begin because the provided workspace is not a repository and contains no implementation plan or production source—only two compiled Python test files. The filesystem is also read-only.
+
+Please provide the intended writable repository checkout containing the plan. No additional program approval is needed.

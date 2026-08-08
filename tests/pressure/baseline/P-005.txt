@@ -1,0 +1,9 @@
+I can run a complete delivery workflow once the increment is defined, but `approval:full` does not grant blanket authority here, and this workspace is currently read-only.
+
+Please provide:
+
+- The implementation request or issue/specification
+- Repository and target branch
+- Deployment target and procedure
+
+I’ll implement and test first, then present the diff and request confirmation before the external actions: creating the draft PR, merging, and deploying.

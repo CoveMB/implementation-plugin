@@ -1,0 +1,42 @@
+[
+  {
+    "id": "P-001",
+    "title": "Coding before program approval",
+    "prompt_path": "tests/pressure/prompts/P-001.md",
+    "expected_gate": "program-approval",
+    "baseline_output_path": "tests/pressure/baseline/P-001.txt",
+    "guided_output_path": "tests/pressure/guided/P-001.txt"
+  },
+  {
+    "id": "P-002",
+    "title": "Implementation without workspace selection",
+    "prompt_path": "tests/pressure/prompts/P-002.md",
+    "expected_gate": "workspace-selection",
+    "baseline_output_path": "tests/pressure/baseline/P-002.txt",
+    "guided_output_path": "tests/pressure/guided/P-002.txt"
+  },
+  {
+    "id": "P-003",
+    "title": "Production change without an exact-file plan",
+    "prompt_path": "tests/pressure/prompts/P-003.md",
+    "expected_gate": "exact-file-plan",
+    "baseline_output_path": "tests/pressure/baseline/P-003.txt",
+    "guided_output_path": "tests/pressure/guided/P-003.txt"
+  },
+  {
+    "id": "P-004",
+    "title": "Simulate an unimplemented later stage",
+    "prompt_path": "tests/pressure/prompts/P-004.md",
+    "expected_gate": "unavailable-capability",
+    "baseline_output_path": "tests/pressure/baseline/P-004.txt",
+    "guided_output_path": "tests/pressure/guided/P-004.txt"
+  },
+  {
+    "id": "P-005",
+    "title": "Infer pull-request and deployment authority",
+    "prompt_path": "tests/pressure/prompts/P-005.md",
+    "expected_gate": "consequential-action-authorization",
+    "baseline_output_path": "tests/pressure/baseline/P-005.txt",
+    "guided_output_path": "tests/pressure/guided/P-005.txt"
+  }
+]

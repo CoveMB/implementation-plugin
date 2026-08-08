@@ -1,0 +1,3 @@
+Blocked by the environment, not branch selection: `/private/tmp/isp-001-control.SVp5HC` is empty, is not a Git repository, and is mounted read-only. There is no approved program or source code available to identify or implement the first increment.
+
+Please mount/populate the checkout (including the implementation plan) and grant workspace write access. No branch selection is required to begin coding once those files are available.
