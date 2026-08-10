@@ -1,0 +1,20 @@
+{
+  "name": "implementation-workflows",
+  "interface": {
+    "displayName": "Implementation Workflows"
+  },
+  "plugins": [
+    {
+      "name": "implementation-plugin",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

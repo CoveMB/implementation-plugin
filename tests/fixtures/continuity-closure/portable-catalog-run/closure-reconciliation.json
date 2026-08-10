@@ -1,0 +1,25 @@
+{
+  "schema_version": "implementation-closure-reconciliation/v1",
+  "program_id": "portable-catalog",
+  "program_revision": 3,
+  "final_increment_id": "catalog-index",
+  "expected_requirement_ids": ["CAT-001", "CAT-002"],
+  "requirement_dispositions": [
+    {"requirement_id": "CAT-001", "disposition": "implemented", "evidence_paths": ["evidence/cat-001.json"], "owner": "catalog-maintainers", "approval_reference": "none", "later_invalidation_checked": true},
+    {"requirement_id": "CAT-002", "disposition": "implemented", "evidence_paths": ["evidence/cat-002.json"], "owner": "catalog-maintainers", "approval_reference": "none", "later_invalidation_checked": true}
+  ],
+  "accepted_increment_ids": ["archive-capture", "archive-scan", "catalog-index"],
+  "accepted_artifact_bindings": [["archive-capture:review-packet", "1111111111111111111111111111111111111111111111111111111111111111"], ["archive-capture:handoff-addendum", "2222222222222222222222222222222222222222222222222222222222222222"], ["archive-scan:review-packet", "3333333333333333333333333333333333333333333333333333333333333333"], ["archive-scan:handoff-addendum", "4444444444444444444444444444444444444444444444444444444444444444"], ["catalog-index:review-packet", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], ["catalog-index:handoff-addendum", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]],
+  "approved_amendment_ids": ["none"],
+  "resolved_amendment_ids": ["none"],
+  "decision_ids": ["CATALOG-DECISION-001"],
+  "deferrals": [],
+  "unresolved_material_findings": 0,
+  "program_command_results": [["python3 -m unittest", 0, "2026-08-09T12:10:00Z"]],
+  "latest_contributing_evidence_at": "2026-08-09T12:00:00Z",
+  "later_invalidation_checks": ["archive-capture", "archive-scan", "catalog-index"],
+  "architecture_assessment": "cohesive local boundary",
+  "documentation_assessment": "operator route is current",
+  "operations_assessment": "no external state was changed",
+  "recovery_assessment": "per-file recovery remains available"
+}

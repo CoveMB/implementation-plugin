@@ -1,0 +1,29 @@
+{
+  "schema_version": "repository-preparation-scenarios/v1",
+  "scenarios": [
+    {"id": "unrelated-dirty-note", "expected_drift": "benign"},
+    {"id": "accepted-dirty-index", "expected_drift": "benign"},
+    {"id": "relevant-catalog-change", "expected_drift": "reconcilable-relevant"},
+    {"id": "untracked-import-file", "expected_drift": "reconcilable-relevant"},
+    {"id": "active-merge", "expected_drift": "base-invalidating"},
+    {"id": "selected-base-moved", "expected_drift": "base-invalidating"},
+    {"id": "new-relevant-test-failure", "expected_drift": "base-invalidating"},
+    {"id": "managed-output-without-owner", "expected_drift": "base-invalidating"},
+    {"id": "reusable-parser-changed", "expected_drift": "reconcilable-relevant"},
+    {"id": "incompatible-manifest-change", "expected_drift": "base-invalidating"},
+    {"id": "invalidated-file-layout-assumption", "expected_drift": "reconcilable-relevant"}
+  ],
+  "operation_markers": [
+    "MERGE_HEAD",
+    "CHERRY_PICK_HEAD",
+    "REVERT_HEAD",
+    "rebase-merge",
+    "rebase-apply",
+    "sequencer",
+    "BISECT_LOG"
+  ],
+  "baseline_failures": ["legacy-thumbnail-test"],
+  "reusable_candidates": ["archive/path_reader.py"],
+  "managed_paths": ["catalog/generated-index.json"],
+  "dependency_paths": ["archive-lock.json"]
+}

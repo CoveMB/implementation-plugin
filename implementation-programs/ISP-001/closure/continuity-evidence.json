@@ -1,0 +1,215 @@
+{
+  "brief": {
+    "acceptance": "Use the approved criteria in `implementation-programs/ISP-001/program/revisions/revision-2/implementation-program.md#separate-program-closure`.",
+    "approval_mode": "approval:full-increment",
+    "handoff_path": "increments/INC-008/handoff.md",
+    "handoff_sha256": "66e4a0eedd89a8a46cf874d016cbc1c35c7e71c5e35b84ea01acd46ee2e872ee",
+    "increment_id": "CLOSURE",
+    "optional_context": [
+      [
+        "integration_checkpoint",
+        "ISP-001 remains active until reconciliation and later explicit closure approval"
+      ],
+      [
+        "sequencing_reason",
+        "INC-008 is accepted by APR-023 and addendum 6b394698853809df3804c850be3d7b08618008f63d01bebf1a63c7f7dbe2b3c5"
+      ],
+      [
+        "non_goal",
+        "No new implementation requirement or consequential external action."
+      ]
+    ],
+    "outcome": "Reconcile every atomic requirement, approved amendment, accepted increment artifact, later-invalidation check, deferral, and material finding; rerun fresh program-level verification; and, only with zero blockers, produce the closure packet and stop for explicit closure approval.",
+    "program_id": "ISP-001",
+    "program_revision": 2,
+    "requirement_ids": [
+      "REQ-ADOPTION",
+      "REQ-AUTHORITY",
+      "REQ-CONTINUITY-CLOSURE",
+      "REQ-REVIEW-PACKET",
+      "REQ-SEMANTIC-NAMING",
+      "REQ-SEQUENCE",
+      "REQ-SOURCE-PROGRAM",
+      "REQ-STATE-AUTHORIZATION",
+      "REQ-VALIDATION"
+    ],
+    "schema_version": "implementation-continuity-evidence/v1",
+    "status_path": "state/status.json",
+    "status_sha256": "1c12575d6af27e942c2ffdc91260bb6177885f7c036d8faf7ffac9fe7a81e38b",
+    "title": "Program reconciliation",
+    "unresolved_user_decision": "Explicit approval of the separate closure-reconciliation exact-file plan remains unresolved.",
+    "workspace_base_commit": "f14449b8808574c720927aedab5b64871cc63858",
+    "workspace_branch": "main",
+    "workspace_head_commit": "53edb8fad2008c7d35b6c17dbb973b24022947fd",
+    "workspace_path": "/Users/CoveMB/Code/CoveMB/implementation-plugin"
+  },
+  "closure_packet": {
+    "accepted_packet_integrity": [
+      "INC-001 through INC-008 each have one current review-packet and handoff-addendum digest; all sixteen current bytes match the reconciliation bindings.",
+      "INC-001 remains accepted under its explicit revision-2 preservation addendum; later increments retain revision-2 evidence."
+    ],
+    "amendment_and_deferral_summary": [
+      "AMEND-001 and AMEND-002 are approved and resolved; DEC-001 through DEC-008 are accounted for.",
+      "There are no deferred requirements, rejected requirements, or not-applicable requirements."
+    ],
+    "architecture_documentation_operations_recovery": [
+      "Architecture: the accepted skills-only boundary remains cohesive; no product, provider, deployment, or new reusable interface was introduced.",
+      "Documentation: the front door and five canonical references remain linked and package-valid; deterministic closure navigation adds no copied policy.",
+      "Operations: closure work is local; index, HEAD, remotes, persistent application data, deployment, provider, and external systems are untouched.",
+      "Recovery: accepted evidence is preserve-only, partial closure files remain inert, JSONL prefixes are append-only, and status uses digest compare-and-swap."
+    ],
+    "closure_approval_request": "Review this exact reconciliation and packet and explicitly approve or reject ISP-001 program closure.",
+    "current_program_state": "active",
+    "final_increment_accepted": true,
+    "final_increment_id": "INC-008",
+    "findings_and_dispositions": [
+      "All accepted material findings have final dispositions and the unresolved material finding count is zero.",
+      "The closure reassessment is controller self-review, non-independent, and reduced assurance."
+    ],
+    "next_action": "Stop for explicit closure approval.",
+    "program_id": "ISP-001",
+    "program_revision": 2,
+    "program_verification": [
+      "Fresh focused continuity, state, and integrated-pressure validation passed: 72 tests.",
+      "Fresh complete unittest discovery passed: 223 tests.",
+      "Package, program authority, state authority, INC-006 through INC-008 review bundles, integrated evidence, skill validation, and diff checking passed after AUTH-027."
+    ],
+    "reconciliation_sha256": "7ddac33846fdccb061b11e6c72071b0842877aa776dace4c97a2ee28d30a0f3e",
+    "requirement_summary": [
+      "All 755 atomic requirements are reconciled exactly once: 704 implemented and 51 amended under AMEND-002.",
+      "Every disposition cites accepted traceability and increment review evidence and records a successful later-invalidation check."
+    ],
+    "residual_risks": [
+      "Local static evidence does not prove live Codex activation, independent reviewer identity, deployment, provider behavior, production recovery, accessibility quality, hostile concurrency, or future model behavior.",
+      "Program closure and every later action remain separately gated."
+    ],
+    "schema_version": "implementation-closure-packet/v1"
+  },
+  "conversation": {
+    "approval_mode": "approval:full-increment",
+    "expected_brief_sha256": "6c54077809df02f51569c390043793f1959622754c1cfab0e52eef8ab4c1d0ca",
+    "explicit_renewed_authority": true,
+    "predicate_evidence": [
+      [
+        "program-part-boundary",
+        true,
+        "the separate closure part is bounded"
+      ],
+      [
+        "risk-or-architecture-domain",
+        true,
+        "the work remained within local program governance"
+      ],
+      [
+        "workspace-or-base",
+        true,
+        "workspace branch base and head remained exact"
+      ],
+      [
+        "superseded-discussion",
+        true,
+        "APR-024 and AUTH-027 supersede the preparation blocker"
+      ],
+      [
+        "evidence-or-expertise",
+        true,
+        "accepted artifacts and fresh local evidence are present"
+      ],
+      [
+        "lossless-summary",
+        true,
+        "the closure handoff preserves all material boundaries"
+      ]
+    ],
+    "same_conversation": true,
+    "schema_version": "implementation-continuity-evidence/v1",
+    "submitted_brief_sha256": "6c54077809df02f51569c390043793f1959622754c1cfab0e52eef8ab4c1d0ca"
+  },
+  "handoff": {
+    "accepted_handoff_addendum_path": "increments/INC-008/handoff-addendum.md",
+    "accepted_handoff_addendum_sha256": "6b394698853809df3804c850be3d7b08618008f63d01bebf1a63c7f7dbe2b3c5",
+    "accepted_increments": [
+      "INC-001",
+      "INC-002",
+      "INC-003",
+      "INC-004",
+      "INC-005",
+      "INC-006",
+      "INC-007",
+      "INC-008"
+    ],
+    "accepted_review_packet_path": "increments/INC-008/review-packet.md",
+    "accepted_review_packet_sha256": "d870ce5bd8a0d8061d4ce2108cfc441e6842719a601cc4603145b0865b894d8d",
+    "accepted_status_sequence": 69,
+    "accepted_status_sha256": "1c12575d6af27e942c2ffdc91260bb6177885f7c036d8faf7ffac9fe7a81e38b",
+    "amendments": [
+      "AMEND-001",
+      "AMEND-002"
+    ],
+    "approval_mode": "approval:full-increment",
+    "base_commit": "f14449b8808574c720927aedab5b64871cc63858",
+    "current_increment_id": "INC-008",
+    "current_increment_state": "accepted",
+    "first_read_files": [
+      "closure/program-closure-packet.md",
+      "closure/reconciliation.json",
+      "state/status.json",
+      "manifest.json"
+    ],
+    "head_commit": "53edb8fad2008c7d35b6c17dbb973b24022947fd",
+    "next_legal_action": "Stop for explicit closure approval.",
+    "program_id": "ISP-001",
+    "program_revision": 2,
+    "schema_version": "implementation-continuity-evidence/v1",
+    "unresolved_risks": [
+      "controller reassessment is non-independent and reduced assurance",
+      "local static checks do not prove live activation deployment provider accessibility or hostile concurrency",
+      "program closure still requires explicit closure approval"
+    ],
+    "verification_status": "closure reconciliation validated with 755 exact requirement dispositions, 16 accepted artifact bindings, zero blockers, 72 focused tests, and 223 full-suite tests passing",
+    "workspace_branch": "main",
+    "workspace_path": "/Users/CoveMB/Code/CoveMB/implementation-plugin"
+  },
+  "negative_scenarios": [
+    {
+      "expected": "handoff required",
+      "name": "overloaded-continuation"
+    },
+    {
+      "expected": "resume denied",
+      "name": "stale-handoff"
+    },
+    {
+      "expected": "closure denied",
+      "name": "premature-closure"
+    },
+    {
+      "expected": "later action denied",
+      "name": "inferred-later-authority"
+    }
+  ],
+  "resume": {
+    "accepted_handoff_addendum_sha256": "6b394698853809df3804c850be3d7b08618008f63d01bebf1a63c7f7dbe2b3c5",
+    "accepted_review_packet_sha256": "d870ce5bd8a0d8061d4ce2108cfc441e6842719a601cc4603145b0865b894d8d",
+    "active_git_operation": null,
+    "brief_sha256": "6c54077809df02f51569c390043793f1959622754c1cfab0e52eef8ab4c1d0ca",
+    "conflicted_paths": [],
+    "handoff_sha256": "c0c0ca3c57dce41d8c636bffa7492f7006123c1d07daca34a311fa4c3c847296",
+    "matching_authorization_ids": [
+      "AUTH-027"
+    ],
+    "program_id": "ISP-001",
+    "program_revision": 2,
+    "program_sha256": "1ed05a86525f9801b593f71272e15fe7ea8ef2088ea3e62e44686824728ba253",
+    "schema_version": "implementation-continuity-evidence/v1",
+    "semantic_requirements_sha256": "151cbe6731fe012b92f2d6138745465bec9b548e89b00d2538fdb706bbe0c10f",
+    "source_sha256": "f4d4bca12706170210be202444df0d4c6d0bbb382143c5a0d0c8da2616eb9c57",
+    "status_sequence": 69,
+    "status_sha256": "1c12575d6af27e942c2ffdc91260bb6177885f7c036d8faf7ffac9fe7a81e38b",
+    "workspace_base_commit": "f14449b8808574c720927aedab5b64871cc63858",
+    "workspace_branch": "main",
+    "workspace_head_commit": "53edb8fad2008c7d35b6c17dbb973b24022947fd",
+    "workspace_path": "/Users/CoveMB/Code/CoveMB/implementation-plugin"
+  },
+  "schema_version": "implementation-continuity-evidence/v1"
+}

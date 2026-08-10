@@ -190,13 +190,18 @@
       "decision_references": [],
       "group_id": "REQ-AUTHORITY",
       "id": "REQ-AUTHORITY-EXPLICIT-HUMAN-APPROVAL-ACTION-AUTHORITY-BOUNDARIES",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "implementation-programs/ISP-001/state/approvals.jsonl and state/action-authorizations.jsonl: APR-016 and AUTH-014 preserve separate exact plan and non-commit action authority"
+      ],
       "normalized_requirement": "explicit human approval and action-authority boundaries;",
       "source_locator": "1. Purpose, line 20",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-0020"
       ],
-      "verification_evidence": []
+    "verification_evidence": [
+      "implementation-programs/ISP-001/increments/INC-005/execution-record.md: exact binding revalidation and authorized lifecycle receipt",
+      "implementation-programs/ISP-001/increments/INC-008/integration-evidence.json: exact approvals and separate local and evaluator action authorizations remained binding throughout the integrated pilot"
+    ]
     },
     {
       "acceptance_criteria": [
@@ -3573,13 +3578,17 @@
       "decision_references": [],
       "group_id": "REQ-ROUTER",
       "id": "REQ-ROUTER-READ-PERSISTED-STATE-DETERMINE-NEXT-LEGAL-LIFECYCLE-ACTION",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/SKILL.md and focused procedure references: persisted-state routing remains the front-door contract"
+      ],
       "normalized_requirement": "Read persisted state and determine the next legal lifecycle action.",
       "source_locator": "7.1 Entry router, line 229",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-0229"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/pressure/integrated/results/direct-request.txt, indirect-request.txt, incomplete-request.txt, and unsupported-action.txt: fresh contexts identify the next legal action or mandatory authority stop"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -4262,13 +4271,18 @@
       "decision_references": [],
       "group_id": "REQ-WORKSPACE-DRIFT",
       "id": "REQ-WORKSPACE-DRIFT-IDENTIFY-IMPLEMENTATION-WORKSPACE-PROTECT-USER-WORK",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/repository_preparation.py: inspect_repository, classify_repository_drift, and validate_plan_overlap"
+      ],
       "normalized_requirement": "Identify the implementation workspace and protect user work.",
       "source_locator": "7.5 Workspace and repository-integrity guard, line 277",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-0277"
       ],
-      "verification_evidence": []
+    "verification_evidence": [
+      "tests/test_repository_preparation.py: RepositoryInspectionTests and DriftAndOwnershipTests",
+      "tests/test_integrated_pressure.py: disposable repository pilot preserves the selected workspace and creates no commit or remote"
+    ]
     },
     {
       "acceptance_criteria": [
@@ -4694,13 +4708,18 @@
       "decision_references": [],
       "group_id": "REQ-EVIDENCE-PLANNING",
       "id": "REQ-EVIDENCE-PLANNING-EVIDENCE-RECORDS-INCLUDE-SOURCE-ACCESS-DATE-VERSION-CONFIGURATION-APPLICABILITY-CLAIMS-SUPPORTED-RISK",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/repository_preparation.py: EvidenceRecord, decide_evidence_refresh, and validate_evidence_record"
+      ],
       "normalized_requirement": "Evidence records include source, access date, version/configuration applicability, claims supported, risk domain, reuse basis, and remaining uncertainty.",
       "source_locator": "7.6 Increment preparation and evidence registry, line 304",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-0304"
       ],
-      "verification_evidence": []
+    "verification_evidence": [
+      "tests/test_repository_preparation.py: EvidenceTests and neutral evidence fixtures",
+      "implementation-programs/ISP-001/increments/INC-008/integration-evidence.json: command, pilot, pressure, schema, package, naming, and limitation evidence is source-bound"
+    ]
     },
     {
       "acceptance_criteria": [
@@ -5291,13 +5310,18 @@
       "decision_references": [],
       "group_id": "REQ-EXECUTION-AMENDMENT",
       "id": "REQ-EXECUTION-AMENDMENT-IMPLEMENT-AUTHORIZED-INCREMENT-USING-CURRENT-EXACT-FILE-PLAN-APPROVED-AMENDMENT-RULES",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/execution_discipline.py: composes approved preparation amendment policy with mode-aware execution decisions"
+      ],
       "normalized_requirement": "Implement the authorized increment using the current exact-file plan and approved amendment rules.",
       "source_locator": "7.8 Execution controller, line 338",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-0338"
       ],
-      "verification_evidence": []
+    "verification_evidence": [
+      "tests/test_execution_discipline.py: bounded, standard-mode, program-amendment, unknown-label, incomplete-record, and contradiction cases",
+      "tests/test_integrated_pressure.py: the repository-backed pilot exercises one evidence-driven bounded amendment without changing program scope"
+    ]
     },
     {
       "acceptance_criteria": [
@@ -5953,13 +5977,18 @@
       "decision_references": [],
       "group_id": "REQ-CONTINUITY-CLOSURE",
       "id": "REQ-CONTINUITY-CLOSURE-PROMPT-GENERATOR-NEVER-RECREATES-FULL-WORKFLOW-PROMPT",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/continuity_closure.py:LeanBrief and render_brief"
+      ],
       "normalized_requirement": "The prompt generator never recreates the full workflow in the prompt.",
       "source_locator": "7.12 Continuity, prompt-generation, and closure controller, line 388",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-0388"
       ],
-      "verification_evidence": []
+    "verification_evidence": [
+      "tests/test_continuity_closure.py:LeanBriefTests and BundleValidationTests",
+      "tests/test_integrated_pressure.py and tests/pressure/integrated/: lean synthetic prompts and the non-triggering control avoid copied workflow policy"
+    ]
     },
     {
       "acceptance_criteria": [
@@ -6385,13 +6414,17 @@
       "decision_references": [],
       "group_id": "REQ-EVIDENCE-PLANNING",
       "id": "REQ-EVIDENCE-PLANNING-PROGRAM-IDENTIFIER-APPROVED-REVISION",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/continuity_closure.py:LeanBrief authority bindings"
+      ],
       "normalized_requirement": "program identifier and approved revision;",
       "source_locator": "8.2 Required fields, line 420",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-0420"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_continuity_closure.py:LeanBriefTests"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -8832,13 +8865,18 @@
       "decision_references": [],
       "group_id": "REQ-ARTIFACT-INVARIANTS",
       "id": "REQ-ARTIFACT-INVARIANTS-SECRETS-TOKENS-SENSITIVE-CREDENTIAL-VALUES-ARE-NEVER-PERSISTED",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/review_coordination.py: regular-input CLI, concise issue output, and sensitive command-result rejection"
+      ],
       "normalized_requirement": "Secrets, tokens, and sensitive credential values are never persisted.",
       "source_locator": "10.1 Artifact invariants, line 619",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-0619"
       ],
-      "verification_evidence": []
+    "verification_evidence": [
+      "tests/test_review_coordination.py: CLI no-content-echo and sensitive-result negative cases; implementation-programs/ISP-001/increments/INC-006/reviews/specialist-security-privacy.md",
+      "tests/pressure/integrated/results/ and implementation-programs/ISP-001/increments/INC-008/reviews/specialist-security-privacy.md: sanitized synthetic minimum-context outputs were reviewed for leakage"
+    ]
     },
     {
       "acceptance_criteria": [
@@ -8919,13 +8957,17 @@
       "decision_references": [],
       "group_id": "REQ-ARTIFACT-INVARIANTS",
       "id": "REQ-ARTIFACT-INVARIANTS-STALE-BRIEFS-HANDOFFS-ARE-DETECTED-REVISION-WORKSPACE-COMMIT-BINDINGS",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/continuity_closure.py:validate_resume_context and validate_rollover"
+      ],
       "normalized_requirement": "Stale briefs and handoffs are detected by revision, workspace, and commit bindings.",
       "source_locator": "10.1 Artifact invariants, line 621",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-0621"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_continuity_closure.py:ResumeValidationTests and RolloverTests"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -12035,13 +12077,18 @@
       "decision_references": [],
       "group_id": "REQ-REVIEW-PACKET",
       "id": "REQ-REVIEW-PACKET-PERSIST-RAW-REVIEWER-REPORTS-BEFORE-RECONCILIATION",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "implementation-programs/ISP-001/increments/INC-006/reviews/: six separate initial raw reports preserved before reviews/remediation.md reconciliation"
+      ],
       "normalized_requirement": "Persist raw reviewer reports before reconciliation.",
       "source_locator": "13.6 Review, remediation, and verification, line 791",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-0791"
       ],
-      "verification_evidence": []
+    "verification_evidence": [
+      "implementation-programs/ISP-001/state/status.json: sequence-48 raw report digest binding and sequence-49 unresolved material finding gate",
+      "implementation-programs/ISP-001/increments/INC-008/review-evidence.json: six distinct raw controller self-reviews precede reconciliation and final verification"
+    ]
     },
     {
       "acceptance_criteria": [
@@ -16208,13 +16255,17 @@
       "decision_references": [],
       "group_id": "REQ-STATE-AUTHORIZATION",
       "id": "REQ-STATE-AUTHORIZATION-APPROVAL-MODES-NEVER-ALTER-THIS-TABLE-IMPLICITLY",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/continuity_closure.py:evaluate_continuation and evaluate_later_action"
+      ],
       "normalized_requirement": "Approval modes never alter this table implicitly.",
       "source_locator": "20. Consequential-action authorization, line 1023",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1023"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_continuity_closure.py:ContinuationTests and LaterActionTests"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -16477,13 +16528,17 @@
       "decision_references": [],
       "group_id": "REQ-PACKAGE",
       "id": "REQ-PACKAGE-FRONT-DOOR-CONTAINS-DISCOVERY-METADATA-NON-NEGOTIABLE-INVARIANTS-STATE-ROUTING-LINKS-FOCUSED",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/SKILL.md: concise front door retains invariants and focused procedure links"
+      ],
       "normalized_requirement": "The front door contains discovery metadata, non-negotiable invariants, state routing, and links to focused procedures.",
       "source_locator": "22. Package design, line 1077",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1077"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_integrated_pressure.py: package links and concise front door pass; validate_package.py confirms the complete package"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -16950,13 +17005,17 @@
       "decision_references": [],
       "group_id": "REQ-VALIDATION",
       "id": "REQ-VALIDATION-STALE-MISMATCHED-APPROVALS-BRIEFS-ARE-REJECTED",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/continuity_closure.py:validate_continuity_bundle"
+      ],
       "normalized_requirement": "stale or mismatched approvals and briefs are rejected;",
       "source_locator": "23.3 State and approval tests, line 1108",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1108"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_continuity_closure.py:BundleValidationTests and IntegrationTests"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -17082,13 +17141,17 @@
       "decision_references": [],
       "group_id": "REQ-VALIDATION",
       "id": "REQ-VALIDATION-NO-MODE-IMPLIES-CONSEQUENTIAL-ACTION-AUTHORITY",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/execution_discipline.py: logical commit validation consumes a separate exact state-authority decision"
+      ],
       "normalized_requirement": "no mode implies consequential-action authority.",
       "source_locator": "23.3 State and approval tests, line 1112",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1112"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_execution_discipline.py: logical boundary regression proves approval mode never supplies create-local-commit authority"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -18398,13 +18461,17 @@
       "decision_references": [],
       "group_id": "REQ-VALIDATION",
       "id": "REQ-VALIDATION-ATOMIC-STATUS-UPDATE-FAILURE-RECOVERY",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/state_authority.py: compare-and-swap atomic JSON replacement and JSONL append"
+      ],
       "normalized_requirement": "atomic status-update failure and recovery;",
       "source_locator": "23.7 Resume and crash tests, line 1173",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1173"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_state_authority.py: AtomicPersistenceTests"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -18563,13 +18630,17 @@
       "decision_references": [],
       "group_id": "REQ-VALIDATION",
       "id": "REQ-VALIDATION-WORKSPACE-SELECTION",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/state_authority.py: select_workspace and explicit RepositoryObservation validation"
+      ],
       "normalized_requirement": "workspace selection;",
       "source_locator": "23.8 Repository-backed pilot, line 1183",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1183"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_state_authority.py: workspace selection approval, action, drift, and prior-digest cases"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -18662,13 +18733,17 @@
       "decision_references": [],
       "group_id": "REQ-VALIDATION",
       "id": "REQ-VALIDATION-BOUNDED-APPROACH-AMENDMENT-PROMPTED-REPOSITORY-EVIDENCE",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/repository_preparation.py: classify_plan_amendment and validate_exact_file_plan"
+      ],
       "normalized_requirement": "bounded approach amendment prompted by repository evidence;",
       "source_locator": "23.8 Repository-backed pilot, line 1186",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1186"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_repository_preparation.py: AmendmentAndShapeTests and ExactPlanTests"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -18695,13 +18770,18 @@
       "decision_references": [],
       "group_id": "REQ-VALIDATION",
       "id": "REQ-VALIDATION-REVIEW-REMEDIATION-VERIFICATION-ACCEPTANCE",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/review_coordination.py: integrated report, remediation, fresh verification, packet, execution-evidence, and recovery validation"
+      ],
       "normalized_requirement": "review, remediation, verification, and acceptance;",
       "source_locator": "23.8 Repository-backed pilot, line 1187",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1187"
       ],
-      "verification_evidence": []
+    "verification_evidence": [
+      "tests/test_review_coordination.py and tests/fixtures/review-coordination/portable-archive-run/: focused negative matrix and byte-equal repaired-finding bundle",
+      "tests/test_integrated_pressure.py and implementation-programs/ISP-001/increments/INC-008/review-evidence.json: integrated pilot and zero-unresolved-finding review bundle"
+    ]
     },
     {
       "acceptance_criteria": [
@@ -18926,13 +19006,18 @@
       "decision_references": [],
       "group_id": "REQ-SEQUENCE",
       "id": "REQ-SEQUENCE-IMPLEMENTATION-SHOULD-REMAIN-INCREMENTAL-BECAUSE-WORKFLOW-STATEFUL-MUST-PROVE-ITS-OWN-CONTROLS",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/references/repository-preparation.md: exact-plan approval and action gates preserve incremental lifecycle order"
+      ],
       "normalized_requirement": "The implementation should remain incremental because the workflow is stateful and must prove its own controls.",
       "source_locator": "24. Proposed implementation sequence, line 1200",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1200"
       ],
-      "verification_evidence": []
+    "verification_evidence": [
+      "tests/test_front_door_contract.py: focused repository-preparation routing without duplicated lifecycle policy",
+      "tests/test_integrated_pressure.py: one repository-backed source-to-closure pilot composes the accepted lifecycle owners in order"
+    ]
     },
     {
       "acceptance_criteria": [
@@ -19215,13 +19300,17 @@
       "decision_references": [],
       "group_id": "REQ-SEQUENCE",
       "id": "REQ-SEQUENCE-IMPLEMENT-SEPARATE-PROGRAM-INCREMENT-STATE-LEGAL-TRANSITIONS-APPROVAL-BINDING-FIVE-APPROVAL-MODES",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/state_authority.py: separate state matrices, approval policies, bindings, workspace selection, and action decisions"
+      ],
       "normalized_requirement": "Implement separate program/increment state, legal transitions, approval binding, five approval modes, workspace-selection gate, and distinct action authorization.",
       "source_locator": "24. Proposed implementation sequence, line 1216",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1216"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_state_authority.py: exhaustive state-pair, five-mode, binding, workspace, and action tests"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -19248,13 +19337,19 @@
       "decision_references": [],
       "group_id": "REQ-SEQUENCE",
       "id": "REQ-SEQUENCE-COMPLETE-STATE-MODE-MATRICES-STALE-APPROVAL-REJECTION-PROOF-THAT-NO-MODE-IMPLIES",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/state_authority.py: immutable transition policies and exact authorization decision boundary",
+        "skills/implementing-staged-plans/scripts/execution_discipline.py: mode-aware amendments preserve separate commit and consequential-action authority"
+      ],
       "normalized_requirement": "Complete state and mode matrices, stale-approval rejection, and proof that no mode implies pull-request, merge, release, deployment, or external-state authority.",
       "source_locator": "24. Proposed implementation sequence, line 1218",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1218"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_state_authority.py: 49 program pairs, 169 increment pairs, stale approval cases, and mode-action cross-product",
+        "tests/test_execution_discipline.py: four preapproved amendment modes, standard-mode renewal, and absent commit authority"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -19341,13 +19436,18 @@
       ],
       "group_id": "REQ-SEMANTIC-NAMING",
       "id": "REQ-SEMANTIC-NAMING-IMPLEMENT-TEST-FIRST-SLICES-ALTERNATIVE-VERIFICATION-BOUNDED-APPROACH-AUTONOMY-SEMANTIC-NAMING-ENFORCEMENT",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/execution_discipline.py and references/execution-discipline.md: test-first and alternative evidence, ownership, contextual names, bounded amendments, logical commit partitions, and four recovery domains"
+      ],
       "normalized_requirement": "Implement test-first slices and alternative verification, bounded approach autonomy, semantic naming enforcement, ownership boundaries, focused commits, amendment classification, and distinct recovery domains.",
       "source_locator": "24. Proposed implementation sequence, line 1228",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1228"
       ],
-      "verification_evidence": []
+    "verification_evidence": [
+      "tests/test_execution_discipline.py and tests/fixtures/execution-discipline/portable-archive-run/scenarios.json: focused negative matrices and neutral preparation-to-execution integration",
+      "tests/test_integrated_pressure.py: context-and-intention inventory covers every required implementation surface kind without a blacklist"
+    ]
     },
     {
       "acceptance_criteria": [
@@ -19403,13 +19503,17 @@
       ],
       "group_id": "REQ-SEMANTIC-NAMING",
       "id": "REQ-SEMANTIC-NAMING-IMPLEMENT-REQUIRED-REVIEW-SCOPES-INCLUDING-CONTEXTUAL-SEMANTIC-NAMING-REVIEW-SPECIALIST-PREDICATES-TRUTHFUL",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/review_coordination.py and references/review-coordination.md: risk scopes, contextual names, truthful assurance, findings, repairs, final verification, and packet validation"
+      ],
       "normalized_requirement": "Implement required review scopes, including contextual semantic naming review, specialist predicates, truthful independence handling, material-finding contracts, remediation loops, final verification, and packet validation.",
       "source_locator": "24. Proposed implementation sequence, line 1234",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1234"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_review_coordination.py: 36 focused tests including semantic basis, independence, material-finding, remediation, freshness, and packet regressions"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -19467,13 +19571,18 @@
       "decision_references": [],
       "group_id": "REQ-SEQUENCE",
       "id": "REQ-SEQUENCE-GENERATE-MINIMAL-BRIEFS-PERSISTED-STATE-CREATE-DURABLE-HANDOFFS-REVALIDATE-RESUME-MANAGE-FULL",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/references/continuity-closure.md",
+        "skills/implementing-staged-plans/scripts/continuity_closure.py"
+      ],
       "normalized_requirement": "Generate minimal briefs from persisted state, create durable handoffs, revalidate on resume, manage full-mode continuation, reconcile the program, require closure approval, and gate draft pull requests and later actions.",
       "source_locator": "24. Proposed implementation sequence, line 1240",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1240"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_continuity_closure.py:IntegrationTests"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -19630,13 +19739,17 @@
       "decision_references": [],
       "group_id": "REQ-SEQUENCE",
       "id": "REQ-SEQUENCE-EACH-INCREMENT-SHOULD-USE-ACCEPTED-PORTIONS-WORKFLOW-ALREADY-IMPLEMENTED-WITHOUT-PRETENDING-LATER",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/review_coordination.py: composes accepted semantic naming, execution-evidence, recovery, and external state-authority owners"
+      ],
       "normalized_requirement": "Each increment should use the accepted portions of the workflow already implemented, without pretending later controls exist.",
       "source_locator": "24. Proposed implementation sequence, line 1250",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1250"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "implementation-programs/ISP-001/increments/INC-006/reviews/remediation.md: raw-review, remediation, renewed-review, and lifecycle sequence evidence"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -19762,13 +19875,17 @@
       "decision_references": [],
       "group_id": "REQ-AUTHORITY",
       "id": "REQ-AUTHORITY-EXACT-FILE-PLANS-ARE-CREATED-CURRENT-REPOSITORY-TRUTH-BEFORE-PRODUCTION-CHANGES",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/repository_preparation.py: validate_preparation, PlanBinding, and current plan digest authorization checks"
+      ],
       "normalized_requirement": "exact-file plans are created from current repository truth before production changes;",
       "source_locator": "25. Design acceptance criteria, line 1261",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1261"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_repository_preparation.py: ExactPlanTests and live current-workspace validation"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -19857,13 +19974,17 @@
       "decision_references": [],
       "group_id": "REQ-AUTHORITY",
       "id": "REQ-AUTHORITY-PROMPTS-REMAIN-LEAN-DO-NOT-DUPLICATE-CANONICAL-WORKFLOW",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/continuity_closure.py:render_brief"
+      ],
       "normalized_requirement": "prompts remain lean and do not duplicate the canonical workflow;",
       "source_locator": "25. Design acceptance criteria, line 1264",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1264"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_continuity_closure.py:LeanBriefTests.test_rendered_brief_is_minimal_and_semantic"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -19956,13 +20077,17 @@
       "decision_references": [],
       "group_id": "REQ-AUTHORITY",
       "id": "REQ-AUTHORITY-ALL-FIVE-APPROVAL-MODES-BEHAVE-DETERMINISTICALLY",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/state_authority.py: APPROVAL_MODE_POLICIES and creation-only default"
+      ],
       "normalized_requirement": "all five approval modes behave deterministically;",
       "source_locator": "25. Design acceptance criteria, line 1267",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1267"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_state_authority.py: ApprovalModeTests"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -19989,13 +20114,17 @@
       "decision_references": [],
       "group_id": "REQ-AUTHORITY",
       "id": "REQ-AUTHORITY-NO-APPROVAL-MODE-IMPLIES-CONSEQUENTIAL-ACTION-AUTHORITY",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/state_authority.py: decide_action_authorization does not consume approval policy"
+      ],
       "normalized_requirement": "no approval mode implies consequential-action authority;",
       "source_locator": "25. Design acceptance criteria, line 1268",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1268"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_state_authority.py: every approval mode crossed with every consequential action without a grant"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -20187,13 +20316,17 @@
       "decision_references": [],
       "group_id": "REQ-AUTHORITY",
       "id": "REQ-AUTHORITY-REVIEWER-INDEPENDENCE-REPRESENTED-TRUTHFULLY",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/review_coordination.py: controller self-review cannot claim independence; bounded independent basis and withheld conclusions are explicit"
+      ],
       "normalized_requirement": "reviewer independence is represented truthfully;",
       "source_locator": "25. Design acceptance criteria, line 1274",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1274"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_review_coordination.py: self-review, independent basis, and material-defect follow-up reviewer regressions"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -20569,13 +20702,17 @@
       "decision_references": [],
       "group_id": "REQ-DEFAULTS",
       "id": "REQ-DEFAULTS-PROGRAM-INCREMENTS-ARE-PROVISIONAL-UNTIL-REPOSITORY-INFORMED-PREPARATION",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/references/repository-preparation.md: current observation, drift, shaping, and just-in-time plan contract"
+      ],
       "normalized_requirement": "program increments are provisional until repository-informed preparation",
       "source_locator": "26. Proposed defaults requiring approval, line 1290",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1290"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_repository_preparation.py: real-Git inspection and current plan binding tests"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -20631,13 +20768,17 @@
       "decision_references": [],
       "group_id": "REQ-DEFAULTS",
       "id": "REQ-DEFAULTS-PROCEED-AUTONOMOUSLY-APPROVAL-PRE-APPROVE-FULL-AUTONOMY-MODES-WHEN-NO-USER-OWNED",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/execution_discipline.py: decide_execution_amendment permits complete bounded records in preapproved modes and preserves hard stops"
+      ],
       "normalized_requirement": "proceed autonomously in `approval:pre-approve` and the full-autonomy modes when no user-owned decision or program amendment is introduced",
       "source_locator": "26. Proposed defaults requiring approval, line 1291",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1291"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_execution_discipline.py: autonomous-mode matrix rejects user-owned decisions, missing evidence, absent recovery, and program amendments"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -20817,13 +20958,18 @@
       "decision_references": [],
       "group_id": "REQ-DEFAULTS",
       "id": "REQ-DEFAULTS-PERSISTED-REPOSITORY-STATE-AUTHORITATIVE",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/continuity_closure.py:ResumeContext and validate_resume_context"
+      ],
       "normalized_requirement": "persisted repository state is authoritative",
       "source_locator": "26. Proposed defaults requiring approval, line 1295",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1295"
       ],
-      "verification_evidence": []
+    "verification_evidence": [
+      "tests/test_continuity_closure.py:ResumeValidationTests",
+      "tests/pressure/integrated/results/indirect-request.txt: fresh isolated routing treats persisted repository authority as controlling and fails closed when absent"
+    ]
     },
     {
       "acceptance_criteria": [
@@ -20972,13 +21118,17 @@
       ],
       "group_id": "REQ-SEMANTIC-NAMING",
       "id": "REQ-SEMANTIC-NAMING-COMBINE-CONTEXT-AWARE-SEMANTIC-NAMING-CONTRACT-DETERMINISTIC-CANDIDATE-DETECTION-ACROSS-IMPLEMENTATION-SURFACES",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/repository_preparation.py: SemanticNameRecord and validate_semantic_naming_inventory"
+      ],
       "normalized_requirement": "combine a context-aware semantic naming contract, deterministic candidate detection across implementation surfaces, and explicit justification for permitted implementation-governance or durable-domain uses.",
       "source_locator": "26. Proposed defaults requiring approval, line 1298",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1298"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_repository_preparation.py: SemanticNamingTests cover every required surface kind and contextual exceptions"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -21146,13 +21296,18 @@
       "decision_references": [],
       "group_id": "REQ-DESIGN-RISKS",
       "id": "REQ-DESIGN-RISKS-MITIGATION-JUST-TIME-PLANNING-EXPLICIT-BOUNDED-AMENDMENT-PATH",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/repository_preparation.py: amendment precedence and exact-file plan validation"
+      ],
       "normalized_requirement": "The mitigation is just-in-time planning and an explicit bounded amendment path.",
       "source_locator": "27.3 Exact-file plans can overconstrain implementation, line 1314",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1314"
       ],
-      "verification_evidence": []
+    "verification_evidence": [
+      "tests/test_repository_preparation.py: program-dimension dominance and stale-plan rejection tests",
+      "implementation-programs/ISP-001/increments/INC-008/execution-record.md: the exact-navigation defect activated one bounded owner-local amendment after a preserved material RED"
+    ]
     },
     {
       "acceptance_criteria": [
@@ -21204,13 +21359,17 @@
       "decision_references": [],
       "group_id": "REQ-DESIGN-RISKS",
       "id": "REQ-DESIGN-RISKS-MITIGATION-REQUIREMENT-TRACEABILITY-EXPLICIT-AMENDMENT-CRITERIA-REVIEW-AGAINST-APPROVED-OUTCOMES-PROGRAM-REVISION",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/execution_discipline.py: accepted program-dimension precedence cannot be downgraded by execution labels or approval modes"
+      ],
       "normalized_requirement": "The mitigation is requirement traceability, explicit amendment criteria, review against approved outcomes, and program-revision invalidation when semantics change.",
       "source_locator": "27.4 Agent discretion can disguise program changes, line 1318",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1318"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_execution_discipline.py: program-dimension and authoritative-contradiction precedence plus bounded evidence and recovery requirements"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -21291,13 +21450,17 @@
       "decision_references": [],
       "group_id": "REQ-DESIGN-RISKS",
       "id": "REQ-DESIGN-RISKS-INSTRUCTION-TEXT-CANNOT-MANUFACTURE-INDEPENDENT-REVIEW",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/references/review-coordination.md: independence is evidence, not a role label, instruction, test, or tool invocation"
+      ],
       "normalized_requirement": "Instruction text cannot manufacture independent review.",
       "source_locator": "27.6 Reviewer independence depends on runtime capability, line 1326",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1326"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "implementation-programs/ISP-001/increments/INC-006/reviews/: every actual report is controller-self-review, non-independent, reduced assurance"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -21465,13 +21628,17 @@
       "decision_references": [],
       "group_id": "REQ-DESIGN-RISKS",
       "id": "REQ-DESIGN-RISKS-AUTOMATIC-CONTINUATION-USEFUL-ONLY-WHILE-CONTEXT-REMAINS-COHERENT",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/continuity_closure.py:assess_conversation and evaluate_continuation"
+      ],
       "normalized_requirement": "Automatic continuation is useful only while context remains coherent.",
       "source_locator": "27.9 Full-mode continuation can degrade in a long conversation, line 1338",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1338"
       ],
-      "verification_evidence": []
+      "verification_evidence": [
+        "tests/test_continuity_closure.py:ConversationAssessmentTests and ContinuationTests"
+      ]
     },
     {
       "acceptance_criteria": [
@@ -21729,13 +21896,19 @@
       "decision_references": [],
       "group_id": "REQ-ADOPTION",
       "id": "REQ-ADOPTION-GENERATED-LEAN-INCREMENT-BRIEFS",
-      "implementation_evidence": [],
+      "implementation_evidence": [
+        "skills/implementing-staged-plans/scripts/continuity_closure.py:LeanBrief and render_brief",
+        "implementation-programs/ISP-001/increments/INC-008/brief.md"
+      ],
       "normalized_requirement": "generated lean increment briefs;",
       "source_locator": "28. Recommended adoption, line 1357",
       "source_unit_ids": [
         "SOURCE-UNIT-LINE-1357"
       ],
-      "verification_evidence": []
+    "verification_evidence": [
+      "tests/test_continuity_closure.py:LeanBriefTests",
+      "tests/pressure/integrated/prompts/ and results/: five minimal request shapes preserve semantic intent without policy duplication"
+    ]
     },
     {
       "acceptance_criteria": [
@@ -21879,11 +22052,11 @@
     }
   ],
   "coverage_assertion": {
-    "approval_event_id": null,
-    "machine_complete": false,
+    "approval_event_id": "APR-010",
+    "machine_complete": true,
     "semantic_requirements_sha256": "151cbe6731fe012b92f2d6138745465bec9b548e89b00d2538fdb706bbe0c10f",
     "source_line_count": 1362,
-    "status": "awaiting-inc-002-diff-approval"
+    "status": "complete"
   },
   "program_id": "ISP-001",
   "program_revision": 2,

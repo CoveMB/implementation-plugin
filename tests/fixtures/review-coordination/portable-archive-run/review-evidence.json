@@ -1,0 +1,78 @@
+{
+  "schema_version": "implementation-review-evidence/v1",
+  "risk_predicates": [
+    {"predicate": "security-privacy", "touched": false, "specialist_scope": "specialist-security-privacy", "evidence": "no sensitive content or external transmission", "rationale": "not touched by the portable validator"},
+    {"predicate": "public-api-compatibility", "touched": false, "specialist_scope": "specialist-compatibility", "evidence": "no public interface or persisted schema change", "rationale": "not touched by the portable validator"},
+    {"predicate": "concurrency-reliability-distributed-state", "touched": false, "specialist_scope": "specialist-reliability", "evidence": "no concurrent or distributed state", "rationale": "not touched by the portable validator"},
+    {"predicate": "persistent-data-migrations", "touched": false, "specialist_scope": "specialist-persistent-data", "evidence": "no application data or migration", "rationale": "not touched by the portable validator"},
+    {"predicate": "accessibility", "touched": false, "specialist_scope": "specialist-accessibility", "evidence": "no user interface or rendered product", "rationale": "not touched by the portable validator"},
+    {"predicate": "platform-deployment-infrastructure", "touched": false, "specialist_scope": "specialist-platform", "evidence": "no deployment or infrastructure", "rationale": "not touched by the portable validator"},
+    {"predicate": "payments-financial-state", "touched": false, "specialist_scope": "specialist-financial", "evidence": "no payment or financial state", "rationale": "not touched by the portable validator"},
+    {"predicate": "performance", "touched": false, "specialist_scope": "specialist-performance", "evidence": "no performance-sensitive runtime path", "rationale": "not touched by the portable validator"},
+    {"predicate": "provider-external-state", "touched": false, "specialist_scope": "specialist-provider", "evidence": "no provider or external mutation", "rationale": "not touched by the portable validator"}
+  ],
+  "reports": [
+    {"report_id": "requirements-initial", "scope": "requirements", "reviewer_role": "controller-self-review", "independent": false, "reduced_assurance": true, "raw_report_path": "reviews/requirements.md", "raw_report_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "persisted_at": "2026-08-09T10:00:00Z", "reconciled_at": "2026-08-09T11:00:00Z", "finding_ids": ["F-001"], "follow_up_for_finding_ids": [], "reviewed_candidate_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "review_basis": "controller self-review without dispatch", "prior_conclusions_withheld": false},
+    {"report_id": "architecture-initial", "scope": "architecture", "reviewer_role": "controller-self-review", "independent": false, "reduced_assurance": true, "raw_report_path": "reviews/architecture.md", "raw_report_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbc", "persisted_at": "2026-08-09T10:01:00Z", "reconciled_at": "2026-08-09T11:00:00Z", "finding_ids": [], "follow_up_for_finding_ids": [], "reviewed_candidate_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "review_basis": "controller self-review without dispatch", "prior_conclusions_withheld": false},
+    {"report_id": "test-evidence-initial", "scope": "test-evidence", "reviewer_role": "controller-self-review", "independent": false, "reduced_assurance": true, "raw_report_path": "reviews/test-evidence.md", "raw_report_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "persisted_at": "2026-08-09T10:02:00Z", "reconciled_at": "2026-08-09T11:00:00Z", "finding_ids": [], "follow_up_for_finding_ids": [], "reviewed_candidate_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "review_basis": "controller self-review without dispatch", "prior_conclusions_withheld": false},
+    {"report_id": "requirements-follow-up", "scope": "requirements", "reviewer_role": "controller-self-review", "independent": false, "reduced_assurance": true, "raw_report_path": "reviews/remediation.md", "raw_report_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "persisted_at": "2026-08-09T11:21:00Z", "reconciled_at": "2026-08-09T11:30:00Z", "finding_ids": [], "follow_up_for_finding_ids": ["F-001"], "reviewed_candidate_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "review_basis": "controller self-review without dispatch", "prior_conclusions_withheld": false}
+  ],
+  "findings": [
+    {"finding_id": "F-001", "report_id": "requirements-initial", "scope": "requirements", "classification": "material", "summary": "stale evidence could be accepted", "evidence": "verification timestamp precedes the repair timestamp", "impact": "a repaired candidate could retain pre-repair verification", "confidence": "high", "remediation": "require every final command to complete after repair", "disposition": "repaired", "affected_requirement_or_invariant": "fresh evidence invariant", "severity": "high", "inspection_path": "compare verification and repair timestamps", "decision_reference": "none"}
+  ],
+  "semantic_surfaces": [
+    {"surface": "ReviewPacket", "surface_kind": "symbol"}
+  ],
+  "semantic_naming": [
+    {"surface": "ReviewPacket", "surface_kind": "symbol", "context": "review packet projection", "intention": "represent complete human review data", "planning_term_basis": "none", "basis_owner": "none", "compatibility_class": "private", "compatibility_disposition": "new internal surface", "status": "accepted", "finding_id": "none"}
+  ],
+  "remediation_cycles": [
+    {"cycle_id": "repair-stale-evidence", "finding_ids": ["F-001"], "started_at": "2026-08-09T11:10:00Z", "completed_at": "2026-08-09T11:20:00Z", "regression_command": "python3 -m unittest tests.test_review_coordination.FinalVerificationTests", "intended_failure": "pre-repair success is rejected", "observed_failure": "pre-repair success was accepted", "repair": "compare every command completion with the latest repair", "verification_command": "python3 -m unittest tests.test_review_coordination.FinalVerificationTests", "verification_result": "tests passed", "renewed_report_ids": ["requirements-follow-up"], "changed_paths": ["skills/implementing-staged-plans/scripts/review_coordination.py"], "affected_scopes": ["requirements"]}
+  ],
+  "test_first_evidence": [
+    {"schema_version": "implementation-execution-evidence/v1", "slice_id": "review-coordination-contracts", "purpose": "reject invalid review bundles", "red_command": "python3 -m unittest tests.test_review_coordination", "expected_failure": "review coordination module is missing", "observed_failure": "review coordination module is missing", "red_exit_code": 1, "observed_before_production_change": true, "intended_reason_match": true, "green_command": "python3 -m unittest tests.test_review_coordination", "observed_green": "tests pass", "green_exit_code": 0, "evidence_order": ["red", "green"]}
+  ],
+  "alternative_verification": [
+    {"schema_version": "implementation-execution-evidence/v1", "surface_kind": "reference", "reason_tdd_is_artificial": "human-facing procedure has no standalone runtime behavior", "command": "python3 skills/implementing-staged-plans/scripts/validate_package.py .", "expected_evidence": "required regular assets and links are valid", "observed_evidence": "package validation passed", "exit_code": 0, "relevant_inputs": ["skills/implementing-staged-plans/references/review-coordination.md"], "residual_limitation": "structural validation does not prove reviewer behavior", "behavioral_test_available": false}
+  ],
+  "recovery_domains": [
+    {"domain": "source-code", "touched": true, "disposition": "recoverable", "mechanism": "restore exact pre-write bytes", "verification": "rerun focused tests", "limitation": "does not restore external state", "required_authority": "modify-workspace", "authority_granted": true},
+    {"domain": "persistent-data", "touched": false, "disposition": "not-touched", "mechanism": "none", "verification": "confirm application data remained untouched", "limitation": "not applicable to this change", "required_authority": "none", "authority_granted": false},
+    {"domain": "deployment", "touched": false, "disposition": "not-touched", "mechanism": "none", "verification": "confirm no deployment occurred", "limitation": "not applicable to this change", "required_authority": "none", "authority_granted": false},
+    {"domain": "provider-or-external-state", "touched": false, "disposition": "not-touched", "mechanism": "none", "verification": "confirm no provider mutation occurred", "limitation": "not applicable to this change", "required_authority": "none", "authority_granted": false}
+  ],
+  "final_verification": {
+    "candidate_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "verified_at": "2026-08-09T12:05:00Z",
+    "commands": [
+      {"command": "python3 -m unittest tests.test_review_coordination", "exit_code": 0, "result": "24 tests passed", "completed_at": "2026-08-09T12:00:00Z", "expected_result": "exit zero with focused tests passing", "relevant_inputs": ["tests/test_review_coordination.py"]}
+    ],
+    "unresolved_material_findings": 0,
+    "verified_paths": ["skills/implementing-staged-plans/scripts/review_coordination.py", "tests/test_review_coordination.py"],
+    "required_commands": ["python3 -m unittest tests.test_review_coordination"],
+    "baseline_failures": ["none"]
+  },
+  "review_packet": {
+    "schema_version": "implementation-review-packet/v1",
+    "candidate_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "identity_and_outcome": ["portable archive review coordination is verified"],
+    "changes_and_rationale": ["added deterministic review evidence validation"],
+    "program_context": ["bounded local implementation with no external action"],
+    "changed_files_by_purpose": ["module: review validation", "tests: contract protection"],
+    "human_review_order": ["requirements", "architecture", "test evidence"],
+    "requirements_and_acceptance": ["distinct scopes and evidence-complete findings"],
+    "exact_commands_and_results": ["python3 -m unittest tests.test_review_coordination | exit 0 | 24 tests passed"],
+    "baseline_failures": ["none"],
+    "execution_evidence": ["test-first RED preceded production GREEN"],
+    "reviewer_roles_findings_dispositions": ["controller self-review; non-independent; reduced assurance", "F-001: repaired"],
+    "repairs_and_renewed_verification": ["repair-stale-evidence: material finding repaired and affected scope reviewed again"],
+    "deviations_and_amendments": ["none"],
+    "human_judgment": ["independence and review quality remain human judgments"],
+    "edge_cases_and_manual_checks": ["stale timestamps and unsupported schemas rejected"],
+    "implications": ["static validation does not prove production behavior"],
+    "residual_risks_and_deferred_work": ["actual reviewer identity is outside this validator"],
+    "recovery": ["restore exact source bytes under separate authority"],
+    "workspace_and_logical_boundaries": ["no staging or commit requested"],
+    "current_state_and_next_action": ["awaiting-diff-approval; obtain exact diff approval"]
+  }
+}

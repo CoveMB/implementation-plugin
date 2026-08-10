@@ -1,0 +1,11 @@
+schema_version: fresh-context-evidence/v1
+scenario_id: non-triggering-request
+prompt_sha256: 21096513fbfc80a874ed1b40ae943d2df19d86c40c648201ca6734cda7fc7ad4
+evaluator: codex-cli 0.146.0
+sandbox: read-only
+session: ephemeral
+exit_code: 0
+expected_boundary: no staged-workflow activation
+
+--- response ---
+The portable catalog lists one ID for each volume.

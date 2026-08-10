@@ -25,6 +25,13 @@ EXPECTED_MANIFEST = {
 }
 
 OBLIGATION_PATTERNS = {
+    "route deterministic program discovery": (
+        r"\[Program discovery\]\(references/program-discovery\.md\)",
+        r"explicit.*manifest",
+        r"source-plan path",
+        r"closed program",
+        r"human selection",
+    ),
     "locate named or implied program manifest": (
         r"program manifest",
         r"named or implied",
@@ -81,6 +88,67 @@ OBLIGATION_PATTERNS = {
         r"traceability",
         r"program revision",
         r"initial (?:program )?approval",
+    ),
+    "route state and action authority workflow": (
+        r"\[State and action authority\]\(references/state-authorization\.md\)",
+        r"lifecycle state",
+        r"approval modes?",
+        r"workspace selection",
+        r"action authorization",
+    ),
+    "route repository preparation workflow": (
+        r"\[Repository preparation\]\(references/repository-preparation\.md\)",
+        r"repository inspection",
+        r"evidence applicability",
+        r"increment shap",
+        r"drift",
+        r"amendment",
+        r"semantic naming",
+        r"exact-file plan",
+    ),
+    "route execution discipline workflow": (
+        r"\[Execution discipline\]\(references/execution-discipline\.md\)",
+        r"test-first",
+        r"ownership",
+        r"semantic",
+        r"amendment",
+        r"logical commit",
+        r"recovery",
+    ),
+    "route review coordination workflow": (
+        r"\[Review coordination\]\(references/review-coordination\.md\)",
+        r"required.*review",
+        r"specialist",
+        r"independen",
+        r"finding",
+        r"remediation",
+        r"fresh.*verification",
+        r"packet",
+    ),
+    "route continuity and closure workflow": (
+        r"\[Continuity and closure\]\(references/continuity-closure\.md\)",
+        r"semantic brief",
+        r"handoff.*navigation",
+        r"resume",
+        r"full-mode",
+        r"reconciliation",
+        r"closure approval",
+        r"later action",
+    ),
+    "route compound approval checkpoints": (
+        r"\[Approval checkpoints\]\(references/approval-checkpoints\.md\)",
+        r"fully bound",
+        r"one checkpoint",
+        r"separate.*receipt",
+        r"commit.*explicit",
+        r"high-consequence",
+    ),
+    "route optional post-closure housekeeping proposal": (
+        r"\[Post-closure housekeeping\]\(references/post-closure-housekeeping\.md\)",
+        r"closed program",
+        r"dry-run proposal",
+        r"destructive-operation",
+        r"never.*cleanup",
     ),
 }
 

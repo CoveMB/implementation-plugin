@@ -25,6 +25,46 @@ AUTHORITY_REFERENCE = (
     "skills/implementing-staged-plans/references/program-authority.md"
 )
 AUTHORITY_SCRIPT = "skills/implementing-staged-plans/scripts/program_authority.py"
+STATE_REFERENCE = (
+    "skills/implementing-staged-plans/references/state-authorization.md"
+)
+STATE_SCRIPT = "skills/implementing-staged-plans/scripts/state_authority.py"
+PREPARATION_REFERENCE = (
+    "skills/implementing-staged-plans/references/repository-preparation.md"
+)
+PREPARATION_SCRIPT = (
+    "skills/implementing-staged-plans/scripts/repository_preparation.py"
+)
+EXECUTION_REFERENCE = (
+    "skills/implementing-staged-plans/references/execution-discipline.md"
+)
+EXECUTION_SCRIPT = (
+    "skills/implementing-staged-plans/scripts/execution_discipline.py"
+)
+REVIEW_REFERENCE = (
+    "skills/implementing-staged-plans/references/review-coordination.md"
+)
+REVIEW_SCRIPT = (
+    "skills/implementing-staged-plans/scripts/review_coordination.py"
+)
+CONTINUITY_REFERENCE = (
+    "skills/implementing-staged-plans/references/continuity-closure.md"
+)
+CONTINUITY_SCRIPT = (
+    "skills/implementing-staged-plans/scripts/continuity_closure.py"
+)
+CHECKPOINT_REFERENCE = (
+    "skills/implementing-staged-plans/references/approval-checkpoints.md"
+)
+CHECKPOINT_SCRIPT = (
+    "skills/implementing-staged-plans/scripts/approval_checkpoint.py"
+)
+DISCOVERY_REFERENCE = (
+    "skills/implementing-staged-plans/references/program-discovery.md"
+)
+DISCOVERY_SCRIPT = (
+    "skills/implementing-staged-plans/scripts/program_discovery.py"
+)
 
 
 VALID_MANIFEST = {
@@ -51,6 +91,9 @@ VALID_OPENAI_YAML = """interface:
   display_name: "Implementing Staged Plans"
   short_description: "Advance approved plans in reviewable increments."
   default_prompt: "Use $implementing-staged-plans to advance the next approved implementation increment."
+
+policy:
+  allow_implicit_invocation: false
 """
 
 
@@ -80,6 +123,20 @@ class PackageFixture:
         )
         self.write(AUTHORITY_REFERENCE, "# Program Authority\n")
         self.write(AUTHORITY_SCRIPT, "# reusable authority validator\n")
+        self.write(STATE_REFERENCE, "# State Authorization\n")
+        self.write(STATE_SCRIPT, "# reusable state authority validator\n")
+        self.write(PREPARATION_REFERENCE, "# Repository Preparation\n")
+        self.write(PREPARATION_SCRIPT, "# read-only repository preparation validator\n")
+        self.write(EXECUTION_REFERENCE, "# Execution Discipline\n")
+        self.write(EXECUTION_SCRIPT, "# pure execution discipline validator\n")
+        self.write(REVIEW_REFERENCE, "# Review Coordination\n")
+        self.write(REVIEW_SCRIPT, "# pure review coordination validator\n")
+        self.write(CONTINUITY_REFERENCE, "# Continuity and Closure\n")
+        self.write(CONTINUITY_SCRIPT, "# pure continuity and closure validator\n")
+        self.write(CHECKPOINT_REFERENCE, "# Approval Checkpoints\n")
+        self.write(CHECKPOINT_SCRIPT, "# compound approval checkpoint helper\n")
+        self.write(DISCOVERY_REFERENCE, "# Program Discovery\n")
+        self.write(DISCOVERY_SCRIPT, "# deterministic read-only program discovery\n")
 
 
 class PackageValidationTestCase(unittest.TestCase):
@@ -215,6 +272,29 @@ class SkillContractTests(PackageValidationTestCase):
             "explicitly name $implementing-staged-plans",
         )
 
+    def test_implicit_invocation_must_be_explicitly_disabled(self) -> None:
+        self.fixture.write("skills/implementing-staged-plans/SKILL.md", VALID_SKILL)
+        invalid_metadata = (
+            VALID_OPENAI_YAML.replace(
+                "\npolicy:\n  allow_implicit_invocation: false\n", "\n"
+            ),
+            VALID_OPENAI_YAML.replace(
+                "allow_implicit_invocation: false",
+                "allow_implicit_invocation: true",
+            ),
+        )
+
+        for metadata in invalid_metadata:
+            with self.subTest(metadata=metadata):
+                self.fixture.write(
+                    "skills/implementing-staged-plans/agents/openai.yaml",
+                    metadata,
+                )
+                self.assert_issue_contains(
+                    VALIDATOR.validate_skill_contract(self.fixture.root),
+                    "allow_implicit_invocation must be false",
+                )
+
 
 class LinkAndMarkerTests(PackageValidationTestCase):
     def test_unresolved_and_escaping_relative_links_are_rejected(self) -> None:
@@ -256,7 +336,6 @@ class ForbiddenSurfaceTests(PackageValidationTestCase):
             ".mcp.json",
             ".app.json",
             "hooks.json",
-            "marketplace.json",
             "publisher.json",
             "publication.json",
             "publish.json",
@@ -264,6 +343,32 @@ class ForbiddenSurfaceTests(PackageValidationTestCase):
         for relative_path in forbidden_paths:
             with self.subTest(relative_path=relative_path):
                 self.fixture.write_valid_package()
+                self.fixture.write_json(relative_path, {})
+                self.assert_issue_contains(
+                    VALIDATOR.validate_forbidden_components(self.fixture.root),
+                    relative_path,
+                )
+                (self.fixture.root / relative_path).unlink()
+
+    def test_only_approved_marketplace_paths_are_allowed(self) -> None:
+        self.fixture.write_valid_package()
+        for relative_path in (
+            ".agents/plugins/marketplace.json",
+            ".claude-plugin/marketplace.json",
+        ):
+            self.fixture.write_json(relative_path, {})
+
+        self.assertEqual(
+            VALIDATOR.validate_forbidden_components(self.fixture.root), []
+        )
+
+        for relative_path in (
+            "marketplace.json",
+            "nested/marketplace.json",
+            ".agents/marketplace.json",
+            ".claude-plugin/nested/marketplace.json",
+        ):
+            with self.subTest(relative_path=relative_path):
                 self.fixture.write_json(relative_path, {})
                 self.assert_issue_contains(
                     VALIDATOR.validate_forbidden_components(self.fixture.root),
@@ -284,13 +389,59 @@ class ForbiddenSurfaceTests(PackageValidationTestCase):
 
 class CompletePackageTests(PackageValidationTestCase):
     def test_required_authority_assets_are_regular_files(self) -> None:
-        for missing_path in (AUTHORITY_REFERENCE, AUTHORITY_SCRIPT):
+        for missing_path in (
+            AUTHORITY_REFERENCE,
+            AUTHORITY_SCRIPT,
+            STATE_REFERENCE,
+            STATE_SCRIPT,
+            PREPARATION_REFERENCE,
+            PREPARATION_SCRIPT,
+            EXECUTION_REFERENCE,
+            EXECUTION_SCRIPT,
+            REVIEW_REFERENCE,
+            REVIEW_SCRIPT,
+            CONTINUITY_REFERENCE,
+            CONTINUITY_SCRIPT,
+            CHECKPOINT_REFERENCE,
+            CHECKPOINT_SCRIPT,
+            DISCOVERY_REFERENCE,
+            DISCOVERY_SCRIPT,
+        ):
             with self.subTest(missing_path=missing_path):
                 self.fixture.write_valid_package()
                 (self.fixture.root / missing_path).unlink()
                 self.assert_issue_contains(
                     VALIDATOR.validate_authority_assets(self.fixture.root),
                     missing_path,
+                )
+
+    def test_required_authority_assets_reject_symlinks(self) -> None:
+        for linked_path in (
+            AUTHORITY_REFERENCE,
+            AUTHORITY_SCRIPT,
+            STATE_REFERENCE,
+            STATE_SCRIPT,
+            PREPARATION_REFERENCE,
+            PREPARATION_SCRIPT,
+            EXECUTION_REFERENCE,
+            EXECUTION_SCRIPT,
+            REVIEW_REFERENCE,
+            REVIEW_SCRIPT,
+            CONTINUITY_REFERENCE,
+            CONTINUITY_SCRIPT,
+            CHECKPOINT_REFERENCE,
+            CHECKPOINT_SCRIPT,
+            DISCOVERY_REFERENCE,
+            DISCOVERY_SCRIPT,
+        ):
+            with self.subTest(linked_path=linked_path):
+                self.fixture.write_valid_package()
+                path = self.fixture.root / linked_path
+                path.unlink()
+                path.symlink_to(self.fixture.root / ".codex-plugin/plugin.json")
+                self.assert_issue_contains(
+                    VALIDATOR.validate_authority_assets(self.fixture.root),
+                    linked_path,
                 )
 
     def test_valid_minimal_package_returns_no_issues(self) -> None:

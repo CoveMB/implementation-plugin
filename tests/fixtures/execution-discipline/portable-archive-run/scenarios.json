@@ -1,0 +1,204 @@
+{
+  "schema_version": "execution-discipline-scenarios/v1",
+  "scenario": {
+    "test_first_evidence": [
+      {
+        "schema_version": "implementation-execution-evidence/v1",
+        "slice_id": "archive-index-contract",
+        "purpose": "reject incomplete archive execution records",
+        "red_command": "python3 -m unittest tests.test_execution_discipline",
+        "expected_failure": "execution module is missing",
+        "observed_failure": "execution module is missing",
+        "red_exit_code": 1,
+        "observed_before_production_change": true,
+        "intended_reason_match": true,
+        "green_command": "python3 -m unittest tests.test_execution_discipline",
+        "observed_green": "execution discipline tests passed",
+        "green_exit_code": 0,
+        "evidence_order": ["red", "green"]
+      }
+    ],
+    "alternative_verification": [
+      {
+        "schema_version": "implementation-execution-evidence/v1",
+        "surface_kind": "reference",
+        "reason_tdd_is_artificial": "the operator procedure is human-facing prose",
+        "command": "python3 skills/implementing-staged-plans/scripts/validate_package.py .",
+        "expected_evidence": "the regular asset and its relative links validate",
+        "observed_evidence": "package validation passed",
+        "exit_code": 0,
+        "relevant_inputs": ["skills/implementing-staged-plans/references/execution-discipline.md"],
+        "residual_limitation": "structural validation does not prove agent execution behavior",
+        "behavioral_test_available": false
+      }
+    ],
+    "planned_paths": [
+      "archive/execution_policy.py",
+      "tests/test_execution_policy.py"
+    ],
+    "actual_changed_paths": [
+      "archive/execution_policy.py",
+      "tests/test_execution_policy.py"
+    ],
+    "pre_write_observation": {
+      "repository": "/srv/portable-archive",
+      "path": "/srv/portable-archive",
+      "branch": "archive-maintenance",
+      "base_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "head_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "staged_paths": [],
+      "modified_paths": [],
+      "untracked_paths": [],
+      "conflicted_paths": [],
+      "active_git_operation": null
+    },
+    "accepted_existing_paths": ["archive/preserved-notes.txt"],
+    "ownership_boundaries": [
+      {
+        "path": "archive/execution_policy.py",
+        "disposition": "create",
+        "owner": "archive execution policy",
+        "accepted_overlap": false,
+        "pre_write_fingerprint": "absent",
+        "post_write_fingerprint": "present",
+        "owning_mechanism": "none",
+        "verification_command": "python3 -m unittest tests.test_execution_policy"
+      },
+      {
+        "path": "tests/test_execution_policy.py",
+        "disposition": "create",
+        "owner": "archive execution policy tests",
+        "accepted_overlap": false,
+        "pre_write_fingerprint": "absent",
+        "post_write_fingerprint": "present",
+        "owning_mechanism": "none",
+        "verification_command": "python3 -m unittest tests.test_execution_policy"
+      },
+      {
+        "path": "archive/preserved-notes.txt",
+        "disposition": "preserve",
+        "owner": "archive operator",
+        "accepted_overlap": true,
+        "pre_write_fingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
+        "post_write_fingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
+        "owning_mechanism": "none",
+        "verification_command": "sha256 preserved notes"
+      }
+    ],
+    "execution_surfaces": [
+      {
+        "surface": "archive/execution_policy.py",
+        "surface_kind": "path",
+        "change_kind": "created"
+      },
+      {
+        "surface": "ArchiveExecutionPolicy",
+        "surface_kind": "symbol",
+        "change_kind": "created"
+      }
+    ],
+    "semantic_names": [
+      {
+        "surface": "archive/execution_policy.py",
+        "surface_kind": "path",
+        "origin": "new",
+        "context": "archive execution control",
+        "intention": "validate prepared archive changes",
+        "planning_term_basis": "none",
+        "basis_owner": "none",
+        "compatibility_class": "private",
+        "compatibility_disposition": "new internal module"
+      },
+      {
+        "surface": "ArchiveExecutionPolicy",
+        "surface_kind": "symbol",
+        "origin": "new",
+        "context": "archive execution control",
+        "intention": "represent archive execution constraints",
+        "planning_term_basis": "none",
+        "basis_owner": "none",
+        "compatibility_class": "private",
+        "compatibility_disposition": "new internal symbol"
+      }
+    ],
+    "amendment": {
+      "proposal": {
+        "proposed_classification": "bounded-implementation-amendment",
+        "changed_dimensions": ["mechanism"],
+        "evidence": ["focused archive fixture demonstrated the helper boundary"],
+        "obligations_preserved": true,
+        "user_owned_decision": false,
+        "reversible_or_recoverable": true,
+        "authoritative_contradiction": false
+      },
+      "approval_mode": "approval:full-increment",
+      "affected_surfaces": ["archive/execution_policy.py"],
+      "recovery_or_reversal": "restore the prior helper selection",
+      "renewed_review": true
+    },
+    "commit_boundaries": [
+      {
+        "boundary_id": "execution-policy",
+        "purpose": "define archive execution validation",
+        "message": "feat: validate archive execution policy",
+        "paths": ["archive/execution_policy.py"],
+        "depends_on": []
+      },
+      {
+        "boundary_id": "execution-policy-tests",
+        "purpose": "protect archive execution validation",
+        "message": "test: protect archive execution policy",
+        "paths": ["tests/test_execution_policy.py"],
+        "depends_on": ["execution-policy"]
+      }
+    ],
+    "commit_authorization": {
+      "authorized": false,
+      "authorization_id": null,
+      "issues": ["no exact action authorization matches the required binding"]
+    },
+    "commit_requested": false,
+    "recovery_domains": [
+      {
+        "domain": "source-code",
+        "touched": true,
+        "disposition": "recoverable",
+        "mechanism": "restore exact pre-write bytes",
+        "verification": "rerun focused archive tests",
+        "limitation": "does not restore data, deployment, or provider state",
+        "required_authority": "modify-workspace",
+        "authority_granted": true
+      },
+      {
+        "domain": "persistent-data",
+        "touched": false,
+        "disposition": "not-touched",
+        "mechanism": "none",
+        "verification": "fixture writes no persistent data",
+        "limitation": "data recovery was not exercised",
+        "required_authority": "none",
+        "authority_granted": false
+      },
+      {
+        "domain": "deployment",
+        "touched": false,
+        "disposition": "not-touched",
+        "mechanism": "none",
+        "verification": "fixture performs no deployment",
+        "limitation": "deployment rollback was not exercised",
+        "required_authority": "none",
+        "authority_granted": false
+      },
+      {
+        "domain": "provider-or-external-state",
+        "touched": false,
+        "disposition": "not-touched",
+        "mechanism": "none",
+        "verification": "fixture performs no provider mutation",
+        "limitation": "provider recovery was not exercised",
+        "required_authority": "none",
+        "authority_granted": false
+      }
+    ]
+  }
+}

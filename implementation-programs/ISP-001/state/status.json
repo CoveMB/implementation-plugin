@@ -1,59 +1,194 @@
 {
-  "schema_version": "implementation-program-status/v1",
-  "state_sequence": 16,
-  "program_id": "ISP-001",
-  "program_revision": 2,
-  "program_state": "active",
-  "current_increment_id": "INC-002",
-  "current_increment_state": "awaiting-diff-approval",
-  "approved_exact_file_plan_sha256": "955f8da03250aa5d10c068ffd1f617673dc556b4e9612daffdca78d57a724641",
-  "pending_exact_file_plan_sha256": null,
   "approval_mode": "approval:full-increment",
-  "updated_at": "2026-08-08T22:17:57Z",
-  "source_binding": {
-    "source_id": "SOURCE-002",
-    "sha256": "f4d4bca12706170210be202444df0d4c6d0bbb382143c5a0d0c8da2616eb9c57"
+  "approved_exact_file_plan_sha256": "599932f1bf845e66149830ed7749a606eaf0775908b76368aba3a99bb53ea8b4",
+  "brief_binding": {
+    "head_commit": "53edb8fad2008c7d35b6c17dbb973b24022947fd",
+    "path": "increments/INC-008/brief.md",
+    "sha256": "07a21014d60f3e84b8ac59c1f5d9a9db3bc6640600463d1c28ac2f6bfa3a44f1",
+    "workspace_sha256": "da30476223f13a26ddf407ce0fcdea5631a86d5ee10608c0d1dff89290007986"
   },
-  "program_binding": {
-    "sha256": "1ed05a86525f9801b593f71272e15fe7ea8ef2088ea3e62e44686824728ba253",
-    "traceability_sha256": "e69b124d616ecc6bb5c7ede3b7009a3221ed649913377f99e016456bc87cd200",
-    "semantic_requirements_sha256": "151cbe6731fe012b92f2d6138745465bec9b548e89b00d2538fdb706bbe0c10f",
-    "machine_complete_traceability": false
+  "closure_binding": {
+    "accepted_increment_ids": [
+      "INC-001",
+      "INC-002",
+      "INC-003",
+      "INC-004",
+      "INC-005",
+      "INC-006",
+      "INC-007",
+      "INC-008"
+    ],
+    "amended_requirements": 51,
+    "approved_amendments": [
+      "AMEND-001",
+      "AMEND-002"
+    ],
+    "closure_action_authorization_id": "AUTH-027",
+    "closure_approval_event_id": "APR-026",
+    "closure_approved_at": "2026-08-10T02:00:22Z",
+    "closure_handoff_path": "closure/handoff.md",
+    "closure_handoff_sha256": "c0c0ca3c57dce41d8c636bffa7492f7006123c1d07daca34a311fa4c3c847296",
+    "closure_packet_path": "closure/program-closure-packet.md",
+    "closure_packet_sha256": "d9bef2f326690035c6570ca722eb4ce37071732c97535ef0864ec98ed35dffb5",
+    "closure_plan_approval_event_id": "APR-024",
+    "closure_transition_authorization_id": "AUTH-029",
+    "corrected_from_closure_packet_sha256": "64337a0d6755ac73d33aa0346fee9e07f009d6e276ff59faa4411e480b23a71b",
+    "corrected_from_continuity_evidence_sha256": "f9c4406f13ce64b6d3a0793bcaf5f09c4fa0bbd1cefa85d2843384ae2ccfdcea",
+    "correction_approval_event_id": "APR-025",
+    "correction_authorization_id": "AUTH-028",
+    "correction_completed_at": "2026-08-10T01:44:40Z",
+    "continuity_evidence_path": "closure/continuity-evidence.json",
+    "continuity_evidence_sha256": "fb8252a0a0e202fc135ceb03fe4a50aafb1cb6cdabc8019dbee6bc3dcb4690d0",
+    "expected_requirements": 755,
+    "final_increment_id": "INC-008",
+    "fresh_verification_completed_at": "2026-08-10T01:44:40Z",
+    "implemented_requirements": 704,
+    "readiness_validated": true,
+    "reconciliation_path": "closure/reconciliation.json",
+    "reconciliation_sha256": "7ddac33846fdccb061b11e6c72071b0842877aa776dace4c97a2ee28d30a0f3e",
+    "resolved_amendments": [
+      "AMEND-001",
+      "AMEND-002"
+    ],
+    "state": "closed",
+    "unowned_deferrals": 0,
+    "unresolved_amendments": 0,
+    "unresolved_material_findings": 0,
+    "unresolved_requirements": 0
   },
-  "previous_state": {
-    "state_sequence": 15,
-    "program_revision": 2,
-    "program_state": "active",
-    "current_increment_id": "INC-002",
-    "current_increment_state": "reviewing",
-    "transition_event_id": "VERIFICATION-INC-002-FINAL"
-  },
-  "verification_binding": {
-    "completed_at": "2026-08-08T22:17:57Z",
-    "unittest_count": 49,
-    "package_validation": "passed",
-    "neutral_program_validation": "passed",
-    "current_program_validation": "passed with incomplete-approval allowance and explicit completeness withholding",
-    "skill_validation": "passed",
-    "diff_check": "passed"
+  "current_increment_id": "INC-008",
+  "current_increment_state": "accepted",
+  "latest_accepted_increment": {
+    "acceptance_event_id": "APR-023",
+    "closure_readiness_sha256": "b0ba785927c9574eb1af61b9f448cdd70cceaee660e8f7d24d70dd4d2ac3c59f",
+    "exact_file_plan_sha256": "599932f1bf845e66149830ed7749a606eaf0775908b76368aba3a99bb53ea8b4",
+    "handoff_addendum_sha256": "6b394698853809df3804c850be3d7b08618008f63d01bebf1a63c7f7dbe2b3c5",
+    "handoff_sha256": "66e4a0eedd89a8a46cf874d016cbc1c35c7e71c5e35b84ea01acd46ee2e872ee",
+    "increment_id": "INC-008",
+    "review_packet_sha256": "d870ce5bd8a0d8061d4ce2108cfc441e6842719a601cc4603145b0865b894d8d"
   },
   "next_legal_actions": [
-    "review the INC-002 packet and complete diff",
-    "explicitly accept the diff and semantic digest or request changes",
-    "do not begin INC-003"
+    "treat ISP-001 as closed with INC-008 accepted and preserve the exact closure evidence",
+    "require a separate exact action authorization before even deciding any draft pull request or other later action",
+    "do not stage, commit, push, create a pull request, publish, release, deploy, migrate, or perform any consequential action"
   ],
+  "pending_exact_file_plan_sha256": null,
+  "post_transition_verification": {
+    "completed_at": "2026-08-10T01:44:40Z",
+    "corrected_counts": {
+      "amended": 51,
+      "implemented": 704
+    },
+    "correction_approval_event_id": "APR-025",
+    "correction_authorization_id": "AUTH-028",
+    "passed": true
+  },
+  "preparation_binding": {
+    "drift_classification": "benign",
+    "exact_file_plan_sha256": "599932f1bf845e66149830ed7749a606eaf0775908b76368aba3a99bb53ea8b4",
+    "head_commit": "53edb8fad2008c7d35b6c17dbb973b24022947fd",
+    "path": "increments/INC-008/preparation.md",
+    "sha256": "5c09c6c91470ecaae5fe95821f52d924d4a4efb28248041b6d112274cc39f070"
+  },
+  "preparation_verification_binding": {
+    "completed_at": "2026-08-09T23:37:00Z",
+    "continuity_bundle_validation": "passed against accepted INC-007 evidence",
+    "diff_check": "passed",
+    "full_plan_validation": "withheld: no exact current write authorization matches the plan digest",
+    "full_unittest_duration_seconds": 12.18,
+    "package_validation": "passed",
+    "plan_content_validation": "passed",
+    "program_authority_validation": "passed",
+    "review_bundle_validation": "passed against accepted INC-007 evidence",
+    "skill_validation": "passed",
+    "state_authority_validation": "passed with exact current observation",
+    "unittest_count": 209
+  },
+  "previous_state": {
+    "current_increment_id": "INC-008",
+    "current_increment_state": "accepted",
+    "program_state": "awaiting-closure-approval",
+    "schema_version": "implementation-program-status/v1",
+    "state_sequence": 70,
+    "status_sha256": "a2b63877035b4d45aa0ff1be96195e7af27ad0f8eac2d460e96f0f2346ed8525",
+    "transition_event_id": "APR-026"
+  },
+  "program_binding": {
+    "approval_event_id": "APR-010",
+    "machine_complete_traceability": true,
+    "semantic_requirements_sha256": "151cbe6731fe012b92f2d6138745465bec9b548e89b00d2538fdb706bbe0c10f",
+    "sha256": "1ed05a86525f9801b593f71272e15fe7ea8ef2088ea3e62e44686824728ba253",
+    "traceability_sha256": "a5fb73c3b9fa8619e0a225c2a388e20a88c475b291805508466dbd324a114cb0"
+  },
+  "program_id": "ISP-001",
+  "program_revision": 2,
+  "program_state": "closed",
   "prohibited_without_new_authorization": [
-    "claim machine-complete atomic traceability",
-    "begin INC-003",
+    "modify accepted INC-001 through INC-008 evidence",
+    "stage or create a commit",
+    "dispatch a reviewer or subagent",
+    "run any evaluator or external egress",
+    "infer any later action from program closure",
     "install a plugin",
     "modify a marketplace",
     "push",
     "create a pull request",
+    "merge",
     "publish",
     "release",
     "deploy",
     "migrate",
     "perform destructive operations",
-    "modify consequential external state"
-  ]
+    "modify provider or consequential external state"
+  ],
+  "review_binding": {
+    "candidate_sha256": "34e1d8685c44b5a4aaab90041a66aa35bee1552e169cda6c584ce8075703d753",
+    "remediation_sha256": "9ca014e9effe5a88ce92f6bea5b6420618e7f3de5c9102b8c5772bad28e5119c",
+    "report_sha256": {
+      "architecture": "3f5d457562dfe321c177ac58b9a42cedfbd06eb9a147ddc26d6ac1ecc0be2e76",
+      "requirements": "d657fe6da9473027f92d81e4ac10d2952380e144465afa3ef85380982afdbbb4",
+      "specialist-compatibility": "e0f9da73cde4d53ec2258d2a7c9c89053531773a716aab6ce773fe05b250ad16",
+      "specialist-reliability": "946aeb531f8aa437f8bb3c07711e60d4db1b110bc28905bf28d95c94617356b6",
+      "specialist-security-privacy": "9ac6d8b55acad50dcead5bb9fbafa7f7b40d489ed940a6fba0ee4e0ddc39287f",
+      "test-evidence": "eb8bde77f69324ff1746c7329ea8c88012936158c493c823efcfcbceee1b13d2"
+    },
+    "reviewer_assurance": "controller self-review; non-independent; reduced",
+    "unresolved_material_findings": 0
+  },
+  "schema_version": "implementation-program-status/v1",
+  "source_binding": {
+    "sha256": "f4d4bca12706170210be202444df0d4c6d0bbb382143c5a0d0c8da2616eb9c57",
+    "source_id": "SOURCE-002"
+  },
+  "state_sequence": 71,
+  "transition_authorization": {
+    "action_authorization_id": "AUTH-029",
+    "event_id": "APR-026"
+  },
+  "transition_evidence": {
+    "action_scope": "close ISP-001 from awaiting-closure-approval after exact approval of the bound reconciliation and packet",
+    "closure_approval_event_id": "APR-026",
+    "closure_approval_recorded": true,
+    "closure_continuity_evidence_sha256": "fb8252a0a0e202fc135ceb03fe4a50aafb1cb6cdabc8019dbee6bc3dcb4690d0",
+    "closure_handoff_sha256": "c0c0ca3c57dce41d8c636bffa7492f7006123c1d07daca34a311fa4c3c847296",
+    "closure_packet_sha256": "d9bef2f326690035c6570ca722eb4ce37071732c97535ef0864ec98ed35dffb5",
+    "closure_reconciliation_performed": true,
+    "closure_reconciliation_sha256": "7ddac33846fdccb061b11e6c72071b0842877aa776dace4c97a2ee28d30a0f3e",
+    "closure_transition_authorization_id": "AUTH-029",
+    "commit_authority": false,
+    "later_action_authority": false,
+    "next_action": "Stop. Any later action requires a separate exact authorization.",
+    "program_closed": true,
+    "readiness_validated": true,
+    "unowned_deferrals": 0,
+    "unresolved_amendments": 0,
+    "unresolved_material_findings": 0,
+    "unresolved_requirements": 0
+  },
+  "updated_at": "2026-08-10T02:00:22Z",
+  "verification_binding": {
+    "review_packet_sha256": "d870ce5bd8a0d8061d4ce2108cfc441e6842719a601cc4603145b0865b894d8d",
+    "unresolved_material_findings": 0,
+    "verified_state_sequence": 67
+  }
 }

@@ -7,10 +7,20 @@ description: Advance approved implementation programs one reviewable increment a
 
 Advance only the next legal action recorded by a repository-backed implementation program. Treat this skill as a front door: discover authority and current state, apply universal gates, and route honestly without claiming that an absent safeguard is mechanically implemented.
 
+## Discover Existing Programs
+
+Use [Program discovery](references/program-discovery.md) before bootstrap or resume. A validated explicit manifest path takes precedence. Otherwise inspect only exact instruction-declared manifest paths and the repository-owned `implementation-programs/*/manifest.json` convention.
+
+- With no manifest, classify a possible new-program bootstrap and require the authoritative source-plan path before any program write.
+- With one valid active or blocked program, resume from its manifest, persisted state, and fresh repository observation; do not ask for the original documentation-plan path.
+- With multiple resumable programs, return the sorted candidates and stop for human selection.
+- With only closed programs, report them and stop for explicit new-program or closed-program inspection intent.
+- Fail closed on invalid, escaping, or symlinked controlling paths. Folder presence without a valid manifest and persisted bindings is not program authority.
+
 ## Establish Current Authority
 
 1. Identify the target repository without modifying it.
-2. Locate the program manifest named or implied by the request. Prefer an explicitly named path; otherwise search repository instructions and conventional implementation-program roots for a unique manifest. If identity remains ambiguous, report the candidates and stop.
+2. Locate the program manifest named or implied by the request through the deterministic discovery procedure. If identity remains ambiguous, report the candidates and stop.
 3. Follow the manifest's logical-role mappings rather than assuming fixed artifact paths.
 4. Load the current source binding, approved program and revision, approval records, action authorizations, workspace binding, status, and current increment binding.
 5. Treat persisted artifacts as authority. A handoff or prompt is only a navigation aid.
@@ -46,6 +56,10 @@ Also require review and fresh verification before diff acceptance, explicit reco
 
 At the first missing invariant, perform no prohibited action. Return the smallest action that can satisfy that invariant and stop.
 
+## Combine Fully Bound Decisions
+
+When several pending decisions are fully bound to the same program, revision, source, semantic requirements, increment, brief, exact-file plan, approval mode, and workspace tuple, follow [Approval checkpoints](references/approval-checkpoints.md). Present them in one checkpoint while keeping every choice explicit and persisting separate typed receipts. Commit authority remains individually explicit. Never combine a different-stage tuple or imply a high-consequence action. On a partial write, stop and resume only from the exact receipt.
+
 ## Discover Supporting Capabilities
 
 Discover only capabilities relevant to the current stage and requested action.
@@ -62,6 +76,30 @@ Capability discovery does not create authority.
 ## Route Program Authority Work
 
 For authorized source capture or registration, complete requirement decomposition, source-located traceability, program revision, or initial program approval, follow [Program authority](references/program-authority.md). Apply only that procedure's current legal step; its mechanical coverage checks do not replace human semantic review.
+
+## Route State and Action Authority Work
+
+For lifecycle state, approval modes or bindings, workspace selection, atomic status updates, or separate action authorization, follow [State and action authority](references/state-authorization.md). Supply a current repository observation, require exact digest-bound records, and apply only the legal transition or explicitly named action.
+
+## Route Repository Preparation Work
+
+For repository inspection, user-work ownership, qualitative drift or amendment classification, evidence applicability, increment shaping, semantic naming, or just-in-time exact-file planning, follow [Repository preparation](references/repository-preparation.md). Keep its read-only validation separate from plan approval and action authorization.
+
+## Route Execution Discipline Work
+
+For authorized test-first or alternative verification evidence, reuse and ownership checks, semantic execution surfaces, bounded amendment decisions, logical commit boundaries, or distinct recovery domains, follow [Execution discipline](references/execution-discipline.md). Its validators are non-mutating; approval mode never supplies separate action or commit authority.
+
+## Route Review Coordination Work
+
+For required and risk-triggered specialist reviews, truthful independence, contextual semantic naming, material findings, remediation and renewed review, fresh final verification, or complete packet validation, follow [Review coordination](references/review-coordination.md). Preserve raw reports before reconciliation and never treat static validation as proof of reviewer identity or judgment.
+
+## Route Continuity and Closure Work
+
+For a lean semantic brief, durable handoff navigation, resume or full-mode continuation decision, program reconciliation, closure approval, or a later action gate, follow [Continuity and closure](references/continuity-closure.md). Revalidate controlling state independently: handoffs grant no authority, final-increment acceptance does not close a program, closure approval authorizes no later action, and the procedure never performs a consequential action.
+
+## Route Optional Post-Closure Housekeeping
+
+For explicit inspection of disposable resources after a closed program, follow [Post-closure housekeeping](references/post-closure-housekeeping.md). Return only a verified dry-run proposal and mandatory stop. Closure approval is never `destructive-operation` authority, and this procedure never performs cleanup.
 
 ## Route or Fall Back Honestly
 

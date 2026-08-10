@@ -1,0 +1,172 @@
+{
+  "schema_version": "implementation-continuity-evidence/v1",
+  "brief": {
+    "schema_version": "implementation-continuity-evidence/v1",
+    "program_id": "ISP-001",
+    "program_revision": 2,
+    "increment_id": "INC-008",
+    "title": "Integrated pressure hardening and release pilot",
+    "outcome": "Run combined pressure, crash and resume, schema evolution, repository-backed pilot, packaging, documentation, and concision checks; repair only demonstrated material gaps.",
+    "requirement_ids": [
+      "REQ-ADOPTION",
+      "REQ-ARTIFACT-INVARIANTS",
+      "REQ-AUTHORITY",
+      "REQ-CONTINUITY-CLOSURE",
+      "REQ-DEFAULTS",
+      "REQ-DESIGN-RISKS",
+      "REQ-EVIDENCE-PLANNING",
+      "REQ-EXECUTION-AMENDMENT",
+      "REQ-PACKAGE",
+      "REQ-REVIEW-PACKET",
+      "REQ-ROUTER",
+      "REQ-SEMANTIC-NAMING",
+      "REQ-SEQUENCE",
+      "REQ-VALIDATION",
+      "REQ-WORKSPACE-DRIFT"
+    ],
+    "acceptance": "Use the approved criteria in `implementation-programs/ISP-001/program/revisions/revision-2/implementation-program.md#inc-008--integrated-pressure-hardening-and-release-pilot`.",
+    "approval_mode": "approval:full-increment",
+    "workspace_path": "/Users/CoveMB/Code/CoveMB/implementation-plugin",
+    "workspace_branch": "main",
+    "workspace_base_commit": "f14449b8808574c720927aedab5b64871cc63858",
+    "workspace_head_commit": "53edb8fad2008c7d35b6c17dbb973b24022947fd",
+    "status_path": "state/status.json",
+    "status_sha256": "530291c2e543f0ea63e34479565b3e1d010bb69627ce0da8823226544d1b5a92",
+    "handoff_path": "increments/INC-007/handoff.md",
+    "handoff_sha256": "e81db917d3a08a837c242dc899748998564c1b57fc4cc88d446a9e31abd5c60e",
+    "unresolved_user_decision": "INC-007 diff acceptance remains unresolved.",
+    "optional_context": [
+      [
+        "integration_checkpoint",
+        "Produce closure-readiness evidence without closing ISP-001."
+      ],
+      [
+        "non_goal",
+        "Do not perform program closure reconciliation or any later consequential action."
+      ]
+    ]
+  },
+  "handoff": {
+    "schema_version": "implementation-continuity-evidence/v1",
+    "program_id": "ISP-001",
+    "program_revision": 2,
+    "current_increment_id": "INC-007",
+    "current_increment_state": "awaiting-diff-approval",
+    "approval_mode": "approval:full-increment",
+    "workspace_path": "/Users/CoveMB/Code/CoveMB/implementation-plugin",
+    "workspace_branch": "main",
+    "base_commit": "f14449b8808574c720927aedab5b64871cc63858",
+    "head_commit": "53edb8fad2008c7d35b6c17dbb973b24022947fd",
+    "accepted_increments": [
+      "INC-001",
+      "INC-002",
+      "INC-003",
+      "INC-004",
+      "INC-005",
+      "INC-006"
+    ],
+    "verification_status": "reviewed and remediated INC-007 candidate; 34 focused tests passed and the 209-test candidate suite has no product failure",
+    "accepted_review_packet_path": "increments/INC-006/review-packet.md",
+    "accepted_review_packet_sha256": "0f17963838e7b0522f79f075cf1cd5aeee26b9c54325fc4376fdbbe9dc1e0085",
+    "accepted_handoff_addendum_path": "increments/INC-006/handoff-addendum.md",
+    "accepted_handoff_addendum_sha256": "f28f8318e88c19d24182691ee16d6646287df10fb34276bce98dd2ac898bf3da",
+    "accepted_status_sequence": 59,
+    "accepted_status_sha256": "530291c2e543f0ea63e34479565b3e1d010bb69627ce0da8823226544d1b5a92",
+    "amendments": [
+      "none"
+    ],
+    "unresolved_risks": [
+      "actual review was controller self-review and non-independent with reduced assurance",
+      "local static validation does not prove live workflow activation or external-state recovery",
+      "INC-008 and program closure remain separate"
+    ],
+    "next_legal_action": "Inspect and explicitly approve, reject, or request changes to the exact INC-007 diff.",
+    "first_read_files": [
+      "manifest.json",
+      "state/status.json",
+      "increments/INC-007/review-packet.md",
+      "increments/INC-007/review-evidence.json"
+    ]
+  },
+  "conversation": {
+    "schema_version": "implementation-continuity-evidence/v1",
+    "approval_mode": "approval:full-increment",
+    "same_conversation": true,
+    "predicate_evidence": [
+      [
+        "program-part-boundary",
+        true,
+        "INC-007 remains the bounded unit through diff review"
+      ],
+      [
+        "risk-or-architecture-domain",
+        true,
+        "continuity and authority evidence remain the active domain"
+      ],
+      [
+        "workspace-or-base",
+        true,
+        "workspace, branch, base, and head remain bound"
+      ],
+      [
+        "superseded-discussion",
+        true,
+        "the durable plan and status disambiguate superseded discussion"
+      ],
+      [
+        "evidence-or-expertise",
+        true,
+        "focused implementation and review evidence are available"
+      ],
+      [
+        "lossless-summary",
+        true,
+        "the handoff preserves material constraints and navigation"
+      ]
+    ],
+    "submitted_brief_sha256": "07a21014d60f3e84b8ac59c1f5d9a9db3bc6640600463d1c28ac2f6bfa3a44f1",
+    "expected_brief_sha256": "07a21014d60f3e84b8ac59c1f5d9a9db3bc6640600463d1c28ac2f6bfa3a44f1",
+    "explicit_renewed_authority": false
+  },
+  "resume": {
+    "schema_version": "implementation-continuity-evidence/v1",
+    "program_id": "ISP-001",
+    "program_revision": 2,
+    "source_sha256": "f4d4bca12706170210be202444df0d4c6d0bbb382143c5a0d0c8da2616eb9c57",
+    "program_sha256": "1ed05a86525f9801b593f71272e15fe7ea8ef2088ea3e62e44686824728ba253",
+    "semantic_requirements_sha256": "151cbe6731fe012b92f2d6138745465bec9b548e89b00d2538fdb706bbe0c10f",
+    "workspace_path": "/Users/CoveMB/Code/CoveMB/implementation-plugin",
+    "workspace_branch": "main",
+    "workspace_base_commit": "f14449b8808574c720927aedab5b64871cc63858",
+    "workspace_head_commit": "53edb8fad2008c7d35b6c17dbb973b24022947fd",
+    "status_sha256": "530291c2e543f0ea63e34479565b3e1d010bb69627ce0da8823226544d1b5a92",
+    "status_sequence": 59,
+    "brief_sha256": "07a21014d60f3e84b8ac59c1f5d9a9db3bc6640600463d1c28ac2f6bfa3a44f1",
+    "handoff_sha256": "e81db917d3a08a837c242dc899748998564c1b57fc4cc88d446a9e31abd5c60e",
+    "accepted_review_packet_sha256": "0f17963838e7b0522f79f075cf1cd5aeee26b9c54325fc4376fdbbe9dc1e0085",
+    "accepted_handoff_addendum_sha256": "f28f8318e88c19d24182691ee16d6646287df10fb34276bce98dd2ac898bf3da",
+    "conflicted_paths": [],
+    "active_git_operation": null,
+    "matching_authorization_ids": [
+      "AUTH-020"
+    ]
+  },
+  "negative_scenarios": [
+    {
+      "name": "overloaded-continuation",
+      "expected": "handoff required"
+    },
+    {
+      "name": "stale-handoff",
+      "expected": "resume denied"
+    },
+    {
+      "name": "premature-closure",
+      "expected": "closure denied"
+    },
+    {
+      "name": "inferred-later-authority",
+      "expected": "later action denied"
+    }
+  ]
+}

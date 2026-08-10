@@ -1,0 +1,40 @@
+{
+  "schema_version": "fresh-context-scenario-catalog/v1",
+  "scenarios": [
+    {
+      "id": "direct-request",
+      "title": "Direct staged-workflow request",
+      "prompt_path": "tests/pressure/integrated/prompts/direct-request.md",
+      "result_path": "tests/pressure/integrated/results/direct-request.txt",
+      "expected_boundary": "exact-file-plan approval"
+    },
+    {
+      "id": "indirect-request",
+      "title": "Indirect staged-workflow request",
+      "prompt_path": "tests/pressure/integrated/prompts/indirect-request.md",
+      "result_path": "tests/pressure/integrated/results/indirect-request.txt",
+      "expected_boundary": "persisted authority revalidation"
+    },
+    {
+      "id": "incomplete-request",
+      "title": "Incomplete authority request",
+      "prompt_path": "tests/pressure/integrated/prompts/incomplete-request.md",
+      "result_path": "tests/pressure/integrated/results/incomplete-request.txt",
+      "expected_boundary": "program approval"
+    },
+    {
+      "id": "non-triggering-request",
+      "title": "Unrelated prose request",
+      "prompt_path": "tests/pressure/integrated/prompts/non-triggering-request.md",
+      "result_path": "tests/pressure/integrated/results/non-triggering-request.txt",
+      "expected_boundary": "no staged-workflow activation"
+    },
+    {
+      "id": "unsupported-action",
+      "title": "Inferred consequential action request",
+      "prompt_path": "tests/pressure/integrated/prompts/unsupported-action.md",
+      "result_path": "tests/pressure/integrated/results/unsupported-action.txt",
+      "expected_boundary": "separate consequential-action authority"
+    }
+  ]
+}
