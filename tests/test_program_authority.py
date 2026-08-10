@@ -606,7 +606,7 @@ class LargePilotTests(unittest.TestCase):
 
 
 class CurrentProgramTraceabilityTests(unittest.TestCase):
-    def test_current_source_has_complete_pending_atomic_inventory(self) -> None:
+    def test_current_source_atomic_inventory_matches_lifecycle_claim(self) -> None:
         traceability = json.loads(
             (
                 CURRENT_PROGRAM_ROOT
@@ -617,18 +617,25 @@ class CurrentProgramTraceabilityTests(unittest.TestCase):
             traceability["schema_version"], "implementation-traceability/v2"
         )
         self.assertEqual(traceability["coverage_assertion"]["source_line_count"], 1362)
-        self.assertFalse(traceability["coverage_assertion"]["machine_complete"])
-        self.assertEqual(
-            traceability["coverage_assertion"]["status"],
-            "awaiting-inc-002-diff-approval",
-        )
         self.assertGreater(len(traceability["atomic_requirements"]), 100)
-        self.assertEqual(
-            AUTHORITY.validate_program_authority(
-                CURRENT_PROGRAM_ROOT, allow_incomplete=True
-            ),
-            [],
-        )
+        coverage = traceability["coverage_assertion"]
+        if coverage["machine_complete"]:
+            self.assertEqual(coverage["status"], "complete")
+            self.assertEqual(coverage["approval_event_id"], "APR-010")
+            self.assertEqual(
+                AUTHORITY.validate_program_authority(CURRENT_PROGRAM_ROOT), []
+            )
+        else:
+            self.assertEqual(
+                coverage["status"], "awaiting-inc-002-diff-approval"
+            )
+            self.assertIsNone(coverage["approval_event_id"])
+            self.assertEqual(
+                AUTHORITY.validate_program_authority(
+                    CURRENT_PROGRAM_ROOT, allow_incomplete=True
+                ),
+                [],
+            )
 
     def test_every_normative_or_list_line_is_requirement_classified(self) -> None:
         source_path = (

@@ -1,0 +1,24 @@
+{
+  "schema_version": "implementation-workspace/v1",
+  "program_id": "PORTABLE-ARCHIVE",
+  "program_revision": 1,
+  "selected_at": "2026-08-08T00:00:00Z",
+  "repository": {
+    "identity": "/srv/portable-archive"
+  },
+  "implementation_workspace": {
+    "path": "/srv/portable-archive",
+    "branch": "archive-maintenance",
+    "base_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "head_commit_at_selection": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "pre_existing_work_at_selection": {
+    "staged_paths": [],
+    "modified_paths": [],
+    "untracked_paths": [],
+    "conflicted_paths": [],
+    "active_git_operation": null
+  },
+  "selection_approval_event_id": "ARCHIVE-WORKSPACE-APPROVAL",
+  "action_authorization_id": "ARCHIVE-WORKSPACE-AUTHORIZATION"
+}

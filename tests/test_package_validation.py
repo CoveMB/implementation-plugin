@@ -25,6 +25,34 @@ AUTHORITY_REFERENCE = (
     "skills/implementing-staged-plans/references/program-authority.md"
 )
 AUTHORITY_SCRIPT = "skills/implementing-staged-plans/scripts/program_authority.py"
+STATE_REFERENCE = (
+    "skills/implementing-staged-plans/references/state-authorization.md"
+)
+STATE_SCRIPT = "skills/implementing-staged-plans/scripts/state_authority.py"
+PREPARATION_REFERENCE = (
+    "skills/implementing-staged-plans/references/repository-preparation.md"
+)
+PREPARATION_SCRIPT = (
+    "skills/implementing-staged-plans/scripts/repository_preparation.py"
+)
+EXECUTION_REFERENCE = (
+    "skills/implementing-staged-plans/references/execution-discipline.md"
+)
+EXECUTION_SCRIPT = (
+    "skills/implementing-staged-plans/scripts/execution_discipline.py"
+)
+REVIEW_REFERENCE = (
+    "skills/implementing-staged-plans/references/review-coordination.md"
+)
+REVIEW_SCRIPT = (
+    "skills/implementing-staged-plans/scripts/review_coordination.py"
+)
+CONTINUITY_REFERENCE = (
+    "skills/implementing-staged-plans/references/continuity-closure.md"
+)
+CONTINUITY_SCRIPT = (
+    "skills/implementing-staged-plans/scripts/continuity_closure.py"
+)
 
 
 VALID_MANIFEST = {
@@ -80,6 +108,16 @@ class PackageFixture:
         )
         self.write(AUTHORITY_REFERENCE, "# Program Authority\n")
         self.write(AUTHORITY_SCRIPT, "# reusable authority validator\n")
+        self.write(STATE_REFERENCE, "# State Authorization\n")
+        self.write(STATE_SCRIPT, "# reusable state authority validator\n")
+        self.write(PREPARATION_REFERENCE, "# Repository Preparation\n")
+        self.write(PREPARATION_SCRIPT, "# read-only repository preparation validator\n")
+        self.write(EXECUTION_REFERENCE, "# Execution Discipline\n")
+        self.write(EXECUTION_SCRIPT, "# pure execution discipline validator\n")
+        self.write(REVIEW_REFERENCE, "# Review Coordination\n")
+        self.write(REVIEW_SCRIPT, "# pure review coordination validator\n")
+        self.write(CONTINUITY_REFERENCE, "# Continuity and Closure\n")
+        self.write(CONTINUITY_SCRIPT, "# pure continuity and closure validator\n")
 
 
 class PackageValidationTestCase(unittest.TestCase):
@@ -284,13 +322,51 @@ class ForbiddenSurfaceTests(PackageValidationTestCase):
 
 class CompletePackageTests(PackageValidationTestCase):
     def test_required_authority_assets_are_regular_files(self) -> None:
-        for missing_path in (AUTHORITY_REFERENCE, AUTHORITY_SCRIPT):
+        for missing_path in (
+            AUTHORITY_REFERENCE,
+            AUTHORITY_SCRIPT,
+            STATE_REFERENCE,
+            STATE_SCRIPT,
+            PREPARATION_REFERENCE,
+            PREPARATION_SCRIPT,
+            EXECUTION_REFERENCE,
+            EXECUTION_SCRIPT,
+            REVIEW_REFERENCE,
+            REVIEW_SCRIPT,
+            CONTINUITY_REFERENCE,
+            CONTINUITY_SCRIPT,
+        ):
             with self.subTest(missing_path=missing_path):
                 self.fixture.write_valid_package()
                 (self.fixture.root / missing_path).unlink()
                 self.assert_issue_contains(
                     VALIDATOR.validate_authority_assets(self.fixture.root),
                     missing_path,
+                )
+
+    def test_required_authority_assets_reject_symlinks(self) -> None:
+        for linked_path in (
+            AUTHORITY_REFERENCE,
+            AUTHORITY_SCRIPT,
+            STATE_REFERENCE,
+            STATE_SCRIPT,
+            PREPARATION_REFERENCE,
+            PREPARATION_SCRIPT,
+            EXECUTION_REFERENCE,
+            EXECUTION_SCRIPT,
+            REVIEW_REFERENCE,
+            REVIEW_SCRIPT,
+            CONTINUITY_REFERENCE,
+            CONTINUITY_SCRIPT,
+        ):
+            with self.subTest(linked_path=linked_path):
+                self.fixture.write_valid_package()
+                path = self.fixture.root / linked_path
+                path.unlink()
+                path.symlink_to(self.fixture.root / ".codex-plugin/plugin.json")
+                self.assert_issue_contains(
+                    VALIDATOR.validate_authority_assets(self.fixture.root),
+                    linked_path,
                 )
 
     def test_valid_minimal_package_returns_no_issues(self) -> None:

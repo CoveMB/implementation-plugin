@@ -1,0 +1,25 @@
+{
+  "schema_version": "repository-preparation-evidence-fixture/v1",
+  "valid_record": {
+    "schema_version": "implementation-evidence-record/v1",
+    "source": "https://example.invalid/archive-api-reference",
+    "accessed_on": "2026-08-08",
+    "version": "4.2",
+    "configuration": "local-file mode",
+    "claims_supported": ["archive entries retain stable identifiers"],
+    "risk_domain": "compatibility",
+    "reuse_basis": "same version, configuration, and assumption set",
+    "remaining_uncertainty": "the optional remote adapter was not exercised"
+  },
+  "invalid_record": {
+    "schema_version": "implementation-evidence-record/v0",
+    "source": "",
+    "accessed_on": "08/08/2026",
+    "version": "",
+    "configuration": "",
+    "claims_supported": [],
+    "risk_domain": "",
+    "reuse_basis": "",
+    "remaining_uncertainty": ""
+  }
+}

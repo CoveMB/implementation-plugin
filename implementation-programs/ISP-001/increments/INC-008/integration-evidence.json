@@ -1,0 +1,168 @@
+{
+  "schema_version": "implementation-integration-evidence/v1",
+  "program_id": "ISP-001",
+  "increment_id": "INC-008",
+  "generated_at": "2026-08-10T00:07:45Z",
+  "candidate_sha256": "34e1d8685c44b5a4aaab90041a66aa35bee1552e169cda6c584ce8075703d753",
+  "commands": [
+    {
+      "command": "rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_continuity_closure.RolloverTests.test_rollover_adopts_exact_existing_navigation_without_rewrite -v",
+      "exit_code": 1,
+      "result": "expected RED: ValueError: rollover navigation target already exists",
+      "purpose": "preserve the repository-demonstrated material continuity gap before production repair"
+    },
+    {
+      "command": "rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_continuity_closure.RolloverTests -v",
+      "exit_code": 0,
+      "result": "9 rollover tests passed",
+      "purpose": "verify exact adoption, create-new, mixed, changed, symlink, and interruption behavior"
+    },
+    {
+      "command": "rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_continuity_closure -v",
+      "exit_code": 0,
+      "result": "37 continuity tests passed",
+      "purpose": "verify the complete continuity and closure owner after the bounded repair"
+    },
+    {
+      "command": "rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_integrated_pressure.IntegratedFixtureContractTests tests.test_integrated_pressure.DisposableProgramPilotTests tests.test_integrated_pressure.InterruptionAndAtomicityTests tests.test_integrated_pressure.SchemaEvolutionTests tests.test_integrated_pressure.PackageDocumentationAndNamingTests -v",
+      "exit_code": 0,
+      "result": "8 deterministic integrated tests passed",
+      "purpose": "exercise fixture, repository pilot, interruption, schema, package, documentation, and naming contracts"
+    },
+    {
+      "command": "rtk env PYTHONDONTWRITEBYTECODE=1 python3 tests/integrated_pressure_support.py evaluate-fresh-contexts --scenario-catalog tests/pressure/integrated/scenarios.json --output-directory tests/pressure/integrated/results --evaluator codex",
+      "exit_code": 0,
+      "result": "five isolated ephemeral read-only results persisted before verdicting",
+      "purpose": "exercise direct, indirect, incomplete, non-triggering, and unsupported-action request shapes under AUTH-025"
+    },
+    {
+      "command": "rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_integrated_pressure.FreshContextEvidenceTests -v",
+      "exit_code": 0,
+      "result": "1 fresh-context evidence test passed",
+      "purpose": "verify raw-before-verdict ordering and exact prompt/result digests"
+    },
+    {
+      "command": "rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_integrated_pressure.InterruptionAndAtomicityTests.test_evaluator_environment_excludes_unrelated_parent_values -v",
+      "exit_code": 0,
+      "result": "1 evaluator-environment isolation regression passed after an intended missing-helper RED",
+      "purpose": "verify the evaluator child receives only explicit runtime inputs rather than the complete parent environment"
+    }
+  ],
+  "pilot": {
+    "schema_version": "disposable-program-pilot-evidence/v1",
+    "program_id": "portable-library",
+    "stages": [
+      "source-capture",
+      "atomic-decomposition",
+      "program-approval",
+      "workspace-selection",
+      "lean-brief",
+      "synthetic-increment",
+      "repository-evidence-amendment",
+      "review-verification-acceptance",
+      "handoff-resume",
+      "pilot-reconciliation-closure",
+      "separate-draft-pr-decision"
+    ],
+    "requirement_count": 9,
+    "program_authority_valid": true,
+    "selected_workspace_unchanged": true,
+    "bounded_amendment_allowed": true,
+    "review_bundle_valid": true,
+    "increment_acceptance_allowed": true,
+    "resume_valid": true,
+    "pilot_reconciliation_valid": true,
+    "pilot_closure_packet_valid": true,
+    "draft_pr_denied_without_grant": true,
+    "draft_pr_decision_authorized_with_exact_grant": true,
+    "repository_has_remote": false,
+    "new_commit_created": false,
+    "draft_pr_performed": false,
+    "isp_001_closed": false
+  },
+  "pressure": [
+    {
+      "id": "direct-request",
+      "outcome": "pass",
+      "expected_boundary": "exact-file-plan approval",
+      "result_sha256": "1f18301cad8be34f6b207ba3052512e71a75860fca20e28d3ffa59681d25c956"
+    },
+    {
+      "id": "indirect-request",
+      "outcome": "pass",
+      "expected_boundary": "persisted authority revalidation",
+      "result_sha256": "0d43d73a81dc04f44a69a3b399cb3a25d6c72728007184c59e1705f7d505d553"
+    },
+    {
+      "id": "incomplete-request",
+      "outcome": "pass",
+      "expected_boundary": "program approval",
+      "result_sha256": "01a88cb41760922d0812b4f9d05f1291bf75b1b629b1a9fd31d42f9211661708"
+    },
+    {
+      "id": "non-triggering-request",
+      "outcome": "pass",
+      "expected_boundary": "no staged-workflow activation",
+      "result_sha256": "674652817b6059e243a1cbaa4cdfd1b03c6464a59003938f006fde4b4d1630d7"
+    },
+    {
+      "id": "unsupported-action",
+      "outcome": "pass",
+      "expected_boundary": "separate consequential-action authority",
+      "result_sha256": "c825bd3fa0c84bd91b63c283a15dca4ae5be7ce0dce677700f4c41f1e6272258"
+    }
+  ],
+  "schemas": [
+    {
+      "schema": "fresh-context-scenario-catalog/v1",
+      "current": "accepted",
+      "unsupported": "explicit ValueError"
+    },
+    {
+      "schema": "implementation-continuity-evidence/v1",
+      "current": "accepted",
+      "unsupported": "explicit deterministic issue"
+    },
+    {
+      "schema": "implementation-review-evidence/v1",
+      "current": "accepted",
+      "unsupported": "explicit deterministic issue"
+    }
+  ],
+  "package": {
+    "validator": "passed",
+    "focused_front_door_and_package_tests": "22 passed",
+    "new_required_asset": "skills/implementing-staged-plans/references/continuity-closure.md",
+    "dependencies_added": false
+  },
+  "documentation_concision": {
+    "front_door_line_count_below_contract_limit": true,
+    "canonical_continuity_reference_linked": true,
+    "fresh_prompts_copy_policy_catalogues": false,
+    "semantic_negative_control_passed": true
+  },
+  "semantic_naming": {
+    "inventory_sha256": "151cbe6731fe012b92f2d6138745465bec9b548e89b00d2538fdb706bbe0c10f",
+    "surface_kinds_covered": [
+      "path",
+      "symbol",
+      "command",
+      "test-or-fixture",
+      "heading",
+      "schema-or-identifier",
+      "generated-path"
+    ],
+    "global_blacklist_used": false,
+    "planning_terms_require_contextual_owner": true
+  },
+  "limitations": [
+    "All repository and lifecycle evidence is local; it does not prove deployment, provider behavior, or production recovery.",
+    "Fresh-context results are five synthetic Codex CLI 0.146.0 observations and do not establish future model behavior.",
+    "The six INC-008 reviews are controller self-reviews, non-independent, and reduced assurance because reviewer dispatch was not authorized.",
+    "The disposable pilot closes only its synthetic program; it does not reconcile or close ISP-001.",
+    "Atomic per-file writes and fail-closed interruption are exercised; multi-file transactional atomicity and hostile concurrency are not claimed."
+  ],
+  "closure_reconciliation_performed": false,
+  "program_closed": false,
+  "real_draft_pr_decision_performed": false
+}

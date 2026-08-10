@@ -1,0 +1,1 @@
+This synthetic repository uses an approval-gated, increment-by-increment implementation program. Resume the current increment from persisted state, identify the controlling authority boundary, and stop before any unauthorized write.

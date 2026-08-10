@@ -19,6 +19,36 @@ PROGRAM_AUTHORITY_REFERENCE = Path(
 PROGRAM_AUTHORITY_SCRIPT = Path(
     "skills/implementing-staged-plans/scripts/program_authority.py"
 )
+STATE_AUTHORITY_REFERENCE = Path(
+    "skills/implementing-staged-plans/references/state-authorization.md"
+)
+STATE_AUTHORITY_SCRIPT = Path(
+    "skills/implementing-staged-plans/scripts/state_authority.py"
+)
+REPOSITORY_PREPARATION_REFERENCE = Path(
+    "skills/implementing-staged-plans/references/repository-preparation.md"
+)
+REPOSITORY_PREPARATION_SCRIPT = Path(
+    "skills/implementing-staged-plans/scripts/repository_preparation.py"
+)
+EXECUTION_DISCIPLINE_REFERENCE = Path(
+    "skills/implementing-staged-plans/references/execution-discipline.md"
+)
+EXECUTION_DISCIPLINE_SCRIPT = Path(
+    "skills/implementing-staged-plans/scripts/execution_discipline.py"
+)
+REVIEW_COORDINATION_REFERENCE = Path(
+    "skills/implementing-staged-plans/references/review-coordination.md"
+)
+REVIEW_COORDINATION_SCRIPT = Path(
+    "skills/implementing-staged-plans/scripts/review_coordination.py"
+)
+CONTINUITY_CLOSURE_REFERENCE = Path(
+    "skills/implementing-staged-plans/references/continuity-closure.md"
+)
+CONTINUITY_CLOSURE_SCRIPT = Path(
+    "skills/implementing-staged-plans/scripts/continuity_closure.py"
+)
 
 EXPECTED_MANIFEST: dict[str, object] = {
     "name": "implementation-plugin",
@@ -286,7 +316,20 @@ def validate_forbidden_components(repository_root: Path) -> list[str]:
 def validate_authority_assets(repository_root: Path) -> list[str]:
     """Require the accepted focused procedure and mechanical authority boundary."""
     issues: list[str] = []
-    for relative_path in (PROGRAM_AUTHORITY_REFERENCE, PROGRAM_AUTHORITY_SCRIPT):
+    for relative_path in (
+        PROGRAM_AUTHORITY_REFERENCE,
+        PROGRAM_AUTHORITY_SCRIPT,
+        STATE_AUTHORITY_REFERENCE,
+        STATE_AUTHORITY_SCRIPT,
+        REPOSITORY_PREPARATION_REFERENCE,
+        REPOSITORY_PREPARATION_SCRIPT,
+        EXECUTION_DISCIPLINE_REFERENCE,
+        EXECUTION_DISCIPLINE_SCRIPT,
+        REVIEW_COORDINATION_REFERENCE,
+        REVIEW_COORDINATION_SCRIPT,
+        CONTINUITY_CLOSURE_REFERENCE,
+        CONTINUITY_CLOSURE_SCRIPT,
+    ):
         path = repository_root / relative_path
         if not path.is_file() or path.is_symlink():
             issues.append(

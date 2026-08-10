@@ -1,0 +1,27 @@
+{
+  "schema_version": "implementation-closure-readiness-evidence/v1",
+  "program_id": "ISP-001",
+  "program_revision": 2,
+  "increment_id": "INC-008",
+  "generated_at": "2026-08-10T00:11:00Z",
+  "candidate_sha256": "34e1d8685c44b5a4aaab90041a66aa35bee1552e169cda6c584ce8075703d753",
+  "traceability_sha256": "a5fb73c3b9fa8619e0a225c2a388e20a88c475b291805508466dbd324a114cb0",
+  "semantic_requirements_sha256": "151cbe6731fe012b92f2d6138745465bec9b548e89b00d2538fdb706bbe0c10f",
+  "integration_evidence_path": "implementation-programs/ISP-001/increments/INC-008/integration-evidence.json",
+  "integration_evidence_sha256": "a8a0b7175381c5fef6ac5f057aa2acbeb3d3f31fd68de29b26d2fc8b06ff02ad",
+  "review_evidence_path": "implementation-programs/ISP-001/increments/INC-008/review-evidence.json",
+  "review_evidence_sha256": "46cdea6c565b219ea49e4e5ccb85db9ced13411dda3f5a9f1745a5a3b1bbd914",
+  "review_packet_path": "implementation-programs/ISP-001/increments/INC-008/review-packet.md",
+  "review_packet_sha256": "d870ce5bd8a0d8061d4ce2108cfc441e6842719a601cc4603145b0865b894d8d",
+  "target_increment_state": "awaiting-diff-approval",
+  "unresolved_material_findings": 0,
+  "reviewer_assurance": "controller self-review; non-independent; reduced",
+  "residual_risks": [
+    "Synthetic local evidence does not prove deployment, provider behavior, production recovery, hostile concurrency, or future model behavior.",
+    "INC-008 diff acceptance and ISP-001 closure remain separate human decisions."
+  ],
+  "next_legal_action": "Inspect and explicitly approve, reject, or request changes to the exact INC-008 diff.",
+  "closure_reconciliation_performed": false,
+  "program_closed": false,
+  "real_draft_pr_decision_performed": false
+}

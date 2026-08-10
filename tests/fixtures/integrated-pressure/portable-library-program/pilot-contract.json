@@ -1,0 +1,35 @@
+{
+  "schema_version": "disposable-program-pilot/v1",
+  "program_id": "portable-library",
+  "source_id": "portable-library-source",
+  "expected_requirement_count": 9,
+  "expected_stages": [
+    "repository-clone",
+    "source-capture",
+    "complete-decomposition",
+    "program-approval",
+    "workspace-observation",
+    "lean-brief",
+    "bounded-amendment",
+    "review-verification-acceptance",
+    "handoff-resume",
+    "pilot-reconciliation-closure",
+    "separate-draft-pr-decision"
+  ],
+  "interruption_boundaries": [
+    "atomic-status-replacement",
+    "append-only-record",
+    "existing-navigation-adoption"
+  ],
+  "schema_cases": [
+    "current",
+    "unsupported"
+  ],
+  "required_assertions": [
+    "no new Git commit",
+    "selected workspace unchanged",
+    "pilot closure does not close ISP-001",
+    "closure alone denies a draft pull request",
+    "an exact synthetic grant authorizes only the draft-pull-request decision"
+  ]
+}

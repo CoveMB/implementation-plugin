@@ -63,6 +63,26 @@ Capability discovery does not create authority.
 
 For authorized source capture or registration, complete requirement decomposition, source-located traceability, program revision, or initial program approval, follow [Program authority](references/program-authority.md). Apply only that procedure's current legal step; its mechanical coverage checks do not replace human semantic review.
 
+## Route State and Action Authority Work
+
+For lifecycle state, approval modes or bindings, workspace selection, atomic status updates, or separate action authorization, follow [State and action authority](references/state-authorization.md). Supply a current repository observation, require exact digest-bound records, and apply only the legal transition or explicitly named action.
+
+## Route Repository Preparation Work
+
+For repository inspection, user-work ownership, qualitative drift or amendment classification, evidence applicability, increment shaping, semantic naming, or just-in-time exact-file planning, follow [Repository preparation](references/repository-preparation.md). Keep its read-only validation separate from plan approval and action authorization.
+
+## Route Execution Discipline Work
+
+For authorized test-first or alternative verification evidence, reuse and ownership checks, semantic execution surfaces, bounded amendment decisions, logical commit boundaries, or distinct recovery domains, follow [Execution discipline](references/execution-discipline.md). Its validators are non-mutating; approval mode never supplies separate action or commit authority.
+
+## Route Review Coordination Work
+
+For required and risk-triggered specialist reviews, truthful independence, contextual semantic naming, material findings, remediation and renewed review, fresh final verification, or complete packet validation, follow [Review coordination](references/review-coordination.md). Preserve raw reports before reconciliation and never treat static validation as proof of reviewer identity or judgment.
+
+## Route Continuity and Closure Work
+
+For a lean semantic brief, durable handoff navigation, resume or full-mode continuation decision, program reconciliation, closure approval, or a later action gate, follow [Continuity and closure](references/continuity-closure.md). Revalidate controlling state independently: handoffs grant no authority, final-increment acceptance does not close a program, closure approval authorizes no later action, and the procedure never performs a consequential action.
+
 ## Route or Fall Back Honestly
 
 If a relevant implemented procedure exists, verify that its inputs and authority match the persisted state, then route only the current legal action to it.

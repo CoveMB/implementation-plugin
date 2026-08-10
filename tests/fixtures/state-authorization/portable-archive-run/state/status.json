@@ -1,0 +1,26 @@
+{
+  "schema_version": "implementation-program-status/v1",
+  "state_sequence": 1,
+  "program_id": "PORTABLE-ARCHIVE",
+  "program_revision": 1,
+  "program_state": "active",
+  "current_increment_id": "archive-index",
+  "current_increment_state": "awaiting-plan-approval",
+  "approved_exact_file_plan_sha256": null,
+  "pending_exact_file_plan_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+  "approval_mode": "approval:standard",
+  "source_binding": {
+    "source_id": "ARCHIVE-SOURCE",
+    "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "program_binding": {
+    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "semantic_requirements_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "brief_binding": {
+    "path": "increments/archive-index/brief.md",
+    "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+    "workspace_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+    "head_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+}

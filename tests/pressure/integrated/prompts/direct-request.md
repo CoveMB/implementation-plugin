@@ -1,0 +1,1 @@
+Use the available implementing-staged-plans capability for this synthetic repository. The implementation program is approved but its current increment has no approved exact-file plan. Explain the first legal action and stop without changing files.
