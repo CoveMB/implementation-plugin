@@ -23,8 +23,10 @@ from state_authority import (
 
 
 CONTINUITY_SCHEMA = "implementation-continuity-evidence/v1"
+CONTINUATION_AUTHORIZATION_SCHEMA = "implementation-continuation-authorization/v1"
 RECONCILIATION_SCHEMA = "implementation-closure-reconciliation/v1"
 CLOSURE_PACKET_SCHEMA = "implementation-closure-packet/v1"
+EXPLICIT_SKILL_INVOCATION = "$implementing-staged-plans"
 
 APPROVAL_MODES = frozenset(APPROVAL_MODE_POLICIES)
 CONVERSATION_SUITABILITY_PREDICATES = (
@@ -227,10 +229,69 @@ class ContinuityWriteReceipt:
 
 
 @dataclass(frozen=True)
+class RemoteHeadObservation:
+    provider: str
+    repository: str
+    base_ref: str
+    head_ref: str
+    head_commit: str
+    remote_ref_exists: bool
+    requires_push: bool
+    draft: bool
+
+
+@dataclass(frozen=True)
+class DraftPullRequestConsumptionReceipt:
+    request_id: str
+    authorization_id: str
+    provider: str
+    repository: str
+    base_ref: str
+    head_ref: str
+    head_commit: str
+    consumed_at: str
+
+
+@dataclass(frozen=True)
+class DraftPullRequestPreflight:
+    request_id: str
+    authorization_id: str
+    checked_at: str
+    valid_until: str
+    remote_head: RemoteHeadObservation
+    prior_consumptions: tuple[DraftPullRequestConsumptionReceipt, ...]
+
+
+@dataclass(frozen=True)
+class DraftPullRequestAuthority:
+    request_id: str
+    provider: str
+    repository: str
+    base_ref: str
+    head_ref: str
+    head_commit: str
+    draft: bool
+    push_requested: bool
+
+
+@dataclass(frozen=True)
 class LaterActionDecision:
     authorized: bool
     authorization_id: str | None
     issues: tuple[str, ...]
+    action: str | None = None
+    scope: str | None = None
+    draft_pull_request: DraftPullRequestAuthority | None = None
+    authorization_expires_at: str | None = None
+
+
+@dataclass(frozen=True)
+class LaterActionRoutingDecision:
+    may_execute_same_turn: bool
+    must_stop: bool
+    authorization_id: str | None
+    issues: tuple[str, ...]
+    consumption_receipt: DraftPullRequestConsumptionReceipt | None = None
 
 
 class _UsageError(ValueError):
@@ -410,7 +471,8 @@ def validate_increment_brief(candidate: LeanBrief) -> list[str]:
     return sorted(set(issues))
 
 
-def render_increment_brief(candidate: LeanBrief) -> str:
+def _render_legacy_increment_brief(candidate: LeanBrief) -> str:
+    """Render accepted v1 brief bytes without the copy-ready invocation wrapper."""
     issues = validate_increment_brief(candidate)
     if issues:
         raise ValueError("; ".join(issues))
@@ -435,6 +497,24 @@ def render_increment_brief(candidate: LeanBrief) -> str:
         )
         lines.append(f"**Context:** {context}")
     return "\n".join(lines) + "\n"
+
+
+def render_increment_brief(candidate: LeanBrief) -> str:
+    """Render a copy-ready next-increment or new-conversation prompt."""
+    return (
+        f"{EXPLICIT_SKILL_INVOCATION}\n\n"
+        f"{_render_legacy_increment_brief(candidate)}"
+    )
+
+
+def _matches_supported_increment_brief(
+    candidate: LeanBrief,
+    brief_markdown: str,
+) -> bool:
+    return brief_markdown in {
+        _render_legacy_increment_brief(candidate),
+        render_increment_brief(candidate),
+    }
 
 
 def validate_handoff(candidate: HandoffRecord) -> list[str]:
@@ -570,6 +650,25 @@ def validate_resume_context(
     program_root: Path | None = None,
     observation: object | None = None,
 ) -> list[str]:
+    issues = validate_resume_record(observed)
+    compared = tuple(
+        field.name
+        for field in fields(ResumeContext)
+        if field.name
+        not in {"conflicted_paths", "active_git_operation", "matching_authorization_ids"}
+    )
+    for name in compared:
+        if getattr(observed, name) != getattr(expected, name):
+            issues.append(f"resume {name} mismatch")
+    if (program_root is None) != (observation is None):
+        issues.append("resume state composition requires both program root and observation")
+    elif program_root is not None and observation is not None:
+        issues.extend(validate_state_authority(Path(program_root), observation))
+    return sorted(set(issues))
+
+
+def validate_resume_record(observed: ResumeContext) -> list[str]:
+    """Validate submitted resume evidence without claiming repository comparison."""
     issues: list[str] = []
     if observed.schema_version != CONTINUITY_SCHEMA:
         issues.append("unsupported resume schema")
@@ -593,15 +692,6 @@ def validate_resume_context(
     for name in ("workspace_base_commit", "workspace_head_commit"):
         if not _is_commit(getattr(observed, name)):
             issues.append(f"resume {name} is invalid")
-    compared = tuple(
-        field.name
-        for field in fields(ResumeContext)
-        if field.name
-        not in {"conflicted_paths", "active_git_operation", "matching_authorization_ids"}
-    )
-    for name in compared:
-        if getattr(observed, name) != getattr(expected, name):
-            issues.append(f"resume {name} mismatch")
     if not isinstance(observed.conflicted_paths, tuple):
         issues.append("resume conflicted_paths must be a tuple")
     elif observed.conflicted_paths:
@@ -612,10 +702,152 @@ def validate_resume_context(
         issues.append("resume requires exactly one matching renewed authorization")
     elif not _nonempty(observed.matching_authorization_ids[0]):
         issues.append("resume authorization id is invalid")
-    if (program_root is None) != (observation is None):
-        issues.append("resume state composition requires both program root and observation")
-    elif program_root is not None and observation is not None:
-        issues.extend(validate_state_authority(Path(program_root), observation))
+    return sorted(set(issues))
+
+
+_CONTINUATION_BINDING_FIELDS = tuple(
+    field.name
+    for field in fields(ResumeContext)
+    if field.name
+    not in {
+        "schema_version",
+        "conflicted_paths",
+        "active_git_operation",
+        "matching_authorization_ids",
+    }
+)
+
+
+def _continuation_binding(context: ResumeContext) -> dict[str, object]:
+    return {
+        "resume_schema_version": context.schema_version,
+        **{
+            field_name: getattr(context, field_name)
+            for field_name in _CONTINUATION_BINDING_FIELDS
+        },
+    }
+
+
+def build_continuation_authorization(
+    context: ResumeContext,
+    *,
+    authorization_id: str,
+    user_request_id: str,
+    requested_action: str,
+    requested_scope: str,
+    issued_at: str,
+    expires_at: str,
+) -> dict[str, object]:
+    """Materialize one explicit request without granting any broader action."""
+    issues = validate_resume_record(context)
+    if issues:
+        raise ValueError("; ".join(issues))
+    for label, value in (
+        ("authorization id", authorization_id),
+        ("user request id", user_request_id),
+        ("requested action", requested_action),
+        ("requested scope", requested_scope),
+    ):
+        if not _nonempty(value):
+            raise ValueError(f"continuation {label} is required")
+    if context.matching_authorization_ids != (authorization_id,):
+        raise ValueError("resume context authorization id does not match the request")
+    issued_time = _timestamp(issued_at)
+    expiry_time = _timestamp(expires_at)
+    if issued_time is None or expiry_time is None:
+        raise ValueError("continuation timestamps must be timezone-aware ISO timestamps")
+    if issued_time >= expiry_time:
+        raise ValueError("continuation authorization requires a valid issuance interval")
+    return {
+        "schema_version": CONTINUATION_AUTHORIZATION_SCHEMA,
+        "authorization_id": authorization_id,
+        "decision": "authorized",
+        "revoked": False,
+        "user_request_id": user_request_id,
+        "requested_action": requested_action,
+        "requested_scope": requested_scope,
+        "issued_at": issued_at,
+        "expires_at": expires_at,
+        **_continuation_binding(context),
+    }
+
+
+def validate_continuation_authority(
+    observed: ResumeContext,
+    expected: ResumeContext,
+    records: Sequence[Mapping[str, object]],
+    *,
+    user_request_id: str,
+    requested_action: str,
+    requested_scope: str,
+    program_root: Path | None = None,
+    observation: object | None = None,
+) -> list[str]:
+    """Require one live request-bound receipt in addition to full resume validation."""
+    issues = validate_resume_context(
+        observed,
+        expected,
+        program_root=program_root,
+        observation=observation,
+    )
+    if not all(
+        _nonempty(value)
+        for value in (user_request_id, requested_action, requested_scope)
+    ):
+        issues.append("continuation request identity, action, and scope are required")
+    expected_binding = _continuation_binding(expected)
+
+    def binding_matches(record: Mapping[str, object]) -> bool:
+        return all(
+            record.get(field_name) == value
+            for field_name, value in expected_binding.items()
+        )
+
+    bound_records = [
+        record
+        for record in records
+        if record.get("schema_version") == CONTINUATION_AUTHORIZATION_SCHEMA
+        and record.get("user_request_id") == user_request_id
+        and record.get("requested_action") == requested_action
+        and record.get("requested_scope") == requested_scope
+        and binding_matches(record)
+    ]
+    current: list[Mapping[str, object]] = []
+    temporal_invalid = False
+    current_time = datetime.now(timezone.utc)
+    for record in bound_records:
+        issued_at = record.get("issued_at")
+        expires_at = record.get("expires_at")
+        parsed_issuance = _timestamp(issued_at)
+        parsed_expiry = _timestamp(expires_at)
+        is_current_interval = (
+            parsed_issuance is not None
+            and parsed_expiry is not None
+            and parsed_issuance <= current_time < parsed_expiry
+        )
+        if (
+            record.get("decision") == "authorized"
+            and record.get("revoked") is not True
+            and is_current_interval
+        ):
+            current.append(record)
+        elif record.get("decision") == "authorized" and record.get("revoked") is not True:
+            temporal_invalid = True
+    if any(
+        record.get("decision") != "authorized" or record.get("revoked") is True
+        for record in bound_records
+    ):
+        issues.append("conflicting continuation authorization records")
+    if temporal_invalid:
+        issues.append("continuation authorization is not currently valid")
+    if len(current) != 1:
+        issues.append("exactly one current continuation authorization")
+    else:
+        authorization_id = current[0].get("authorization_id")
+        if not _nonempty(authorization_id):
+            issues.append("continuation authorization id is invalid")
+        elif observed.matching_authorization_ids != (authorization_id,):
+            issues.append("resume authorization id does not match the current request")
     return sorted(set(issues))
 
 
@@ -980,6 +1212,7 @@ def decide_later_action(
     action_authorizations: Sequence[Mapping[str, object]],
     recovery_evidence: str,
     authority_context: Mapping[str, object],
+    draft_pull_request: DraftPullRequestAuthority | None = None,
 ) -> LaterActionDecision:
     issues: list[str] = []
     if program_state != "closed":
@@ -1005,6 +1238,32 @@ def decide_later_action(
     }
     if set(authority_context) != context_fields:
         issues.append("later action authority context fields are incomplete")
+    if draft_pull_request is not None:
+        if action != "create-draft-pull-request":
+            issues.append("draft pull request binding requires the draft action")
+        for label, value in (
+            ("request id", draft_pull_request.request_id),
+            ("provider", draft_pull_request.provider),
+            ("repository", draft_pull_request.repository),
+            ("base ref", draft_pull_request.base_ref),
+            ("head ref", draft_pull_request.head_ref),
+        ):
+            if not _nonempty(value):
+                issues.append(f"draft pull request {label} is required")
+        if not _is_commit(draft_pull_request.head_commit):
+            issues.append("draft pull request head commit is invalid")
+        if draft_pull_request.draft is not True:
+            issues.append("same-turn pull request authority must require a draft")
+        if draft_pull_request.push_requested is not False:
+            issues.append("same-turn pull request authority cannot request a push")
+        workspace = authority_context.get("workspace")
+        workspace_head = (
+            workspace.get("head_commit") if isinstance(workspace, Mapping) else None
+        )
+        if draft_pull_request.head_commit != workspace_head:
+            issues.append(
+                "draft pull request authority head does not match the closed workspace"
+            )
 
     def context_matches(record: Mapping[str, object]) -> bool:
         return set(authority_context) == context_fields and all(
@@ -1039,6 +1298,21 @@ def decide_later_action(
         and record.get("closure_reconciliation_sha256") == reconciliation_sha256
         and record.get("closure_packet_sha256") == closure_packet_sha256
         and context_matches(record)
+        and (
+            draft_pull_request is None
+            or (
+                record.get("user_request_id") == draft_pull_request.request_id
+                and record.get("remote_provider") == draft_pull_request.provider
+                and record.get("remote_repository")
+                == draft_pull_request.repository
+                and record.get("base_ref") == draft_pull_request.base_ref
+                and record.get("head_ref") == draft_pull_request.head_ref
+                and record.get("head_commit") == draft_pull_request.head_commit
+                and record.get("draft") is draft_pull_request.draft
+                and record.get("push_requested")
+                is draft_pull_request.push_requested
+            )
+        )
     ]
     matching_grants = [
         record
@@ -1051,11 +1325,20 @@ def decide_later_action(
     ):
         issues.append("conflicting exact later-action authorization records")
     current_grants = []
+    current_time = datetime.now(timezone.utc)
     for record in matching_grants:
         expires = record.get("expires_at")
         parsed = _timestamp(expires) if expires is not None else None
-        if expires is None or (parsed is not None and parsed > datetime.now(timezone.utc)):
+        if draft_pull_request is not None and expires is None:
+            continue
+        if expires is None or (parsed is not None and parsed > current_time):
             current_grants.append(record)
+    if draft_pull_request is not None and any(
+        record.get("expires_at") is None
+        or _timestamp(record.get("expires_at")) is None
+        for record in matching_grants
+    ):
+        issues.append("same-turn draft grant requires bounded expiry")
     if len(current_grants) != 1:
         issues.append("exactly one current action authorization must match action, scope, and closure evidence")
     if action in RECOVERY_REQUIRED_ACTIONS and (
@@ -1068,7 +1351,141 @@ def decide_later_action(
     if authorization_id is not None and not _nonempty(authorization_id):
         issues.append("later action authorization id is invalid")
         authorization_id = None
-    return LaterActionDecision(not issues, authorization_id, tuple(sorted(set(issues))))
+    authorization_expires_at = (
+        current_grants[0].get("expires_at")
+        if len(current_grants) == 1
+        and _nonempty(current_grants[0].get("expires_at"))
+        else None
+    )
+    return LaterActionDecision(
+        not issues,
+        authorization_id,
+        tuple(sorted(set(issues))),
+        action,
+        scope,
+        draft_pull_request,
+        authorization_expires_at,
+    )
+
+
+def route_later_action(
+    decision: LaterActionDecision,
+    *,
+    action: str,
+    scope: str,
+    current_request_id: str,
+    current_request_action: str,
+    current_request_scope: str,
+    authority_context: Mapping[str, object],
+    preflight: DraftPullRequestPreflight | None,
+    routed_at: str,
+) -> LaterActionRoutingDecision:
+    """Route only a no-push draft PR; this function performs no external action."""
+    issues = list(decision.issues)
+    if not decision.authorized or not _nonempty(decision.authorization_id):
+        issues.append("later action is not authorized")
+    if action != "create-draft-pull-request":
+        issues.append("mandatory stop")
+        return LaterActionRoutingDecision(
+            False,
+            True,
+            decision.authorization_id,
+            tuple(sorted(set(issues))),
+            None,
+        )
+    if not _nonempty(scope):
+        issues.append("draft pull request scope is required")
+    if decision.action != action or decision.scope != scope:
+        issues.append("routed action and scope do not match the authorization decision")
+    draft_authority = decision.draft_pull_request
+    routed_time = _timestamp(routed_at)
+    grant_expiry = _timestamp(decision.authorization_expires_at)
+    if draft_authority is None:
+        issues.append("draft pull request decision lacks exact request and remote authority")
+    elif current_request_id != draft_authority.request_id:
+        issues.append("current request identity does not match draft authority")
+    if grant_expiry is None or routed_time is None or routed_time >= grant_expiry:
+        issues.append("draft pull request grant is not current")
+    if current_request_action != decision.action or current_request_scope != decision.scope:
+        issues.append("current request does not match the authorized action and scope")
+    remote_head: RemoteHeadObservation | None = None
+    if preflight is None:
+        issues.append("request-bound draft pull request preflight is required")
+    else:
+        if preflight.request_id != current_request_id:
+            issues.append("draft pull request preflight request mismatch")
+        if preflight.authorization_id != decision.authorization_id:
+            issues.append("draft pull request preflight authorization mismatch")
+        checked_at = _timestamp(preflight.checked_at)
+        valid_until = _timestamp(preflight.valid_until)
+        if checked_at is None or valid_until is None or routed_time is None:
+            issues.append("draft pull request preflight timestamps are invalid")
+        elif not (checked_at <= routed_time < valid_until):
+            issues.append("draft pull request preflight is not current")
+        if not isinstance(preflight.prior_consumptions, tuple) or any(
+            not isinstance(receipt, DraftPullRequestConsumptionReceipt)
+            for receipt in preflight.prior_consumptions
+        ):
+            issues.append("draft pull request consumption evidence is invalid")
+        elif any(
+            receipt.request_id == current_request_id
+            or receipt.authorization_id == decision.authorization_id
+            for receipt in preflight.prior_consumptions
+        ):
+            issues.append("draft pull request request was already consumed")
+        if isinstance(preflight.remote_head, RemoteHeadObservation):
+            remote_head = preflight.remote_head
+        else:
+            issues.append("fresh remote head observation is required")
+    workspace = authority_context.get("workspace")
+    current_workspace_head = (
+        workspace.get("head_commit") if isinstance(workspace, Mapping) else None
+    )
+    if (
+        draft_authority is not None
+        and current_workspace_head != draft_authority.head_commit
+    ):
+        issues.append("current workspace head no longer matches draft authority")
+    if remote_head is None:
+        issues.append("fresh remote head observation is required")
+    elif draft_authority is not None:
+        if (
+            remote_head.provider != draft_authority.provider
+            or remote_head.repository != draft_authority.repository
+            or remote_head.base_ref != draft_authority.base_ref
+            or remote_head.head_ref != draft_authority.head_ref
+        ):
+            issues.append("remote identity or ref binding mismatch")
+        if remote_head.remote_ref_exists is not True:
+            issues.append("exact remote head ref does not exist")
+        if remote_head.requires_push is not False:
+            issues.append("same-turn draft pull request cannot require a push")
+        if remote_head.draft is not True:
+            issues.append("same-turn pull request must remain a draft")
+        if (
+            not _is_commit(remote_head.head_commit)
+            or remote_head.head_commit != draft_authority.head_commit
+        ):
+            issues.append("remote head commit does not match the closed workspace")
+    consumption_receipt = None
+    if not issues and draft_authority is not None and decision.authorization_id is not None:
+        consumption_receipt = DraftPullRequestConsumptionReceipt(
+            request_id=current_request_id,
+            authorization_id=decision.authorization_id,
+            provider=draft_authority.provider,
+            repository=draft_authority.repository,
+            base_ref=draft_authority.base_ref,
+            head_ref=draft_authority.head_ref,
+            head_commit=draft_authority.head_commit,
+            consumed_at=routed_at,
+        )
+    return LaterActionRoutingDecision(
+        may_execute_same_turn=not issues,
+        must_stop=bool(issues),
+        authorization_id=decision.authorization_id,
+        issues=tuple(sorted(set(issues))),
+        consumption_receipt=consumption_receipt,
+    )
 
 
 def validate_continuity_bundle(
@@ -1111,9 +1528,22 @@ def validate_continuity_bundle(
             for issue in continuation_issues
             if issue != "one-increment approval mode requires a stop"
         )
-    issues.extend(validate_resume_context(resume, resume))
+    issues.extend(validate_resume_record(resume))
+    bundle_resume_bindings = {
+        "program_id": handoff_record.program_id,
+        "program_revision": handoff_record.program_revision,
+        "workspace_path": handoff_record.workspace_path,
+        "workspace_branch": handoff_record.workspace_branch,
+        "workspace_base_commit": handoff_record.base_commit,
+        "workspace_head_commit": handoff_record.head_commit,
+        "accepted_review_packet_sha256": handoff_record.accepted_review_packet_sha256,
+        "accepted_handoff_addendum_sha256": handoff_record.accepted_handoff_addendum_sha256,
+    }
+    for name, expected_value in bundle_resume_bindings.items():
+        if getattr(resume, name) != expected_value:
+            issues.append(f"resume {name} mismatch")
     if not issues:
-        if render_increment_brief(brief_record) != brief_markdown:
+        if not _matches_supported_increment_brief(brief_record, brief_markdown):
             issues.append("rendered brief does not match the bound Markdown")
         if render_handoff(handoff_record) != handoff_markdown:
             issues.append("rendered handoff does not match the bound Markdown")

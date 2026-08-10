@@ -97,10 +97,13 @@ class DisposableProgramPilotTests(unittest.TestCase):
             "review_bundle_valid",
             "increment_acceptance_allowed",
             "resume_valid",
+            "continuation_authority_valid",
+            "compound_checkpoint_valid",
             "pilot_reconciliation_valid",
             "pilot_closure_packet_valid",
             "draft_pr_denied_without_grant",
             "draft_pr_decision_authorized_with_exact_grant",
+            "draft_pr_same_turn_blocked_without_remote",
         ):
             self.assertTrue(evidence[field], field)
         for field in (

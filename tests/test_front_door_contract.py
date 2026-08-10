@@ -25,6 +25,13 @@ EXPECTED_MANIFEST = {
 }
 
 OBLIGATION_PATTERNS = {
+    "route deterministic program discovery": (
+        r"\[Program discovery\]\(references/program-discovery\.md\)",
+        r"explicit.*manifest",
+        r"source-plan path",
+        r"closed program",
+        r"human selection",
+    ),
     "locate named or implied program manifest": (
         r"program manifest",
         r"named or implied",
@@ -127,6 +134,21 @@ OBLIGATION_PATTERNS = {
         r"reconciliation",
         r"closure approval",
         r"later action",
+    ),
+    "route compound approval checkpoints": (
+        r"\[Approval checkpoints\]\(references/approval-checkpoints\.md\)",
+        r"fully bound",
+        r"one checkpoint",
+        r"separate.*receipt",
+        r"commit.*explicit",
+        r"high-consequence",
+    ),
+    "route optional post-closure housekeeping proposal": (
+        r"\[Post-closure housekeeping\]\(references/post-closure-housekeeping\.md\)",
+        r"closed program",
+        r"dry-run proposal",
+        r"destructive-operation",
+        r"never.*cleanup",
     ),
 }
 

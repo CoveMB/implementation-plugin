@@ -15,8 +15,18 @@ from datetime import date
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from program_authority import load_json_object, resolve_managed_path, sha256_file
-from state_authority import RepositoryObservation, validate_state_authority
+from program_authority import (
+    load_json_lines,
+    load_json_object,
+    resolve_managed_path,
+    sha256_file,
+)
+from state_authority import (
+    ActionBinding,
+    RepositoryObservation,
+    decide_action_authorization,
+    validate_state_authority,
+)
 
 
 REPOSITORY_INSPECTION_SCHEMA = "implementation-repository-inspection/v1"
@@ -1104,17 +1114,32 @@ def _validate_bound_plan_digest(program_root: Path, plan_path: Path) -> list[str
     if status is None:
         return sorted(set(issues))
     actual = sha256_file(supplied_plan)
-    if actual not in {
-        status.get("approved_exact_file_plan_sha256"),
-        status.get("pending_exact_file_plan_sha256"),
-    }:
-        issues.append("current exact-file plan digest does not match persisted state")
-    authorization = status.get("transition_authorization")
-    authorization_id = (
-        authorization.get("action_authorization_id")
-        if isinstance(authorization, dict)
-        else None
-    )
+    is_v2 = status.get("schema_version") == "implementation-program-status/v2"
+    if is_v2:
+        if status.get("approved_exact_file_plan_sha256") != actual:
+            issues.append("v2 execution requires the approved exact-file plan")
+        authorization = status.get("execution_authorization")
+        authorization_id = (
+            authorization.get("authorization_id")
+            if isinstance(authorization, dict)
+            else None
+        )
+        authorization_scope = (
+            authorization.get("scope") if isinstance(authorization, dict) else None
+        )
+    else:
+        if actual not in {
+            status.get("approved_exact_file_plan_sha256"),
+            status.get("pending_exact_file_plan_sha256"),
+        }:
+            issues.append("current exact-file plan digest does not match persisted state")
+        authorization = status.get("transition_authorization")
+        authorization_id = (
+            authorization.get("action_authorization_id")
+            if isinstance(authorization, dict)
+            else None
+        )
+        authorization_scope = None
     records_path, record_path_issues = resolve_managed_path(
         root,
         logical_roles.get("action_authorizations"),
@@ -1122,13 +1147,9 @@ def _validate_bound_plan_digest(program_root: Path, plan_path: Path) -> list[str
     )
     issues.extend(record_path_issues)
     if records_path is not None:
-        try:
-            records = [
-                json.loads(line)
-                for line in records_path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-        except (OSError, UnicodeError, json.JSONDecodeError):
+        records, record_issues = load_json_lines(records_path)
+        issues.extend(record_issues)
+        if records is None:
             records = []
         source = manifest.get("source_binding")
         program = manifest.get("program_binding")
@@ -1157,24 +1178,52 @@ def _validate_bound_plan_digest(program_root: Path, plan_path: Path) -> list[str
             "exact_file_plan_sha256": actual,
             "approval_mode": status.get("approval_mode"),
         }
-        matching = []
-        for record in records:
-            scope = record.get("scope")
+        if is_v2 and isinstance(authorization_scope, str) and expected_workspace is not None:
+            binding = ActionBinding(
+                action="modify-workspace",
+                scope=authorization_scope,
+                program_id=str(expected_fields["program_id"]),
+                program_revision=int(expected_fields["program_revision"]),
+                source_id=str(expected_fields["source_id"]),
+                source_sha256=str(expected_fields["source_sha256"]),
+                program_sha256=str(expected_fields["program_sha256"]),
+                semantic_requirements_sha256=str(
+                    expected_fields["semantic_requirements_sha256"]
+                ),
+                increment_id=str(expected_fields["increment_id"]),
+                brief_sha256=str(expected_fields["brief_sha256"]),
+                exact_file_plan_sha256=actual,
+                approval_mode=str(expected_fields["approval_mode"]),
+                workspace_path=str(expected_workspace["path"]),
+                workspace_branch=str(expected_workspace["branch"]),
+                workspace_base_commit=str(expected_workspace["base_commit"]),
+                workspace_head_commit=str(expected_workspace["head_commit"]),
+            )
+            decision = decide_action_authorization(records, binding)
             if (
-                record.get("schema_version") == "implementation-action-authorization/v1"
-                and record.get("authorization_id") == authorization_id
-                and record.get("decision") == "authorized"
-                and isinstance(record.get("actions"), list)
-                and "modify-workspace" in record["actions"]
-                and isinstance(scope, list)
-                and scope
-                and all(isinstance(item, str) and item for item in scope)
-                and all(record.get(field) == value for field, value in expected_fields.items())
-                and record.get("workspace") == expected_workspace
+                not decision.authorized
+                or decision.authorization_id != authorization_id
             ):
-                matching.append(record)
-        if len(matching) != 1:
-            issues.append("no exact current write authorization matches the plan digest")
+                issues.append("no exact current write authorization matches the plan digest")
+        else:
+            matching = []
+            for record in records:
+                scope = record.get("scope")
+                if (
+                    record.get("schema_version") == "implementation-action-authorization/v1"
+                    and record.get("authorization_id") == authorization_id
+                    and record.get("decision") == "authorized"
+                    and isinstance(record.get("actions"), list)
+                    and "modify-workspace" in record["actions"]
+                    and isinstance(scope, list)
+                    and scope
+                    and all(isinstance(item, str) and item for item in scope)
+                    and all(record.get(field) == value for field, value in expected_fields.items())
+                    and record.get("workspace") == expected_workspace
+                ):
+                    matching.append(record)
+            if len(matching) != 1:
+                issues.append("no exact current write authorization matches the plan digest")
     return sorted(set(issues))
 
 

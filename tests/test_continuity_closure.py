@@ -256,6 +256,11 @@ class ImmutableRecordTests(unittest.TestCase):
 
 
 class BriefAndHandoffTests(unittest.TestCase):
+    def test_copy_ready_prompt_explicitly_invokes_front_door_skill(self) -> None:
+        rendered = CONTINUITY.render_increment_brief(brief())
+
+        self.assertEqual(rendered.splitlines()[0], "$implementing-staged-plans")
+
     def test_minimal_brief_has_all_semantics_and_deterministic_markdown(self) -> None:
         self.assertEqual(CONTINUITY.validate_increment_brief(brief()), [])
         rendered = CONTINUITY.render_increment_brief(brief())
@@ -364,6 +369,154 @@ class ContinuationAndResumeTests(unittest.TestCase):
             )
         self.assertIn("state drift", issues)
 
+    def test_explicit_resume_request_materializes_and_validates_the_full_context(self) -> None:
+        expected = resume_context()
+        record = CONTINUITY.build_continuation_authorization(
+            expected,
+            authorization_id="CATALOG-RESUME-AUTH",
+            user_request_id="REQUEST-RESUME-CATALOG",
+            requested_action="modify-workspace",
+            requested_scope="continue the exact catalog index increment",
+            issued_at="2000-08-10T12:00:00Z",
+            expires_at="2999-08-10T13:00:00Z",
+        )
+
+        self.assertEqual(
+            CONTINUITY.validate_continuation_authority(
+                expected,
+                expected,
+                (record,),
+                user_request_id="REQUEST-RESUME-CATALOG",
+                requested_action="modify-workspace",
+                requested_scope="continue the exact catalog index increment",
+            ),
+            [],
+        )
+        for field, changed in {
+            "source_sha256": "0" * 64,
+            "program_sha256": "0" * 64,
+            "semantic_requirements_sha256": "0" * 64,
+            "workspace_path": "/other",
+            "workspace_branch": "other",
+            "workspace_base_commit": "c" * 40,
+            "workspace_head_commit": "d" * 40,
+            "status_sha256": "0" * 64,
+            "status_sequence": 15,
+            "brief_sha256": "0" * 64,
+            "handoff_sha256": "0" * 64,
+            "accepted_review_packet_sha256": "0" * 64,
+            "accepted_handoff_addendum_sha256": "0" * 64,
+        }.items():
+            with self.subTest(field=field):
+                stale = {**record, field: changed}
+                issues = CONTINUITY.validate_continuation_authority(
+                    expected,
+                    expected,
+                    (stale,),
+                    user_request_id="REQUEST-RESUME-CATALOG",
+                    requested_action="modify-workspace",
+                    requested_scope="continue the exact catalog index increment",
+                )
+                self.assertIn("exactly one current continuation authorization", issues)
+
+    def test_resume_authority_rejects_handoff_only_duplicate_revoked_expired_and_wrong_request(self) -> None:
+        expected = resume_context()
+        record = CONTINUITY.build_continuation_authorization(
+            expected,
+            authorization_id="CATALOG-RESUME-AUTH",
+            user_request_id="REQUEST-RESUME-CATALOG",
+            requested_action="modify-workspace",
+            requested_scope="continue the exact catalog index increment",
+            issued_at="2000-08-10T12:00:00Z",
+            expires_at="2999-08-10T13:00:00Z",
+        )
+
+        scenarios = (
+            (),
+            (record, dict(record)),
+            ({**record, "revoked": True},),
+            ({**record, "expires_at": "2000-01-01T00:00:00Z"},),
+            ({**record, "decision": "denied"},),
+        )
+        for records in scenarios:
+            with self.subTest(records=records):
+                self.assertTrue(
+                    CONTINUITY.validate_continuation_authority(
+                        expected,
+                        expected,
+                        records,
+                        user_request_id="REQUEST-RESUME-CATALOG",
+                        requested_action="modify-workspace",
+                        requested_scope="continue the exact catalog index increment",
+                    )
+                )
+        wrong_request = CONTINUITY.validate_continuation_authority(
+            expected,
+            expected,
+            (record,),
+            user_request_id="REQUEST-OTHER",
+            requested_action="modify-workspace",
+            requested_scope="continue the exact catalog index increment",
+        )
+        self.assertIn("exactly one current continuation authorization", wrong_request)
+
+    def test_resume_authority_is_live_only_within_its_issuance_interval(self) -> None:
+        expected = resume_context()
+        record = CONTINUITY.build_continuation_authorization(
+            expected,
+            authorization_id="CATALOG-RESUME-AUTH",
+            user_request_id="REQUEST-RESUME-CATALOG",
+            requested_action="modify-workspace",
+            requested_scope="continue the exact catalog index increment",
+            issued_at="2000-08-10T12:00:00Z",
+            expires_at="2999-08-10T13:00:00Z",
+        )
+        common = {
+            "user_request_id": "REQUEST-RESUME-CATALOG",
+            "requested_action": "modify-workspace",
+            "requested_scope": "continue the exact catalog index increment",
+        }
+
+        self.assertEqual(
+            CONTINUITY.validate_continuation_authority(
+                expected,
+                expected,
+                (record,),
+                **common,
+            ),
+            [],
+        )
+        for changed in (
+            {
+                **record,
+                "issued_at": "2998-08-10T12:00:00Z",
+                "expires_at": "2999-08-10T13:00:00Z",
+            },
+            {
+                **record,
+                "issued_at": "2999-08-10T12:00:00Z",
+                "expires_at": "2998-08-10T13:00:00Z",
+            },
+        ):
+            with self.subTest(changed=changed):
+                issues = CONTINUITY.validate_continuation_authority(
+                    expected,
+                    expected,
+                    (changed,),
+                    **common,
+                )
+                self.assertIn("continuation authorization is not currently valid", issues)
+        with self.assertRaisesRegex(ValueError, "valid issuance interval"):
+            CONTINUITY.build_continuation_authorization(
+                expected,
+                authorization_id="CATALOG-RESUME-AUTH",
+                user_request_id="REQUEST-RESUME-CATALOG",
+                requested_action="modify-workspace",
+                requested_scope="continue the exact catalog index increment",
+                issued_at="2999-08-10T12:00:00Z",
+                expires_at="2998-08-10T13:00:00Z",
+            )
+
 
 class RolloverTests(unittest.TestCase):
     def rollover_values(self, root: Path):
@@ -429,6 +582,13 @@ class RolloverTests(unittest.TestCase):
                 "manifest.json",
                 "state/status.json",
             ))
+            generated_prompt = (
+                root / "increments/catalog-index/brief.md"
+            ).read_text(encoding="utf-8")
+            self.assertEqual(
+                generated_prompt.splitlines()[0],
+                "$implementing-staged-plans",
+            )
             self.assertFalse(receipt.requires_fresh_resume)
 
     def test_rollover_adopts_exact_existing_navigation_without_rewrite(self) -> None:
@@ -619,6 +779,395 @@ class RolloverTests(unittest.TestCase):
 
 
 class ClosureAndLaterActionTests(unittest.TestCase):
+    def draft_preflight(
+        self,
+        decision,
+        remote,
+        *,
+        prior_consumptions=(),
+        checked_at="2026-08-10T12:00:00Z",
+        valid_until="2026-08-10T12:05:00Z",
+    ):
+        return CONTINUITY.DraftPullRequestPreflight(
+            request_id="REQUEST-DRAFT-CATALOG",
+            authorization_id=str(decision.authorization_id),
+            checked_at=checked_at,
+            valid_until=valid_until,
+            remote_head=remote,
+            prior_consumptions=prior_consumptions,
+        )
+
+    def authorized_later_action(self, action="create-draft-pull-request"):
+        approval = bound_record({
+            "schema_version": "implementation-approval/v1",
+            "type": "program-closure-approval",
+            "decision": "approved",
+            "closure_reconciliation_sha256": "c" * 64,
+            "closure_packet_sha256": "d" * 64,
+        })
+        scope = "open the reviewed catalog as a draft"
+        draft_request = (
+            CONTINUITY.DraftPullRequestAuthority(
+                request_id="REQUEST-DRAFT-CATALOG",
+                provider="github",
+                repository="example/portable-catalog",
+                base_ref="main",
+                head_ref="catalog-maintenance",
+                head_commit="a" * 40,
+                draft=True,
+                push_requested=False,
+            )
+            if action == "create-draft-pull-request"
+            else None
+        )
+        draft_binding = (
+            {
+                "user_request_id": draft_request.request_id,
+                "remote_provider": draft_request.provider,
+                "remote_repository": draft_request.repository,
+                "base_ref": draft_request.base_ref,
+                "head_ref": draft_request.head_ref,
+                "head_commit": draft_request.head_commit,
+                "draft": draft_request.draft,
+                "push_requested": draft_request.push_requested,
+            }
+            if draft_request is not None
+            else {}
+        )
+        grant = bound_record({
+            "schema_version": "implementation-action-authorization/v1",
+            "authorization_id": "CATALOG-LATER-ACTION",
+            "decision": "authorized",
+            "actions": [action],
+            "scope": [scope],
+            "closure_reconciliation_sha256": "c" * 64,
+            "closure_packet_sha256": "d" * 64,
+            **draft_binding,
+            **({"expires_at": "2999-08-10T13:00:00Z"} if draft_request else {}),
+        })
+        decision = CONTINUITY.decide_later_action(
+            program_state="closed",
+            action=action,
+            scope=scope,
+            reconciliation_sha256="c" * 64,
+            closure_packet_sha256="d" * 64,
+            closure_approvals=(approval,),
+            action_authorizations=(grant,),
+            recovery_evidence=(
+                "exact provider recovery"
+                if action in CONTINUITY.RECOVERY_REQUIRED_ACTIONS
+                else "none required"
+            ),
+            authority_context=authority_context(),
+            draft_pull_request=draft_request,
+        )
+        self.assertTrue(decision.authorized, decision.issues)
+        return decision, scope
+
+    def test_exact_existing_remote_head_can_route_draft_pr_in_the_current_request(self) -> None:
+        decision, scope = self.authorized_later_action()
+        remote = CONTINUITY.RemoteHeadObservation(
+            provider="github",
+            repository="example/portable-catalog",
+            base_ref="main",
+            head_ref="catalog-maintenance",
+            head_commit="a" * 40,
+            remote_ref_exists=True,
+            requires_push=False,
+            draft=True,
+        )
+
+        routed = CONTINUITY.route_later_action(
+            decision,
+            action="create-draft-pull-request",
+            scope=scope,
+            current_request_id="REQUEST-DRAFT-CATALOG",
+            current_request_action="create-draft-pull-request",
+            current_request_scope=scope,
+            authority_context=authority_context(),
+            preflight=self.draft_preflight(decision, remote),
+            routed_at="2026-08-10T12:01:00Z",
+        )
+
+        self.assertTrue(routed.may_execute_same_turn, routed.issues)
+        self.assertFalse(routed.must_stop)
+        self.assertEqual(routed.authorization_id, decision.authorization_id)
+
+    def test_draft_pr_routing_denies_push_stale_remote_or_implicit_request(self) -> None:
+        decision, scope = self.authorized_later_action()
+        valid = CONTINUITY.RemoteHeadObservation(
+            provider="github",
+            repository="example/portable-catalog",
+            base_ref="main",
+            head_ref="catalog-maintenance",
+            head_commit="a" * 40,
+            remote_ref_exists=True,
+            requires_push=False,
+            draft=True,
+        )
+        cases = (
+            {"preflight": self.draft_preflight(decision, replace(valid, requires_push=True))},
+            {"preflight": self.draft_preflight(decision, replace(valid, remote_ref_exists=False))},
+            {"preflight": self.draft_preflight(decision, replace(valid, head_commit="f" * 40))},
+            {"preflight": self.draft_preflight(decision, replace(valid, repository="other/catalog"))},
+            {"preflight": self.draft_preflight(decision, replace(valid, draft=False))},
+            {"current_request_id": ""},
+            {"current_request_action": "merge"},
+            {"current_request_scope": "different scope"},
+            {"preflight": self.draft_preflight(decision, valid, valid_until="2026-08-10T12:00:30Z")},
+        )
+        common = {
+            "action": "create-draft-pull-request",
+            "scope": scope,
+            "current_request_id": "REQUEST-DRAFT-CATALOG",
+            "current_request_action": "create-draft-pull-request",
+            "current_request_scope": scope,
+            "authority_context": authority_context(),
+            "preflight": self.draft_preflight(decision, valid),
+            "routed_at": "2026-08-10T12:01:00Z",
+        }
+        for overrides in cases:
+            with self.subTest(overrides=overrides):
+                routed = CONTINUITY.route_later_action(
+                    decision, **{**common, **overrides}
+                )
+                self.assertFalse(routed.may_execute_same_turn)
+                self.assertTrue(routed.must_stop)
+
+    def test_high_consequence_later_actions_always_stop_after_authorization(self) -> None:
+        decision, scope = self.authorized_later_action("merge")
+        routed = CONTINUITY.route_later_action(
+            decision,
+            action="merge",
+            scope=scope,
+            current_request_id="REQUEST-MERGE-CATALOG",
+            current_request_action="merge",
+            current_request_scope=scope,
+            authority_context=authority_context(),
+            preflight=None,
+            routed_at="2026-08-10T12:01:00Z",
+        )
+
+        self.assertFalse(routed.may_execute_same_turn)
+        self.assertTrue(routed.must_stop)
+        self.assertIn("mandatory stop", routed.issues)
+
+    def test_draft_pr_route_rejects_request_replay_and_joint_target_change(self) -> None:
+        decision, scope = self.authorized_later_action()
+        original = CONTINUITY.RemoteHeadObservation(
+            provider="github",
+            repository="example/portable-catalog",
+            base_ref="main",
+            head_ref="catalog-maintenance",
+            head_commit="a" * 40,
+            remote_ref_exists=True,
+            requires_push=False,
+            draft=True,
+        )
+        common = {
+            "action": "create-draft-pull-request",
+            "scope": scope,
+            "current_request_id": "REQUEST-DRAFT-CATALOG",
+            "current_request_action": "create-draft-pull-request",
+            "current_request_scope": scope,
+            "authority_context": authority_context(),
+            "preflight": self.draft_preflight(decision, original),
+            "routed_at": "2026-08-10T12:01:00Z",
+        }
+
+        replayed = CONTINUITY.route_later_action(
+            decision,
+            **{**common, "current_request_id": "REQUEST-REPLAYED"},
+        )
+        changed_target = CONTINUITY.route_later_action(
+            decision,
+            **{
+                **common,
+                "preflight": self.draft_preflight(
+                    decision,
+                    replace(
+                        original,
+                        repository="other/portable-catalog",
+                        head_ref="other-maintenance",
+                    ),
+                ),
+            },
+        )
+
+        self.assertFalse(replayed.may_execute_same_turn)
+        self.assertTrue(replayed.must_stop)
+        self.assertFalse(changed_target.may_execute_same_turn)
+        self.assertTrue(changed_target.must_stop)
+
+    def test_draft_pr_route_rejects_an_exact_consumed_request_replay(self) -> None:
+        decision, scope = self.authorized_later_action()
+        remote = CONTINUITY.RemoteHeadObservation(
+            provider="github",
+            repository="example/portable-catalog",
+            base_ref="main",
+            head_ref="catalog-maintenance",
+            head_commit="a" * 40,
+            remote_ref_exists=True,
+            requires_push=False,
+            draft=True,
+        )
+        try:
+            preflight = CONTINUITY.DraftPullRequestPreflight(
+                request_id="REQUEST-DRAFT-CATALOG",
+                authorization_id=str(decision.authorization_id),
+                checked_at="2026-08-10T12:00:00Z",
+                valid_until="2026-08-10T12:05:00Z",
+                remote_head=remote,
+                prior_consumptions=(),
+            )
+            first = CONTINUITY.route_later_action(
+                decision,
+                action="create-draft-pull-request",
+                scope=scope,
+                current_request_id="REQUEST-DRAFT-CATALOG",
+                current_request_action="create-draft-pull-request",
+                current_request_scope=scope,
+                authority_context=authority_context(),
+                preflight=preflight,
+                routed_at="2026-08-10T12:01:00Z",
+            )
+        except (AttributeError, TypeError) as error:
+            self.fail(f"draft route lacks request consumption evidence: {error}")
+
+        self.assertTrue(first.may_execute_same_turn, first.issues)
+        self.assertIsNotNone(first.consumption_receipt)
+        replay_preflight = replace(
+            preflight,
+            prior_consumptions=(first.consumption_receipt,),
+        )
+        replayed = CONTINUITY.route_later_action(
+            decision,
+            action="create-draft-pull-request",
+            scope=scope,
+            current_request_id="REQUEST-DRAFT-CATALOG",
+            current_request_action="create-draft-pull-request",
+            current_request_scope=scope,
+            authority_context=authority_context(),
+            preflight=replay_preflight,
+            routed_at="2026-08-10T12:02:00Z",
+        )
+
+        self.assertFalse(replayed.may_execute_same_turn)
+        self.assertTrue(replayed.must_stop)
+        self.assertIn("draft pull request request was already consumed", replayed.issues)
+
+    def test_draft_pr_route_revalidates_grant_expiry(self) -> None:
+        decision, scope = self.authorized_later_action()
+        remote = CONTINUITY.RemoteHeadObservation(
+            provider="github",
+            repository="example/portable-catalog",
+            base_ref="main",
+            head_ref="catalog-maintenance",
+            head_commit="a" * 40,
+            remote_ref_exists=True,
+            requires_push=False,
+            draft=True,
+        )
+
+        routed = CONTINUITY.route_later_action(
+            decision,
+            action="create-draft-pull-request",
+            scope=scope,
+            current_request_id="REQUEST-DRAFT-CATALOG",
+            current_request_action="create-draft-pull-request",
+            current_request_scope=scope,
+            authority_context=authority_context(),
+            preflight=self.draft_preflight(
+                decision,
+                remote,
+                checked_at="3000-08-10T12:00:00Z",
+                valid_until="3000-08-10T12:05:00Z",
+            ),
+            routed_at="3000-08-10T12:01:00Z",
+        )
+
+        self.assertFalse(routed.may_execute_same_turn)
+        self.assertTrue(routed.must_stop)
+        self.assertIn("draft pull request grant is not current", routed.issues)
+        self.assertIsNone(routed.consumption_receipt)
+
+    def test_draft_pr_decision_requires_request_and_remote_bound_grant(self) -> None:
+        scope = "open the reviewed catalog as a draft"
+        approval = bound_record({
+            "schema_version": "implementation-approval/v1",
+            "type": "program-closure-approval",
+            "decision": "approved",
+            "closure_reconciliation_sha256": "c" * 64,
+            "closure_packet_sha256": "d" * 64,
+        })
+        draft_request = CONTINUITY.DraftPullRequestAuthority(
+            request_id="REQUEST-DRAFT-CATALOG",
+            provider="github",
+            repository="example/portable-catalog",
+            base_ref="main",
+            head_ref="catalog-maintenance",
+            head_commit="a" * 40,
+            draft=True,
+            push_requested=False,
+        )
+        grant = bound_record({
+            "schema_version": "implementation-action-authorization/v1",
+            "authorization_id": "CATALOG-DRAFT-PR",
+            "decision": "authorized",
+            "actions": ["create-draft-pull-request"],
+            "scope": [scope],
+            "closure_reconciliation_sha256": "c" * 64,
+            "closure_packet_sha256": "d" * 64,
+            "user_request_id": draft_request.request_id,
+            "remote_provider": draft_request.provider,
+            "remote_repository": draft_request.repository,
+            "base_ref": draft_request.base_ref,
+            "head_ref": draft_request.head_ref,
+            "head_commit": draft_request.head_commit,
+            "draft": True,
+            "push_requested": False,
+            "expires_at": "2999-08-10T13:00:00Z",
+        })
+        common = {
+            "program_state": "closed",
+            "action": "create-draft-pull-request",
+            "scope": scope,
+            "reconciliation_sha256": "c" * 64,
+            "closure_packet_sha256": "d" * 64,
+            "closure_approvals": (approval,),
+            "recovery_evidence": "none required",
+            "authority_context": authority_context(),
+        }
+
+        wrong_request = CONTINUITY.decide_later_action(
+            **common,
+            action_authorizations=(grant,),
+            draft_pull_request=replace(
+                draft_request,
+                request_id="REQUEST-REPLAYED",
+            ),
+        )
+        wrong_target = CONTINUITY.decide_later_action(
+            **common,
+            action_authorizations=(grant,),
+            draft_pull_request=replace(
+                draft_request,
+                repository="other/portable-catalog",
+            ),
+        )
+        unbounded_grant = dict(grant)
+        unbounded_grant.pop("expires_at")
+        unbounded = CONTINUITY.decide_later_action(
+            **common,
+            action_authorizations=(unbounded_grant,),
+            draft_pull_request=draft_request,
+        )
+
+        self.assertFalse(wrong_request.authorized)
+        self.assertFalse(wrong_target.authorized)
+        self.assertFalse(unbounded.authorized)
+        self.assertIn("same-turn draft grant requires bounded expiry", unbounded.issues)
+
     def test_reconciliation_requires_complete_exact_fresh_resolution(self) -> None:
         self.assertEqual(CONTINUITY.validate_closure_reconciliation(reconciliation()), [])
         cases = (
@@ -772,6 +1321,27 @@ class BundleAndCliTests(unittest.TestCase):
             closure_packet_markdown=(FIXTURE_ROOT / "closure-packet.md").read_text(encoding="utf-8"),
         )
         self.assertEqual(issues, [])
+
+    def test_bundle_resume_is_compared_with_independent_handoff_bindings(self) -> None:
+        evidence = json.loads(
+            (FIXTURE_ROOT / "continuity-evidence.json").read_text(encoding="utf-8")
+        )
+        evidence["resume"]["accepted_review_packet_sha256"] = "e" * 64
+
+        issues = CONTINUITY.validate_continuity_bundle(
+            evidence,
+            brief_markdown=(FIXTURE_ROOT / "next-increment-brief.md").read_text(
+                encoding="utf-8"
+            ),
+            handoff_markdown=(FIXTURE_ROOT / "handoff.md").read_text(
+                encoding="utf-8"
+            ),
+        )
+
+        self.assertIn(
+            "accepted_review_packet_sha256 mismatch",
+            " ".join(issues),
+        )
 
     def test_fixture_negative_scenarios_cover_continuity_and_authority_boundaries(self) -> None:
         evidence = json.loads((FIXTURE_ROOT / "continuity-evidence.json").read_text(encoding="utf-8"))

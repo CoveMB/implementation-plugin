@@ -565,6 +565,44 @@ class ExactPlanTests(unittest.TestCase):
         issues = PREPARATION._validate_bound_plan_digest(self.fixture.root, self.plan_path)
         self.assertTrue(any("no exact current write authorization" in issue for issue in issues))
 
+    def test_v2_plan_requires_approved_state_and_exact_live_execution_grant(self) -> None:
+        _, authorization_path, authorization = self.write_bound_program_state()
+        status_path = self.fixture.root / "state/status.json"
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+        status.update(
+            schema_version="implementation-program-status/v2",
+            current_increment_state="authorized",
+            execution_authorization={
+                "authorization_id": "archive-write-authorization",
+                "scope": "modify only the bound archive catalog files",
+            },
+        )
+        status.pop("transition_authorization")
+        status_path.write_text(json.dumps(status), encoding="utf-8")
+
+        self.assertEqual(
+            PREPARATION._validate_bound_plan_digest(self.fixture.root, self.plan_path),
+            [],
+        )
+
+        authorization["revoked"] = True
+        authorization_path.write_text(json.dumps(authorization) + "\n", encoding="utf-8")
+        issues = PREPARATION._validate_bound_plan_digest(
+            self.fixture.root, self.plan_path
+        )
+        self.assertTrue(any("no exact current write authorization" in issue for issue in issues))
+
+        authorization.pop("revoked")
+        authorization_path.write_text(json.dumps(authorization) + "\n", encoding="utf-8")
+        status["approved_exact_file_plan_sha256"] = None
+        status["pending_exact_file_plan_sha256"] = sha256_file(self.plan_path)
+        status["current_increment_state"] = "awaiting-plan-approval"
+        status_path.write_text(json.dumps(status), encoding="utf-8")
+        issues = PREPARATION._validate_bound_plan_digest(
+            self.fixture.root, self.plan_path
+        )
+        self.assertTrue(any("approved exact-file plan" in issue for issue in issues))
+
     def test_preparation_must_be_manifest_owned_and_status_bound(self) -> None:
         preparation_path, _, _ = self.write_bound_program_state()
         self.assertEqual(

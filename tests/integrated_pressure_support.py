@@ -38,6 +38,7 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 sys.path.insert(0, str(SCRIPT_ROOT))
 try:
+    import approval_checkpoint
     import continuity_closure
     import execution_discipline
     import program_authority
@@ -593,8 +594,27 @@ class DisposableProgramPilot:
             active_git_operation=None,
             matching_authorization_ids=("PORTABLE-LIBRARY-RESUME",),
         )
-        if continuity_closure.validate_resume_context(resume, resume):
+        if continuity_closure.validate_resume_record(resume):
             raise ValueError("disposable pilot resume failed validation")
+        continuation_record = continuity_closure.build_continuation_authorization(
+            resume,
+            authorization_id="PORTABLE-LIBRARY-RESUME",
+            user_request_id="PORTABLE-LIBRARY-REQUEST",
+            requested_action="resume-program",
+            requested_scope="resume the exact portable library program context",
+            issued_at="2026-08-09T12:00:00Z",
+            expires_at="2999-08-09T12:00:00Z",
+        )
+        continuation_issues = continuity_closure.validate_continuation_authority(
+            resume,
+            resume,
+            (continuation_record,),
+            user_request_id="PORTABLE-LIBRARY-REQUEST",
+            requested_action="resume-program",
+            requested_scope="resume the exact portable library program context",
+        )
+        if continuation_issues:
+            raise ValueError("disposable pilot continuation authority failed validation")
 
         requirement_ids = tuple(
             f"LIBRARY-CATALOG-{index:03d}" for index in range(1, requirement_count + 1)
@@ -685,6 +705,51 @@ class DisposableProgramPilot:
                 "head_commit": clone_head_before,
             },
         }
+        checkpoint = approval_checkpoint.build_checkpoint(
+            (
+                approval_checkpoint.AuthorityRequirement(
+                    requirement_id="approve-portable-plan",
+                    kind="approval",
+                    summary="Approve the exact portable library plan.",
+                    record={
+                        **authority_context,
+                        "schema_version": "implementation-approval/v1",
+                        "event_id": "PORTABLE-LIBRARY-PLAN-APPROVAL",
+                        "type": "exact-file-plan-approval",
+                        "scope": ["approve the exact portable library plan"],
+                    },
+                ),
+                approval_checkpoint.AuthorityRequirement(
+                    requirement_id="execute-portable-plan",
+                    kind="action",
+                    summary="Authorize bounded local implementation and verification.",
+                    record={
+                        **authority_context,
+                        "schema_version": "implementation-action-authorization/v1",
+                        "authorization_id": "PORTABLE-LIBRARY-EXECUTION",
+                        "actions": ["modify-workspace", "run-local-verification"],
+                        "scope": ["implement the exact portable library plan"],
+                    },
+                    prerequisites=("approve-portable-plan",),
+                ),
+            ),
+            (),
+            (),
+        )
+        resolved_checkpoint = approval_checkpoint.resolve_checkpoint(
+            checkpoint,
+            {
+                "approve-portable-plan": "approve",
+                "execute-portable-plan": "authorize",
+            },
+        )
+        compound_checkpoint_valid = (
+            not checkpoint.blocked_requirement_ids
+            and len(resolved_checkpoint.approval_records) == 1
+            and len(resolved_checkpoint.action_records) == 1
+        )
+        if not compound_checkpoint_valid:
+            raise ValueError("disposable pilot compound checkpoint failed validation")
         closure_approval = {
             **authority_context,
             "schema_version": "implementation-approval/v1",
@@ -704,6 +769,16 @@ class DisposableProgramPilot:
             recovery_evidence="none required",
             authority_context=authority_context,
         )
+        draft_request = continuity_closure.DraftPullRequestAuthority(
+            request_id="PORTABLE-LIBRARY-DRAFT-REQUEST",
+            provider="portable-provider",
+            repository="portable-library",
+            base_ref="main",
+            head_ref="library-maintenance",
+            head_commit=clone_head_before,
+            draft=True,
+            push_requested=False,
+        )
         grant = {
             **authority_context,
             "schema_version": "implementation-action-authorization/v1",
@@ -713,6 +788,15 @@ class DisposableProgramPilot:
             "scope": ["open the portable library candidate as a draft"],
             "closure_reconciliation_sha256": reconciliation_sha256,
             "closure_packet_sha256": closure_packet_sha256,
+            "user_request_id": draft_request.request_id,
+            "remote_provider": draft_request.provider,
+            "remote_repository": draft_request.repository,
+            "base_ref": draft_request.base_ref,
+            "head_ref": draft_request.head_ref,
+            "head_commit": draft_request.head_commit,
+            "draft": draft_request.draft,
+            "push_requested": draft_request.push_requested,
+            "expires_at": "2999-08-10T13:00:00Z",
         }
         allowed = continuity_closure.decide_later_action(
             program_state="closed",
@@ -724,6 +808,18 @@ class DisposableProgramPilot:
             action_authorizations=(grant,),
             recovery_evidence="none required",
             authority_context=authority_context,
+            draft_pull_request=draft_request,
+        )
+        draft_route = continuity_closure.route_later_action(
+            allowed,
+            action="create-draft-pull-request",
+            scope="open the portable library candidate as a draft",
+            current_request_id="PORTABLE-LIBRARY-DRAFT-REQUEST",
+            current_request_action="create-draft-pull-request",
+            current_request_scope="open the portable library candidate as a draft",
+            authority_context=authority_context,
+            preflight=None,
+            routed_at="2026-08-10T12:01:00Z",
         )
         clone_head_after = _git_output(clone_path, "rev-parse", "HEAD")
         source_status_after = run_command(
@@ -748,10 +844,15 @@ class DisposableProgramPilot:
             "review_bundle_valid": not review_issues,
             "increment_acceptance_allowed": transition.allowed,
             "resume_valid": True,
+            "continuation_authority_valid": not continuation_issues,
+            "compound_checkpoint_valid": compound_checkpoint_valid,
             "pilot_reconciliation_valid": not reconciliation_issues,
             "pilot_closure_packet_valid": True,
             "draft_pr_denied_without_grant": not denied.authorized,
             "draft_pr_decision_authorized_with_exact_grant": allowed.authorized,
+            "draft_pr_same_turn_blocked_without_remote": (
+                draft_route.must_stop and not draft_route.may_execute_same_turn
+            ),
             "draft_pr_performed": False,
             "isp_001_closed": False,
         }

@@ -1,0 +1,14 @@
+{
+  "name": "implementation-workflows",
+  "owner": {
+    "name": "CoveMB"
+  },
+  "plugins": [
+    {
+      "name": "implementation-plugin",
+      "source": "./",
+      "description": "Run approved implementation programs one reviewable increment at a time.",
+      "version": "0.1.0"
+    }
+  ]
+}

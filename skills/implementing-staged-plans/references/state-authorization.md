@@ -43,9 +43,11 @@ Rejected, stale, schema-less, differently scoped, or conflicting records do not 
 
 ## Select a workspace
 
-`select_workspace` records an `implementation-workspace/v1` object from an explicit repository observation. Require both an exact workspace-selection approval and an exact `create-workspace` action authorization. When replacing a selection, supply the current workspace digest and retain it as prior-workspace evidence.
+Legacy `implementation-workspace/v1` selection retains its existing contract: require both an exact workspace-selection approval and an exact `create-workspace` action authorization. This is dual-read compatibility, not a request to rewrite an accepted record.
 
-Selection records repository identity, path, branch, base and head, pre-existing work, active Git operation, approval event, and action authorization. The function writes the record only; it does not create a branch or worktree, run Git, or classify drift.
+For a newly created `implementation-workspace/v2` selection, record the exact approved workspace-selection event as `selection_authority`. Do not claim `create-workspace` action authority when the workspace already exists and selection only adopts the caller-observed path. When replacing either schema, supply the current workspace digest and retain it as prior-workspace evidence.
+
+Selection records repository identity, path, branch, base and head, pre-existing work, active Git operation, and the schema-appropriate authority. The function writes the record only; it does not create a branch or worktree, run Git, or classify drift.
 
 ## Authorize actions separately
 
@@ -55,11 +57,13 @@ Approval policies contain no action grants. Approval of any mode never authorize
 
 ## Persist one transition
 
-Before `apply_state_transition`, revalidate authority and provide a `TransitionRequest` with the expected status digest and sequence, target program and increment states, exact transition event, exact action authorization, and the authorized action scope in its evidence.
+Before `apply_state_transition`, revalidate authority and provide a `TransitionRequest` with the expected status digest and sequence, target program and increment states, exact transition event, schema-appropriate authority, and the controlling action scope in its evidence.
+
+Legacy `implementation-program-status/v1` transitions keep their existing action-authorization contract. New v2 status is dual-read and records an explicit authority union. The exact approval-driven edges are program approval to active, plan approval to authorized, diff approval to accepted, and closure approval to closed. Those governance transitions rely on the matching approved event and do not falsely claim `modify-workspace` authority. Every other declared state change still requires an exact live `modify-workspace` authorization. Plan approval also binds the separately expected execution-authorization identifier and scope; it does not make that future grant exist.
 
 The transition must be a declared matrix edge and satisfy its conditional evidence gates. Blocked state may resume only to its recorded legal target. Terminal state has no same-entity outgoing edge. Starting another increment is a separate operation and requires renewed one-increment authority or suitable conversation-bound full authority.
 
-State replacement uses a same-directory temporary file, flush and file sync, digest compare-and-swap, and atomic replacement. JSON Lines append preserves the exact prior byte prefix and rejects duplicate identifiers. Each receipt reports prior and current digests. This is per-file atomicity, not a multi-file transaction, lock, or hostile-concurrency guarantee.
+State replacement uses a same-directory temporary file, flush and file sync, digest compare-and-swap, and atomic replacement. JSON Lines append preserves the exact prior byte prefix and rejects duplicate identifiers. Each receipt reports prior and current digests. This is per-file atomicity, not a multi-file transaction, lock, or hostile-concurrency guarantee. For an approval plus governance transition plus execution grants, use the ordered and retry-safe checkpoint procedure rather than treating those files as one transaction.
 
 ## Command results and stop conditions
 

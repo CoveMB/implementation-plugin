@@ -14,6 +14,8 @@ Generate a brief from the current approved program and state. Include the progra
 
 Do not copy repository-inspection policy, test or review procedures, hard-stop lists, action prohibitions, exact-file plans, or provisional implementation choices. Validate the structured record before rendering deterministic Markdown.
 
+Render every newly generated next-increment or new-conversation prompt with `$implementing-staged-plans` as its first line. Keep the invocation as a copy-ready wrapper around the lean semantic brief so exact accepted historical brief bytes remain valid without rewriting them.
+
 ## Create a Durable Handoff
 
 After accepted work, bind the handoff to the program revision, current increment, approval mode, workspace, base and head, accepted increments, verification result, accepted packet and addendum, accepted status sequence and digest, amendments, unresolved risks, next legal action, and first-read files. Reject secret-like content and wording that purports to authorize work.
@@ -29,6 +31,8 @@ One-increment modes stop after their increment. `approval:full` can continue aut
 ## Revalidate a Resume
 
 Compare a fresh observation with the exact source, program, semantic digest, workspace, branch, base, head, status sequence and digest, brief, handoff, accepted packet, accepted addendum, and one matching renewed authorization. Reject conflicts, active Git operations, unsupported schemas, duplicate grants, and every mismatched dimension.
+
+Build renewed authority from the complete validated `ResumeContext`, the current user-request identifier, the one requested continuation action, the exact scope, and a bounded validity period. Validation must match the entire context again and require exactly one live, approved, non-revoked record. Never renew from a reduced tuple or infer authority from the handoff.
 
 Do not use handoff prose to repair a controlling mismatch. Return the first authority boundary and the smallest legal recovery action.
 
@@ -57,6 +61,10 @@ Final-increment acceptance leaves the program active. Moving to `awaiting-closur
 Closure approval alone denies every later action. A decision may be authorized only when the program is closed, one exact closure approval matches, one current non-revoked grant matches the requested action and scope, and applicable non-Git recovery evidence exists. Supported decision classes cover draft pull request, merge, publication, release, deployment, migration, destructive operation, and provider or external-state modification.
 
 An authorized decision is not execution. Return the decision and stop; use a separately authorized procedure to perform the action.
+
+One narrow same-turn route exists for creating a draft pull request without pushing. The action grant and resulting decision must bind the exact current request identifier, provider, repository, base branch, head branch, closed workspace head, draft status, `push_requested: false`, and a current bounded expiry. The router accepts only request- and authorization-bound preflight evidence whose checked and valid-until timestamps contain the routing time, and compares its remote observation only with those grant-bound values; caller-supplied substitute targets carry no authority. It also requires an already-existing remote head ref at that exact commit.
+
+The pure router only reports eligibility and returns an exact request-consumption receipt. A downstream executor must durably record that receipt before provider mutation and must supply the complete authoritative prior-consumption set on every route check. An existing receipt for the request or grant, a missing or stale preflight, a missing or different remote ref, a jointly changed target, any push request, a non-draft request, or any other later action returns a mandatory stop. The router neither persists the receipt nor performs the provider action, so callers that cannot establish the complete consumption history must stop. Merge, publication, release, deployment, migration, destructive operations, permission changes, and provider or external-state mutations never use this narrow route.
 
 ## Validate
 

@@ -53,6 +53,18 @@ CONTINUITY_REFERENCE = (
 CONTINUITY_SCRIPT = (
     "skills/implementing-staged-plans/scripts/continuity_closure.py"
 )
+CHECKPOINT_REFERENCE = (
+    "skills/implementing-staged-plans/references/approval-checkpoints.md"
+)
+CHECKPOINT_SCRIPT = (
+    "skills/implementing-staged-plans/scripts/approval_checkpoint.py"
+)
+DISCOVERY_REFERENCE = (
+    "skills/implementing-staged-plans/references/program-discovery.md"
+)
+DISCOVERY_SCRIPT = (
+    "skills/implementing-staged-plans/scripts/program_discovery.py"
+)
 
 
 VALID_MANIFEST = {
@@ -79,6 +91,9 @@ VALID_OPENAI_YAML = """interface:
   display_name: "Implementing Staged Plans"
   short_description: "Advance approved plans in reviewable increments."
   default_prompt: "Use $implementing-staged-plans to advance the next approved implementation increment."
+
+policy:
+  allow_implicit_invocation: false
 """
 
 
@@ -118,6 +133,10 @@ class PackageFixture:
         self.write(REVIEW_SCRIPT, "# pure review coordination validator\n")
         self.write(CONTINUITY_REFERENCE, "# Continuity and Closure\n")
         self.write(CONTINUITY_SCRIPT, "# pure continuity and closure validator\n")
+        self.write(CHECKPOINT_REFERENCE, "# Approval Checkpoints\n")
+        self.write(CHECKPOINT_SCRIPT, "# compound approval checkpoint helper\n")
+        self.write(DISCOVERY_REFERENCE, "# Program Discovery\n")
+        self.write(DISCOVERY_SCRIPT, "# deterministic read-only program discovery\n")
 
 
 class PackageValidationTestCase(unittest.TestCase):
@@ -253,6 +272,29 @@ class SkillContractTests(PackageValidationTestCase):
             "explicitly name $implementing-staged-plans",
         )
 
+    def test_implicit_invocation_must_be_explicitly_disabled(self) -> None:
+        self.fixture.write("skills/implementing-staged-plans/SKILL.md", VALID_SKILL)
+        invalid_metadata = (
+            VALID_OPENAI_YAML.replace(
+                "\npolicy:\n  allow_implicit_invocation: false\n", "\n"
+            ),
+            VALID_OPENAI_YAML.replace(
+                "allow_implicit_invocation: false",
+                "allow_implicit_invocation: true",
+            ),
+        )
+
+        for metadata in invalid_metadata:
+            with self.subTest(metadata=metadata):
+                self.fixture.write(
+                    "skills/implementing-staged-plans/agents/openai.yaml",
+                    metadata,
+                )
+                self.assert_issue_contains(
+                    VALIDATOR.validate_skill_contract(self.fixture.root),
+                    "allow_implicit_invocation must be false",
+                )
+
 
 class LinkAndMarkerTests(PackageValidationTestCase):
     def test_unresolved_and_escaping_relative_links_are_rejected(self) -> None:
@@ -294,7 +336,6 @@ class ForbiddenSurfaceTests(PackageValidationTestCase):
             ".mcp.json",
             ".app.json",
             "hooks.json",
-            "marketplace.json",
             "publisher.json",
             "publication.json",
             "publish.json",
@@ -302,6 +343,32 @@ class ForbiddenSurfaceTests(PackageValidationTestCase):
         for relative_path in forbidden_paths:
             with self.subTest(relative_path=relative_path):
                 self.fixture.write_valid_package()
+                self.fixture.write_json(relative_path, {})
+                self.assert_issue_contains(
+                    VALIDATOR.validate_forbidden_components(self.fixture.root),
+                    relative_path,
+                )
+                (self.fixture.root / relative_path).unlink()
+
+    def test_only_approved_marketplace_paths_are_allowed(self) -> None:
+        self.fixture.write_valid_package()
+        for relative_path in (
+            ".agents/plugins/marketplace.json",
+            ".claude-plugin/marketplace.json",
+        ):
+            self.fixture.write_json(relative_path, {})
+
+        self.assertEqual(
+            VALIDATOR.validate_forbidden_components(self.fixture.root), []
+        )
+
+        for relative_path in (
+            "marketplace.json",
+            "nested/marketplace.json",
+            ".agents/marketplace.json",
+            ".claude-plugin/nested/marketplace.json",
+        ):
+            with self.subTest(relative_path=relative_path):
                 self.fixture.write_json(relative_path, {})
                 self.assert_issue_contains(
                     VALIDATOR.validate_forbidden_components(self.fixture.root),
@@ -335,6 +402,10 @@ class CompletePackageTests(PackageValidationTestCase):
             REVIEW_SCRIPT,
             CONTINUITY_REFERENCE,
             CONTINUITY_SCRIPT,
+            CHECKPOINT_REFERENCE,
+            CHECKPOINT_SCRIPT,
+            DISCOVERY_REFERENCE,
+            DISCOVERY_SCRIPT,
         ):
             with self.subTest(missing_path=missing_path):
                 self.fixture.write_valid_package()
@@ -358,6 +429,10 @@ class CompletePackageTests(PackageValidationTestCase):
             REVIEW_SCRIPT,
             CONTINUITY_REFERENCE,
             CONTINUITY_SCRIPT,
+            CHECKPOINT_REFERENCE,
+            CHECKPOINT_SCRIPT,
+            DISCOVERY_REFERENCE,
+            DISCOVERY_SCRIPT,
         ):
             with self.subTest(linked_path=linked_path):
                 self.fixture.write_valid_package()

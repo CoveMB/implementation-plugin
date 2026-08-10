@@ -22,7 +22,11 @@ from program_authority import (
 
 
 STATUS_SCHEMA = "implementation-program-status/v1"
+STATUS_SCHEMA_V2 = "implementation-program-status/v2"
+STATUS_SCHEMAS = frozenset({STATUS_SCHEMA, STATUS_SCHEMA_V2})
 WORKSPACE_SCHEMA = "implementation-workspace/v1"
+WORKSPACE_SCHEMA_V2 = "implementation-workspace/v2"
+WORKSPACE_SCHEMAS = frozenset({WORKSPACE_SCHEMA, WORKSPACE_SCHEMA_V2})
 APPROVAL_SCHEMA = "implementation-approval/v1"
 ACTION_AUTHORIZATION_SCHEMA = "implementation-action-authorization/v1"
 
@@ -219,8 +223,11 @@ class TransitionRequest:
     target_increment_id: str
     target_increment_state: str
     transition_event_id: str
-    action_authorization_id: str
+    action_authorization_id: str | None
     evidence: dict[str, object]
+    authority_kind: str = "action-authorization"
+    execution_authorization_id: str | None = None
+    checkpoint_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -244,7 +251,8 @@ class WorkspaceSelection:
     selected_at: str
     observation: RepositoryObservation
     approval_event_id: str
-    action_authorization_id: str
+    action_authorization_id: str | None
+    authority_kind: str = "action-authorization"
 
 
 @dataclass(frozen=True)
@@ -311,6 +319,41 @@ def is_increment_transition_allowed(
     return target in INCREMENT_TRANSITIONS[current]
 
 
+def transition_authority_policy(
+    current_program_state: str,
+    target_program_state: str,
+    current_increment_state: str,
+    target_increment_state: str,
+) -> str:
+    """Classify every transition edge without granting authority itself."""
+    program_changed = current_program_state != target_program_state
+    increment_changed = current_increment_state != target_increment_state
+    if not program_changed and not increment_changed:
+        raise ValueError("transition authority policy requires a state change")
+    approval_program_edges = {
+        ("awaiting-program-approval", "active"),
+        ("awaiting-closure-approval", "closed"),
+    }
+    approval_increment_edges = {
+        ("awaiting-plan-approval", "authorized"),
+        ("awaiting-diff-approval", "accepted"),
+    }
+    if (
+        program_changed
+        and not increment_changed
+        and (current_program_state, target_program_state) in approval_program_edges
+    ):
+        return "approval-event"
+    if (
+        increment_changed
+        and not program_changed
+        and (current_increment_state, target_increment_state)
+        in approval_increment_edges
+    ):
+        return "approval-event"
+    return "action-authorization"
+
+
 def _workspace_parts(workspace: dict[str, object]) -> tuple[dict[str, Any], dict[str, Any]]:
     selected = workspace.get("implementation_workspace")
     existing = workspace.get("pre_existing_work_at_selection")
@@ -327,8 +370,19 @@ def validate_workspace_selection(
 ) -> list[str]:
     """Compare a persisted selection with explicit caller-supplied facts."""
     issues: list[str] = []
-    if workspace.get("schema_version") != WORKSPACE_SCHEMA:
+    workspace_schema = workspace.get("schema_version")
+    if workspace_schema not in WORKSPACE_SCHEMAS:
         issues.append("unsupported workspace schema")
+    if workspace_schema == WORKSPACE_SCHEMA_V2:
+        selection_authority = workspace.get("selection_authority")
+        if (
+            not isinstance(selection_authority, dict)
+            or selection_authority.get("kind") != "approval-event"
+            or not isinstance(selection_authority.get("event_id"), str)
+            or not selection_authority.get("event_id")
+            or "action_authorization_id" in workspace
+        ):
+            issues.append("v2 workspace selection authority is invalid")
     repository = workspace.get("repository")
     repository_identity = (
         repository.get("identity") if isinstance(repository, dict) else None
@@ -415,7 +469,7 @@ def validate_state(
 ) -> list[str]:
     """Validate status fields and their current artifact bindings."""
     issues: list[str] = []
-    if status.get("schema_version") != STATUS_SCHEMA:
+    if status.get("schema_version") not in STATUS_SCHEMAS:
         issues.append("unsupported status schema")
     sequence = status.get("state_sequence")
     if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
@@ -535,7 +589,7 @@ def validate_state(
         if not isinstance(previous, dict):
             issues.append("previous_state must be an object")
         else:
-            if previous.get("schema_version") != STATUS_SCHEMA:
+            if previous.get("schema_version") not in STATUS_SCHEMAS:
                 issues.append("previous state schema mismatch")
             prior_sequence = previous.get("state_sequence")
             if (
@@ -548,6 +602,67 @@ def validate_state(
             digest = previous.get("status_sha256")
             if not isinstance(digest, str) or len(digest) != 64:
                 issues.append("previous state digest invalid")
+    if status.get("schema_version") == STATUS_SCHEMA_V2:
+        transition_authority = status.get("transition_authority")
+        approved_plan = status.get("approved_exact_file_plan_sha256")
+        if (
+            isinstance(approved_plan, str)
+            and approved_plan
+            and transition_authority is None
+        ):
+            issues.append("v2 approved state requires transition authority")
+        if transition_authority is not None:
+            authority_kind = (
+                transition_authority.get("kind")
+                if isinstance(transition_authority, dict)
+                else None
+            )
+            event_id = (
+                transition_authority.get("event_id")
+                if isinstance(transition_authority, dict)
+                else None
+            )
+            checkpoint_id = (
+                transition_authority.get("checkpoint_id")
+                if isinstance(transition_authority, dict)
+                else None
+            )
+            authorization_id = (
+                transition_authority.get("authorization_id")
+                if isinstance(transition_authority, dict)
+                else None
+            )
+            authority_invalid = (
+                authority_kind not in {"approval-event", "action-authorization"}
+                or not isinstance(event_id, str)
+                or not event_id
+                or (
+                    checkpoint_id is not None
+                    and (not isinstance(checkpoint_id, str) or not checkpoint_id)
+                )
+                or (
+                    authority_kind == "approval-event"
+                    and authorization_id is not None
+                )
+                or (
+                    authority_kind == "action-authorization"
+                    and (
+                        not isinstance(authorization_id, str)
+                        or not authorization_id
+                    )
+                )
+            )
+            if authority_invalid:
+                issues.append("v2 transition authority is invalid")
+        execution_authorization = status.get("execution_authorization")
+        if execution_authorization is not None and (
+            not isinstance(execution_authorization, dict)
+            or not isinstance(execution_authorization.get("authorization_id"), str)
+            or not execution_authorization.get("authorization_id")
+            or not isinstance(execution_authorization.get("scope"), str)
+            or not execution_authorization.get("scope")
+        ):
+            issues.append("v2 execution authorization binding is invalid")
     return sorted(set(issues))
 
 
@@ -750,6 +865,36 @@ def validate_state_authority(
     issues.extend(workspace_issues)
     if status is not None:
         issues.extend(validate_state(root, manifest, status, observation))
+        approved_plan = status.get("approved_exact_file_plan_sha256")
+        if (
+            status.get("schema_version") == STATUS_SCHEMA_V2
+            and isinstance(approved_plan, str)
+            and approved_plan
+        ):
+            approvals_path, approval_path_issues = resolve_managed_path(
+                root,
+                logical_roles.get("approvals"),
+                role="logical role approvals",
+            )
+            issues.extend(approval_path_issues)
+            if approvals_path is not None:
+                approvals, approval_load_issues = load_json_lines(approvals_path)
+                issues.extend(approval_load_issues)
+                if approvals is not None:
+                    try:
+                        plan_approval = _binding_from_state(
+                            manifest,
+                            status,
+                            observation,
+                            event_type="exact-file-plan-approval",
+                        )
+                    except (KeyError, TypeError, ValueError):
+                        issues.append("v2 approved plan binding is incomplete")
+                    else:
+                        if validate_approval_binding(approvals, plan_approval):
+                            issues.append(
+                                "v2 approved plan requires exact plan approval"
+                            )
     if workspace is not None:
         if workspace.get("program_id") != manifest.get("program_id"):
             issues.append("workspace program_id mismatch")
@@ -1066,18 +1211,27 @@ def select_workspace(
     if approval_issues:
         raise ValueError("; ".join(sorted(set(approval_issues))))
 
-    action = _action_binding_from_approval(
-        approval, "create-workspace", "select the bound implementation workspace"
-    )
-    authorization = decide_action_authorization(authorizations, action)
-    if not authorization.authorized:
-        raise ValueError("; ".join(authorization.issues))
-    if authorization.authorization_id != selection.action_authorization_id:
-        raise ValueError("workspace action authorization id mismatch")
+    status_schema = status.get("schema_version")
+    if status_schema == STATUS_SCHEMA_V2:
+        if selection.authority_kind != "approval-event":
+            raise ValueError("v2 workspace selection requires approval-event authority")
+        if selection.action_authorization_id is not None:
+            raise ValueError("v2 governance selection cannot claim workspace creation authority")
+    else:
+        action = _action_binding_from_approval(
+            approval, "create-workspace", "select the bound implementation workspace"
+        )
+        authorization = decide_action_authorization(authorizations, action)
+        if not authorization.authorized:
+            raise ValueError("; ".join(authorization.issues))
+        if authorization.authorization_id != selection.action_authorization_id:
+            raise ValueError("workspace action authorization id mismatch")
 
     observation = selection.observation
     workspace: dict[str, object] = {
-        "schema_version": WORKSPACE_SCHEMA,
+        "schema_version": (
+            WORKSPACE_SCHEMA_V2 if status_schema == STATUS_SCHEMA_V2 else WORKSPACE_SCHEMA
+        ),
         "program_id": manifest["program_id"],
         "program_revision": manifest["program_revision"],
         "selected_at": selection.selected_at,
@@ -1096,8 +1250,14 @@ def select_workspace(
             "active_git_operation": observation.active_git_operation,
         },
         "selection_approval_event_id": selection.approval_event_id,
-        "action_authorization_id": selection.action_authorization_id,
     }
+    if status_schema == STATUS_SCHEMA_V2:
+        workspace["selection_authority"] = {
+            "kind": "approval-event",
+            "event_id": selection.approval_event_id,
+        }
+    else:
+        workspace["action_authorization_id"] = selection.action_authorization_id
     if expected_sha256 is None:
         receipt = _atomic_create_json(workspace_path, workspace)
     else:
@@ -1225,14 +1385,36 @@ def apply_state_transition(
     action_scope = request.evidence.get("action_scope")
     if not isinstance(action_scope, str) or not action_scope:
         raise ValueError("transition evidence action_scope is required")
-    action = _action_binding_from_approval(
-        approval, "modify-workspace", action_scope
+    status_schema = status.get("schema_version")
+    authority_kind = transition_authority_policy(
+        str(current_program),
+        request.target_program_state,
+        str(current_increment_state),
+        request.target_increment_state,
     )
-    authorization = decide_action_authorization(authorizations, action)
-    if not authorization.authorized:
-        raise ValueError("; ".join(authorization.issues))
-    if authorization.authorization_id != request.action_authorization_id:
-        raise ValueError("action authorization id mismatch")
+    if status_schema == STATUS_SCHEMA_V2 and request.authority_kind != authority_kind:
+        raise ValueError(f"transition requires {authority_kind} authority")
+    if status_schema != STATUS_SCHEMA_V2 or authority_kind == "action-authorization":
+        action = _action_binding_from_approval(
+            approval, "modify-workspace", action_scope
+        )
+        authorization = decide_action_authorization(authorizations, action)
+        if not authorization.authorized:
+            raise ValueError("; ".join(authorization.issues))
+        if authorization.authorization_id != request.action_authorization_id:
+            raise ValueError("action authorization id mismatch")
+    elif request.action_authorization_id is not None:
+        raise ValueError("approval-driven governance transition cannot claim action authority")
+    if (
+        status_schema == STATUS_SCHEMA_V2
+        and current_increment_state == "awaiting-plan-approval"
+        and request.target_increment_state == "authorized"
+        and (
+            not isinstance(request.execution_authorization_id, str)
+            or not request.execution_authorization_id
+        )
+    ):
+        raise ValueError("v2 plan approval requires an expected execution authorization id")
 
     new_status = dict(status)
     new_status.update(
@@ -1249,11 +1431,27 @@ def apply_state_transition(
             "current_increment_state": status["current_increment_state"],
             "transition_event_id": request.transition_event_id,
         },
-        transition_authorization={
+    )
+    if status_schema == STATUS_SCHEMA_V2:
+        transition_authority: dict[str, object] = {
+            "kind": authority_kind,
+            "event_id": request.transition_event_id,
+        }
+        if request.checkpoint_id is not None:
+            transition_authority["checkpoint_id"] = request.checkpoint_id
+        if authority_kind == "action-authorization":
+            transition_authority["authorization_id"] = request.action_authorization_id
+        new_status["transition_authority"] = transition_authority
+        if request.execution_authorization_id is not None:
+            new_status["execution_authorization"] = {
+                "authorization_id": request.execution_authorization_id,
+                "scope": action_scope,
+            }
+    else:
+        new_status["transition_authorization"] = {
             "event_id": request.transition_event_id,
             "action_authorization_id": request.action_authorization_id,
-        },
-    )
+        }
     if (
         status.get("current_increment_state") == "awaiting-plan-approval"
         and request.target_increment_state == "authorized"
@@ -1384,7 +1582,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 selected_at=request["selected_at"],
                 observation=observation,
                 approval_event_id=request["approval_event_id"],
-                action_authorization_id=request["action_authorization_id"],
+                action_authorization_id=request.get("action_authorization_id"),
+                authority_kind=request.get("authority_kind", "action-authorization"),
             )
             receipt = select_workspace(
                 root, selection, request.get("expected_workspace_sha256")

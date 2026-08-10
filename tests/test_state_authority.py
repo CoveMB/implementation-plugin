@@ -703,6 +703,228 @@ class AtomicPersistenceTests(unittest.TestCase):
 
 
 class StateApplicationAndCliTests(StateAuthorityTestCase):
+    def test_v2_authorized_state_requires_exact_plan_approval_lineage(self) -> None:
+        status = self.fixture.load_json("state/status.json")
+        status.update(
+            schema_version="implementation-program-status/v2",
+            current_increment_state="authorized",
+            approved_exact_file_plan_sha256=self.fixture.plan_sha256,
+            pending_exact_file_plan_sha256=None,
+            execution_authorization={
+                "authorization_id": "ARCHIVE-IMPLEMENTATION-AUTHORIZATION",
+                "scope": "implement the bound archive index plan",
+            },
+        )
+        self.fixture.write_json("state/status.json", status)
+        write_json_lines(
+            self.fixture.approvals_path,
+            [
+                record
+                for record in self.fixture.approvals()
+                if record.get("event_id") != "ARCHIVE-PLAN-APPROVAL"
+            ],
+        )
+
+        issues = AUTHORITY.validate_state_authority(
+            self.fixture.root,
+            self.fixture.observation,
+        )
+
+        self.assertIn("v2 approved plan requires exact plan approval", issues)
+        self.assertIn("v2 approved state requires transition authority", issues)
+
+    def test_v2_plan_approval_records_governance_transition_before_execution_grant(self) -> None:
+        status = self.fixture.load_json("state/status.json")
+        status["schema_version"] = "implementation-program-status/v2"
+        self.fixture.write_json("state/status.json", status)
+        write_json_lines(self.fixture.authorizations_path, [])
+        request = AUTHORITY.TransitionRequest(
+            expected_status_sha256=sha256_file(self.fixture.status_path),
+            expected_state_sequence=1,
+            target_program_state="active",
+            target_increment_id="archive-index",
+            target_increment_state="authorized",
+            transition_event_id="ARCHIVE-PLAN-APPROVAL",
+            action_authorization_id=None,
+            evidence={"action_scope": "implement the bound archive index plan"},
+            authority_kind="approval-event",
+            execution_authorization_id="ARCHIVE-IMPLEMENTATION-AUTHORIZATION",
+            checkpoint_id="ARCHIVE-PLAN-CHECKPOINT",
+        )
+
+        receipt = AUTHORITY.apply_state_transition(
+            self.fixture.root, request, self.fixture.observation
+        )
+
+        self.assertEqual(receipt.increment_state, "authorized")
+        current = self.fixture.load_json("state/status.json")
+        self.assertEqual(
+            current["transition_authority"],
+            {
+                "kind": "approval-event",
+                "event_id": "ARCHIVE-PLAN-APPROVAL",
+                "checkpoint_id": "ARCHIVE-PLAN-CHECKPOINT",
+            },
+        )
+        self.assertEqual(
+            current["execution_authorization"],
+            {
+                "authorization_id": "ARCHIVE-IMPLEMENTATION-AUTHORIZATION",
+                "scope": "implement the bound archive index plan",
+            },
+        )
+
+        current["transition_authority"]["event_id"] = ""
+        self.assertIn(
+            "v2 transition authority is invalid",
+            AUTHORITY.validate_state(
+                self.fixture.root,
+                self.fixture.manifest,
+                current,
+                self.fixture.observation,
+            ),
+        )
+
+    def test_v2_nonapproval_transition_still_requires_exact_execution_authority(self) -> None:
+        status = self.fixture.load_json("state/status.json")
+        status.update(
+            schema_version="implementation-program-status/v2",
+            current_increment_state="authorized",
+            approved_exact_file_plan_sha256=self.fixture.plan_sha256,
+            pending_exact_file_plan_sha256=None,
+            execution_authorization={
+                "authorization_id": "ARCHIVE-IMPLEMENTATION-AUTHORIZATION",
+                "scope": "implement the bound archive index plan",
+            },
+            transition_authority={
+                "kind": "approval-event",
+                "event_id": "ARCHIVE-PLAN-APPROVAL",
+            },
+        )
+        self.fixture.write_json("state/status.json", status)
+        request = AUTHORITY.TransitionRequest(
+            expected_status_sha256=sha256_file(self.fixture.status_path),
+            expected_state_sequence=1,
+            target_program_state="active",
+            target_increment_id="archive-index",
+            target_increment_state="implementing",
+            transition_event_id="ARCHIVE-IMPLEMENTATION-STARTED",
+            action_authorization_id="ARCHIVE-IMPLEMENTATION-AUTHORIZATION",
+            evidence={"action_scope": "implement the bound archive index plan"},
+            authority_kind="action-authorization",
+            execution_authorization_id="ARCHIVE-IMPLEMENTATION-AUTHORIZATION",
+            checkpoint_id="ARCHIVE-PLAN-CHECKPOINT",
+        )
+
+        receipt = AUTHORITY.apply_state_transition(
+            self.fixture.root, request, self.fixture.observation
+        )
+        self.assertEqual(receipt.increment_state, "implementing")
+
+        current = self.fixture.load_json("state/status.json")
+        current.update(
+            current_increment_state="authorized",
+            state_sequence=1,
+        )
+        current.pop("previous_state", None)
+        self.fixture.write_json("state/status.json", current)
+        wrong_kind = AUTHORITY.TransitionRequest(
+            **{
+                **request.__dict__,
+                "expected_status_sha256": sha256_file(self.fixture.status_path),
+                "authority_kind": "approval-event",
+                "action_authorization_id": None,
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "action-authorization authority"):
+            AUTHORITY.apply_state_transition(
+                self.fixture.root, wrong_kind, self.fixture.observation
+            )
+
+    def test_transition_authority_policy_classifies_every_declared_edge(self) -> None:
+        for current, targets in AUTHORITY.PROGRAM_TRANSITIONS.items():
+            for target in targets:
+                with self.subTest(domain="program", current=current, target=target):
+                    self.assertIn(
+                        AUTHORITY.transition_authority_policy(
+                            current,
+                            target,
+                            "accepted",
+                            "accepted",
+                        ),
+                        {"approval-event", "action-authorization"},
+                    )
+        for current, targets in AUTHORITY.INCREMENT_TRANSITIONS.items():
+            for target in targets:
+                with self.subTest(domain="increment", current=current, target=target):
+                    self.assertIn(
+                        AUTHORITY.transition_authority_policy(
+                            "active",
+                            "active",
+                            current,
+                            target,
+                        ),
+                        {"approval-event", "action-authorization"},
+                    )
+        self.assertEqual(
+            AUTHORITY.transition_authority_policy(
+                "blocked", "active", "blocked", "implementing"
+            ),
+            "action-authorization",
+        )
+
+    def test_v2_workspace_selection_records_approval_without_claiming_creation(self) -> None:
+        status = self.fixture.load_json("state/status.json")
+        status["schema_version"] = "implementation-program-status/v2"
+        self.fixture.write_json("state/status.json", status)
+        selection_approval = self.fixture._bound_record(
+            {
+                "schema_version": "implementation-approval/v1",
+                "event_id": "ARCHIVE-WORKSPACE-SELECTION",
+                "type": "workspace-selection-approval",
+                "decision": "approved",
+                "scope": ["select the bound implementation workspace"],
+            }
+        )
+        write_json_lines(
+            self.fixture.approvals_path,
+            [*self.fixture.approvals(), selection_approval],
+        )
+        write_json_lines(self.fixture.authorizations_path, [])
+        selection = AUTHORITY.WorkspaceSelection(
+            selected_at="2026-08-08T12:00:00Z",
+            observation=self.fixture.observation,
+            approval_event_id="ARCHIVE-WORKSPACE-SELECTION",
+            action_authorization_id=None,
+            authority_kind="approval-event",
+        )
+
+        AUTHORITY.select_workspace(
+            self.fixture.root,
+            selection,
+            sha256_file(self.fixture.workspace_path),
+        )
+
+        workspace = self.fixture.load_json("state/workspace.json")
+        self.assertEqual(workspace["schema_version"], "implementation-workspace/v2")
+        self.assertEqual(
+            workspace["selection_authority"],
+            {
+                "kind": "approval-event",
+                "event_id": "ARCHIVE-WORKSPACE-SELECTION",
+            },
+        )
+        self.assertNotIn("action_authorization_id", workspace)
+
+        workspace["selection_authority"]["event_id"] = ""
+        self.assertIn(
+            "v2 workspace selection authority is invalid",
+            AUTHORITY.validate_workspace_selection(
+                workspace,
+                self.fixture.observation,
+            ),
+        )
+
     def test_closure_transition_requires_exact_reconciliation_and_packet(self) -> None:
         status = self.fixture.load_json("state/status.json")
         status.update(current_increment_state="accepted", pending_exact_file_plan_sha256=None, approved_exact_file_plan_sha256=self.fixture.plan_sha256)

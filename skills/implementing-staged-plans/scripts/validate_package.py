@@ -49,6 +49,18 @@ CONTINUITY_CLOSURE_REFERENCE = Path(
 CONTINUITY_CLOSURE_SCRIPT = Path(
     "skills/implementing-staged-plans/scripts/continuity_closure.py"
 )
+APPROVAL_CHECKPOINT_REFERENCE = Path(
+    "skills/implementing-staged-plans/references/approval-checkpoints.md"
+)
+APPROVAL_CHECKPOINT_SCRIPT = Path(
+    "skills/implementing-staged-plans/scripts/approval_checkpoint.py"
+)
+PROGRAM_DISCOVERY_REFERENCE = Path(
+    "skills/implementing-staged-plans/references/program-discovery.md"
+)
+PROGRAM_DISCOVERY_SCRIPT = Path(
+    "skills/implementing-staged-plans/scripts/program_discovery.py"
+)
 
 EXPECTED_MANIFEST: dict[str, object] = {
     "name": "implementation-plugin",
@@ -65,6 +77,10 @@ FORBIDDEN_FILENAMES = {
     "publication.json",
     "publish.json",
     "publisher.json",
+}
+ALLOWED_MARKETPLACE_PATHS = {
+    Path(".agents/plugins/marketplace.json"),
+    Path(".claude-plugin/marketplace.json"),
 }
 MARKDOWN_LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 TEMPLATE_MARKER_PATTERN = re.compile(
@@ -163,6 +179,21 @@ def _parse_openai_fields(openai_yaml: str) -> dict[str, str]:
     return fields
 
 
+def _parse_implicit_invocation_policy(openai_yaml: str) -> list[str]:
+    values: list[str] = []
+    in_policy = False
+    for line in openai_yaml.splitlines():
+        if line and not line[0].isspace():
+            in_policy = line.strip() == "policy:"
+            continue
+        if not in_policy:
+            continue
+        match = re.fullmatch(r"\s{2}allow_implicit_invocation:\s*(\S+)\s*", line)
+        if match is not None:
+            values.append(match.group(1))
+    return values
+
+
 def validate_skill_contract(repository_root: Path) -> list[str]:
     """Validate skill metadata, trigger description, and UI metadata."""
     skill_path = repository_root / SKILL_MARKDOWN
@@ -217,6 +248,11 @@ def validate_skill_contract(repository_root: Path) -> list[str]:
         issues.append(
             "agents/openai.yaml default_prompt must explicitly name "
             "$implementing-staged-plans"
+        )
+
+    if _parse_implicit_invocation_policy(openai_yaml) != ["false"]:
+        issues.append(
+            "agents/openai.yaml policy allow_implicit_invocation must be false"
         )
 
     metadata_marker = TEMPLATE_MARKER_PATTERN.search(openai_yaml)
@@ -292,7 +328,10 @@ def validate_forbidden_components(repository_root: Path) -> list[str]:
     issues: list[str] = []
     for forbidden_name in sorted(FORBIDDEN_FILENAMES):
         for path in sorted(repository_root.rglob(forbidden_name)):
-            relative_path = path.relative_to(repository_root).as_posix()
+            relative = path.relative_to(repository_root)
+            if relative in ALLOWED_MARKETPLACE_PATHS:
+                continue
+            relative_path = relative.as_posix()
             issues.append(f"forbidden component or identity surface: {relative_path}")
 
     for path in _package_facing_paths(repository_root):
@@ -329,6 +368,10 @@ def validate_authority_assets(repository_root: Path) -> list[str]:
         REVIEW_COORDINATION_SCRIPT,
         CONTINUITY_CLOSURE_REFERENCE,
         CONTINUITY_CLOSURE_SCRIPT,
+        APPROVAL_CHECKPOINT_REFERENCE,
+        APPROVAL_CHECKPOINT_SCRIPT,
+        PROGRAM_DISCOVERY_REFERENCE,
+        PROGRAM_DISCOVERY_SCRIPT,
     ):
         path = repository_root / relative_path
         if not path.is_file() or path.is_symlink():

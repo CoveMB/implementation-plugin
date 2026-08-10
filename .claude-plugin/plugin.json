@@ -1,0 +1,8 @@
+{
+  "name": "implementation-plugin",
+  "displayName": "Implementation Plugin",
+  "version": "0.1.0",
+  "description": "Run approved implementation programs one reviewable increment at a time.",
+  "repository": "https://github.com/CoveMB/implementation-plugin",
+  "skills": "./skills/"
+}
