@@ -1,0 +1,80 @@
+{
+  "findings": [],
+  "increment_id": "ARCHIVE-INDEX",
+  "independent": false,
+  "persisted_at": "2026-08-18T10:00:00Z",
+  "prior_conclusions_withheld": false,
+  "program_id": "ARCHIVE-PROGRAM",
+  "program_revision": 1,
+  "reconciled_at": "2026-08-18T10:10:00Z",
+  "reduced_assurance": true,
+  "review_basis": "bounded architecture review of the exact current delta",
+  "reviewer_role": "controller-self-review",
+  "risk_predicates": [
+    {
+      "evidence": "the exact delta does not touch security-privacy",
+      "predicate": "security-privacy",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-security-privacy",
+      "touched": false
+    },
+    {
+      "evidence": "the exact delta does not touch public-api-compatibility",
+      "predicate": "public-api-compatibility",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-compatibility",
+      "touched": false
+    },
+    {
+      "evidence": "the exact delta does not touch concurrency-reliability-distributed-state",
+      "predicate": "concurrency-reliability-distributed-state",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-reliability",
+      "touched": false
+    },
+    {
+      "evidence": "the exact delta does not touch persistent-data-migrations",
+      "predicate": "persistent-data-migrations",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-persistent-data",
+      "touched": false
+    },
+    {
+      "evidence": "the exact delta does not touch accessibility",
+      "predicate": "accessibility",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-accessibility",
+      "touched": false
+    },
+    {
+      "evidence": "the exact delta does not touch platform-deployment-infrastructure",
+      "predicate": "platform-deployment-infrastructure",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-platform",
+      "touched": false
+    },
+    {
+      "evidence": "the exact delta does not touch payments-financial-state",
+      "predicate": "payments-financial-state",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-financial",
+      "touched": false
+    },
+    {
+      "evidence": "the exact delta does not touch performance",
+      "predicate": "performance",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-performance",
+      "touched": false
+    },
+    {
+      "evidence": "the exact delta does not touch provider-external-state",
+      "predicate": "provider-external-state",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-provider",
+      "touched": false
+    }
+  ],
+  "schema_version": "implementation-raw-review-report/v1",
+  "scope": "architecture"
+}

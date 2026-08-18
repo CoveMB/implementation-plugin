@@ -7,6 +7,10 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PRESSURE_ROOT = REPOSITORY_ROOT / "tests" / "pressure"
 SCENARIO_PATH = PRESSURE_ROOT / "scenarios.json"
 VERDICTS_PATH = PRESSURE_ROOT / "verdicts.json"
+PLAN_A_FIXTURE_CONTRACT = (
+    REPOSITORY_ROOT
+    / "tests/fixtures/program-bootstrap/v0.1.1/fixture-contract.json"
+)
 
 EXPECTED_SCENARIOS = [
     {
@@ -157,6 +161,21 @@ class PressureVerdictContractTests(unittest.TestCase):
             guided_record = verdicts_by_id[scenario_id].get("guided")
             self.assert_evidence_record(guided_record, {"pass", "fail"})
             self.assertEqual(guided_record["outcome"], "pass")
+
+    def test_unavailable_capability_pressure_is_bound_to_plan_a_fixture(self) -> None:
+        contract = load_json(PLAN_A_FIXTURE_CONTRACT)
+        self.assertEqual(contract["package_version"], "0.1.1")
+        self.assertEqual(
+            contract["states"],
+            {
+                "accepted-stop": "accepted",
+                "awaiting-diff": "awaiting-diff-approval",
+            },
+        )
+        scenario = next(
+            value for value in EXPECTED_SCENARIOS if value["id"] == "P-004"
+        )
+        self.assertEqual(scenario["expected_gate"], "unavailable-capability")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,79 @@
+{
+  "current_increment_authority_binding": {
+    "grant_id": "INCREMENT-GRANT-f6306dab8294f8c94a022e38",
+    "grant_sha256": "b1c8e24773dea164e2203e54ea43572f65ca032a6adfee714d6d64947d3e8a8e",
+    "increment_id": "ARCHIVE-INDEX",
+    "kind": "increment-grant",
+    "schema_version": "implementation-current-increment-authority-binding/v1"
+  },
+  "exact_file_plan_sha256": "0dd1cda5f5f370b691e77ca04dd250b200b2af64303c4342c504249c0ac76426",
+  "file_map": {
+    "create": [
+      "archive-output.txt",
+      "implementation-programs/ARCHIVE-PROGRAM/closure/closure-packet.md",
+      "implementation-programs/ARCHIVE-PROGRAM/closure/reconciliation.json",
+      "implementation-programs/ARCHIVE-PROGRAM/increments/ARCHIVE-INDEX/execution-baseline.json",
+      "implementation-programs/ARCHIVE-PROGRAM/increments/ARCHIVE-INDEX/review-evidence.json",
+      "implementation-programs/ARCHIVE-PROGRAM/increments/ARCHIVE-INDEX/review-packet.md",
+      "reviews/architecture.json",
+      "reviews/requirements.json",
+      "reviews/test-evidence.json"
+    ],
+    "modify": [
+      "implementation-programs/ARCHIVE-PROGRAM/state/action-authorizations.jsonl",
+      "implementation-programs/ARCHIVE-PROGRAM/state/approvals.jsonl",
+      "implementation-programs/ARCHIVE-PROGRAM/state/block-resolutions.jsonl",
+      "implementation-programs/ARCHIVE-PROGRAM/state/increment-grants.jsonl",
+      "implementation-programs/ARCHIVE-PROGRAM/state/rollovers.jsonl",
+      "implementation-programs/ARCHIVE-PROGRAM/state/status.json"
+    ],
+    "preserve": [
+      "catalog.txt"
+    ]
+  },
+  "increment_id": "ARCHIVE-INDEX",
+  "inherited_paths": [],
+  "path_baselines": [
+    {
+      "disposition": "Create",
+      "path": "archive-output.txt",
+      "sha256": null
+    },
+    {
+      "disposition": "Create",
+      "path": "reviews/architecture.json",
+      "sha256": null
+    },
+    {
+      "disposition": "Create",
+      "path": "reviews/requirements.json",
+      "sha256": null
+    },
+    {
+      "disposition": "Create",
+      "path": "reviews/test-evidence.json",
+      "sha256": null
+    },
+    {
+      "disposition": "Preserve",
+      "path": "catalog.txt",
+      "sha256": "46c39d42182ffdfeb32014153ec515827e73cb3f8cf00848c0743e6098f0da32"
+    }
+  ],
+  "program_id": "ARCHIVE-PROGRAM",
+  "program_revision": 1,
+  "schema_version": "implementation-execution-baseline/v1",
+  "user_work_baselines": [],
+  "workspace_observation": {
+    "active_git_operation": null,
+    "base_commit": "19cf11694a2a760371532aad0f2e0a2284fff765",
+    "branch": "archive-maintenance",
+    "conflicted_paths": [],
+    "head_commit": "19cf11694a2a760371532aad0f2e0a2284fff765",
+    "modified_paths": [],
+    "path": "/private/var/folders/4b/92vv49v10lj3j8mwm6k0q8qh0000gn/T/tmpcy_txmee/repository",
+    "repository": "/private/var/folders/4b/92vv49v10lj3j8mwm6k0q8qh0000gn/T/tmpcy_txmee/repository",
+    "staged_paths": [],
+    "untracked_paths": []
+  }
+}

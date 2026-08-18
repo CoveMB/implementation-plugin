@@ -639,5 +639,199 @@ class CliContractTests(unittest.TestCase):
             fixture.close()
 
 
+class ExactFileMapTests(unittest.TestCase):
+    def test_parser_requires_one_normalized_disposition_map(self) -> None:
+        markdown = """# Plan
+
+## File map
+
+### Create
+
+- `review/evidence.json`
+
+### Modify
+
+- `state/status.json`
+
+### Preserve
+
+- `catalog.txt`
+"""
+        self.assertEqual(
+            PREPARATION.parse_exact_file_map(markdown),
+            PREPARATION.ExactFileMap(
+                create=("review/evidence.json",),
+                modify=("state/status.json",),
+                preserve=("catalog.txt",),
+            ),
+        )
+
+    def test_parser_rejects_duplicates_escapes_and_repeated_sections(self) -> None:
+        valid = """# Plan
+## File map
+### Create
+- `review/evidence.json`
+### Modify
+- `state/status.json`
+### Preserve
+- `catalog.txt`
+"""
+        cases = (
+            valid.replace("`catalog.txt`", "`state/status.json`"),
+            valid.replace("`catalog.txt`", "`../catalog.txt`"),
+            valid + "\n## File map\n### Create\n- `other.txt`\n",
+            valid.replace("### Preserve\n- `catalog.txt`", ""),
+        )
+        for markdown in cases:
+            with self.subTest(markdown=markdown[-50:]):
+                with self.assertRaises(ValueError):
+                    PREPARATION.parse_exact_file_map(markdown)
+
+
+class ExecutionWorkspaceValidationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fixture = GitFixture()
+        self.program_root = self.fixture.root / "implementation-programs/ARCHIVE-PROGRAM"
+        self.program_root.mkdir(parents=True)
+        (self.fixture.root / "settings.txt").write_text("keep=true\n", encoding="utf-8")
+        run_git(self.fixture.root, "add", "settings.txt")
+        run_git(self.fixture.root, "commit", "-m", "add settings")
+        self.fixture.base = run_git(
+            self.fixture.root, "rev-parse", "HEAD"
+        ).stdout.decode().strip()
+        initial = PREPARATION.inspect_repository(self.fixture.root, self.fixture.base)
+        self.initial = initial
+        self.baseline = PREPARATION.ExecutionBaseline(
+            schema_version=PREPARATION.EXECUTION_BASELINE_SCHEMA,
+            program_id="ARCHIVE-PROGRAM",
+            program_revision=1,
+            increment_id="ARCHIVE-INDEX",
+            exact_file_plan_sha256="a" * 64,
+            current_increment_authority_binding={"grant_id": "GRANT-1"},
+            workspace_observation=dict(initial.observation.__dict__),
+            file_map=PREPARATION.ExactFileMap(
+                create=("archive-output.txt",),
+                modify=("catalog.txt",),
+                preserve=("settings.txt",),
+            ),
+            path_baselines=(
+                PREPARATION.ExecutionPathBaseline(
+                    "archive-output.txt", "Create", None
+                ),
+                PREPARATION.ExecutionPathBaseline(
+                    "catalog.txt", "Modify", sha256_file(self.fixture.root / "catalog.txt")
+                ),
+                PREPARATION.ExecutionPathBaseline(
+                    "settings.txt", "Preserve", sha256_file(self.fixture.root / "settings.txt")
+                ),
+            ),
+            user_work_baselines=(),
+            inherited_paths=(),
+        )
+
+    def tearDown(self) -> None:
+        self.fixture.close()
+
+    def assess(self, state: str):
+        return PREPARATION.validate_execution_workspace(
+            self.program_root,
+            self.baseline,
+            PREPARATION.inspect_repository(self.fixture.root, self.fixture.base),
+            increment_state=state,
+        )
+
+    def test_authorized_requires_no_product_delta(self) -> None:
+        self.assertTrue(self.assess("authorized").valid)
+        (self.fixture.root / "catalog.txt").write_text("changed\n", encoding="utf-8")
+        assessment = self.assess("authorized")
+        self.assertFalse(assessment.valid)
+        self.assertIn(
+            "authorized workspace changed Modify path: catalog.txt",
+            assessment.issues,
+        )
+
+    def test_implementing_allows_a_subset_but_reviewing_requires_complete_delta(self) -> None:
+        (self.fixture.root / "catalog.txt").write_text("changed\n", encoding="utf-8")
+        implementing = self.assess("implementing")
+        self.assertTrue(implementing.valid, implementing.issues)
+        reviewing = self.assess("reviewing")
+        self.assertIn(
+            "reviewing workspace is missing Create path: archive-output.txt",
+            reviewing.issues,
+        )
+        (self.fixture.root / "archive-output.txt").write_text("complete\n", encoding="utf-8")
+        complete = self.assess("reviewing")
+        self.assertTrue(complete.valid, complete.issues)
+        self.assertEqual(
+            tuple(item["path"] for item in complete.product_delta),
+            ("archive-output.txt", "catalog.txt"),
+        )
+
+    def test_rejects_preserved_unmapped_staged_deleted_and_unsafe_paths(self) -> None:
+        cases = (
+            (
+                lambda: (self.fixture.root / "settings.txt").write_text(
+                    "keep=false\n", encoding="utf-8"
+                ),
+                "preserved path changed: settings.txt",
+            ),
+            (
+                lambda: (self.fixture.root / "other.txt").write_text(
+                    "unmapped\n", encoding="utf-8"
+                ),
+                "execution workspace has unmapped dirty paths: other.txt",
+            ),
+            (
+                lambda: (
+                    (self.fixture.root / "archive-output.txt").write_text(
+                        "staged\n", encoding="utf-8"
+                    ),
+                    run_git(self.fixture.root, "add", "archive-output.txt"),
+                ),
+                "execution workspace has new or changed staged paths",
+            ),
+            (
+                lambda: (self.fixture.root / "catalog.txt").unlink(),
+                "execution workspace deleted Modify path: catalog.txt",
+            ),
+            (
+                lambda: (self.fixture.root / "archive-output.txt").symlink_to(
+                    "settings.txt"
+                ),
+                "execution path is unsafe: archive-output.txt",
+            ),
+        )
+        for mutate, issue in cases:
+            with self.subTest(issue=issue):
+                self.tearDown()
+                self.setUp()
+                mutate()
+                self.assertIn(issue, self.assess("implementing").issues)
+
+    def test_pre_existing_user_work_is_byte_bound_and_cannot_be_claimed(self) -> None:
+        (self.fixture.root / "notes.txt").write_text("mine\n", encoding="utf-8")
+        dirty = PREPARATION.inspect_repository(self.fixture.root, self.fixture.base)
+        user_baseline = PREPARATION.UserWorkBaseline(
+            "notes.txt", ("untracked",), sha256_file(self.fixture.root / "notes.txt")
+        )
+        baseline = replace(
+            self.baseline,
+            workspace_observation=dict(dirty.observation.__dict__),
+            user_work_baselines=(user_baseline,),
+        )
+        unchanged = PREPARATION.validate_execution_workspace(
+            self.program_root, baseline, dirty, increment_state="authorized"
+        )
+        self.assertTrue(unchanged.valid, unchanged.issues)
+        (self.fixture.root / "notes.txt").write_text("changed mine\n", encoding="utf-8")
+        changed = PREPARATION.validate_execution_workspace(
+            self.program_root,
+            baseline,
+            PREPARATION.inspect_repository(self.fixture.root, self.fixture.base),
+            increment_state="authorized",
+        )
+        self.assertIn("pre-existing user work changed: notes.txt", changed.issues)
+
+
 if __name__ == "__main__":
     unittest.main()

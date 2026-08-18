@@ -1,0 +1,77 @@
+{
+  "atomic_requirements": [
+    {
+      "acceptance_criteria": [
+        "A corrupted stored object is rejected by checksum verification."
+      ],
+      "assigned_increments": [
+        "ARCHIVE-INDEX"
+      ],
+      "assigned_parts": [
+        "Archive integrity"
+      ],
+      "assigned_tasks": [
+        "Verify stored objects"
+      ],
+      "current_disposition": "allocated",
+      "decision_references": [],
+      "group_id": "INTEGRITY",
+      "id": "INTEGRITY-VERIFY-CHECKSUMS",
+      "implementation_evidence": [],
+      "normalized_requirement": "Verify every stored checksum.",
+      "source_locator": "Archive Plan, line 3",
+      "source_unit_ids": [
+        "SOURCE-UNIT-LINE-3"
+      ],
+      "verification_evidence": []
+    }
+  ],
+  "coverage_assertion": {
+    "approval_event_id": "ARCHIVE-APPROVAL",
+    "machine_complete": true,
+    "semantic_requirements_sha256": "5b669e2f72f340dd221be4a983d6f557dc0c1fa2972baed4c3aa868f829e59ea",
+    "source_line_count": 3,
+    "status": "complete"
+  },
+  "program_id": "ARCHIVE-PROGRAM",
+  "program_revision": 1,
+  "requirement_groups": [
+    {
+      "id": "INTEGRITY",
+      "title": "Archive integrity"
+    }
+  ],
+  "schema_version": "implementation-traceability/v2",
+  "source_id": "ARCHIVE-SOURCE",
+  "source_sha256": "2dab0af58f832caef7eea74640dac0c36b3fae60087ba9df83d0522530e79ffb",
+  "source_units": [
+    {
+      "classification": "context",
+      "context_rationale": "Heading or structural separation.",
+      "end_line": 1,
+      "id": "SOURCE-UNIT-LINE-1",
+      "requirement_ids": [],
+      "source_text_sha256": "e7d4f1df56b295c80c5a444d010c7b3a2720f6a3c80b8a4c48cf4c3d64b510e3",
+      "start_line": 1
+    },
+    {
+      "classification": "context",
+      "context_rationale": "Heading or structural separation.",
+      "end_line": 2,
+      "id": "SOURCE-UNIT-LINE-2",
+      "requirement_ids": [],
+      "source_text_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "start_line": 2
+    },
+    {
+      "classification": "requirement",
+      "end_line": 3,
+      "id": "SOURCE-UNIT-LINE-3",
+      "requirement_ids": [
+        "INTEGRITY-VERIFY-CHECKSUMS"
+      ],
+      "source_text_sha256": "7494dfd1a2184642da6800ce399621d15854ea20368f1ac0911b92bc55af2003",
+      "start_line": 3
+    }
+  ]
+}

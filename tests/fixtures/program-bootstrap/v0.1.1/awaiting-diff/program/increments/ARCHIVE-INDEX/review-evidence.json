@@ -1,0 +1,352 @@
+{
+  "alternative_verification": [],
+  "final_verification": {
+    "baseline_failures": [
+      "none"
+    ],
+    "candidate_sha256": "6eb9ebda65e5170a6a3372c5a7be048791ea1ef702102dab2cd5ec2a23d0763b",
+    "commands": [
+      {
+        "command": "python3 -m unittest tests.test_archive_output",
+        "completed_at": "2026-08-18T11:00:00Z",
+        "exit_code": 0,
+        "expected_result": "exit zero",
+        "relevant_inputs": [
+          "archive-output.txt"
+        ],
+        "result": "archive output test passed"
+      }
+    ],
+    "required_commands": [
+      "python3 -m unittest tests.test_archive_output"
+    ],
+    "unresolved_material_findings": 0,
+    "verified_at": "2026-08-18T11:05:00Z",
+    "verified_paths": [
+      "archive-output.txt",
+      "reviews/architecture.json",
+      "reviews/requirements.json",
+      "reviews/test-evidence.json"
+    ]
+  },
+  "findings": [],
+  "recovery_domains": [
+    {
+      "authority_granted": true,
+      "disposition": "recoverable",
+      "domain": "source-code",
+      "limitation": "does not recover external state",
+      "mechanism": "restore the exact pre-write bytes",
+      "required_authority": "modify-workspace",
+      "touched": true,
+      "verification": "rerun the bound deterministic test"
+    },
+    {
+      "authority_granted": false,
+      "disposition": "not-touched",
+      "domain": "persistent-data",
+      "limitation": "not exercised",
+      "mechanism": "none",
+      "required_authority": "none",
+      "touched": false,
+      "verification": "confirmed outside the exact plan"
+    },
+    {
+      "authority_granted": false,
+      "disposition": "not-touched",
+      "domain": "deployment",
+      "limitation": "not exercised",
+      "mechanism": "none",
+      "required_authority": "none",
+      "touched": false,
+      "verification": "confirmed outside the exact plan"
+    },
+    {
+      "authority_granted": false,
+      "disposition": "not-touched",
+      "domain": "provider-or-external-state",
+      "limitation": "not exercised",
+      "mechanism": "none",
+      "required_authority": "none",
+      "touched": false,
+      "verification": "confirmed outside the exact plan"
+    }
+  ],
+  "remediation_cycles": [],
+  "reports": [
+    {
+      "finding_ids": [],
+      "follow_up_for_finding_ids": [],
+      "independent": false,
+      "persisted_at": "2026-08-18T10:00:00Z",
+      "prior_conclusions_withheld": false,
+      "raw_report_path": "reviews/requirements.json",
+      "raw_report_sha256": "986c5a0d6c43d39066e83fd073e0af7bc3d073242772e0e5215bb2548cd7cb66",
+      "reconciled_at": "2026-08-18T10:10:00Z",
+      "reduced_assurance": true,
+      "report_id": "requirements-initial",
+      "review_basis": "bounded requirements review of the exact current delta",
+      "reviewed_candidate_sha256": "6eb9ebda65e5170a6a3372c5a7be048791ea1ef702102dab2cd5ec2a23d0763b",
+      "reviewer_role": "controller-self-review",
+      "scope": "requirements"
+    },
+    {
+      "finding_ids": [],
+      "follow_up_for_finding_ids": [],
+      "independent": false,
+      "persisted_at": "2026-08-18T10:00:00Z",
+      "prior_conclusions_withheld": false,
+      "raw_report_path": "reviews/architecture.json",
+      "raw_report_sha256": "d3a4758e8f0925334c69c2b1e4baceea0d961468b124768ffd4b598d5caab574",
+      "reconciled_at": "2026-08-18T10:10:00Z",
+      "reduced_assurance": true,
+      "report_id": "architecture-initial",
+      "review_basis": "bounded architecture review of the exact current delta",
+      "reviewed_candidate_sha256": "6eb9ebda65e5170a6a3372c5a7be048791ea1ef702102dab2cd5ec2a23d0763b",
+      "reviewer_role": "controller-self-review",
+      "scope": "architecture"
+    },
+    {
+      "finding_ids": [],
+      "follow_up_for_finding_ids": [],
+      "independent": false,
+      "persisted_at": "2026-08-18T10:00:00Z",
+      "prior_conclusions_withheld": false,
+      "raw_report_path": "reviews/test-evidence.json",
+      "raw_report_sha256": "2af3214c6fc9f8ca5ef88997df4cad4a97097581d543bef1dbf573b4ea947714",
+      "reconciled_at": "2026-08-18T10:10:00Z",
+      "reduced_assurance": true,
+      "report_id": "test-evidence-initial",
+      "review_basis": "bounded test-evidence review of the exact current delta",
+      "reviewed_candidate_sha256": "6eb9ebda65e5170a6a3372c5a7be048791ea1ef702102dab2cd5ec2a23d0763b",
+      "reviewer_role": "controller-self-review",
+      "scope": "test-evidence"
+    }
+  ],
+  "review_packet": {
+    "baseline_failures": [
+      "none"
+    ],
+    "candidate_sha256": "6eb9ebda65e5170a6a3372c5a7be048791ea1ef702102dab2cd5ec2a23d0763b",
+    "changed_files_by_purpose": [
+      "archive-output.txt: exact-plan-declared product or review input",
+      "reviews/architecture.json: exact-plan-declared product or review input",
+      "reviews/requirements.json: exact-plan-declared product or review input",
+      "reviews/test-evidence.json: exact-plan-declared product or review input"
+    ],
+    "changes_and_rationale": [
+      "reviewed archive-output.txt",
+      "reviewed reviews/architecture.json",
+      "reviewed reviews/requirements.json",
+      "reviewed reviews/test-evidence.json"
+    ],
+    "current_state_and_next_action": [
+      "awaiting-diff-approval; present the exact diff disposition prompt"
+    ],
+    "deviations_and_amendments": [
+      "none recorded"
+    ],
+    "edge_cases_and_manual_checks": [
+      "raw paths, digests, findings, and verification were validated"
+    ],
+    "exact_commands_and_results": [
+      "python3 -m unittest tests.test_archive_output | exit 0 | archive output test passed"
+    ],
+    "execution_evidence": [
+      "raw test evidence is preserved in the review evidence"
+    ],
+    "human_judgment": [
+      "review identity and quality remain human judgments"
+    ],
+    "human_review_order": [
+      "requirements",
+      "architecture",
+      "test-evidence"
+    ],
+    "identity_and_outcome": [
+      "reviewed candidate 6eb9ebda65e5170a6a3372c5a7be048791ea1ef702102dab2cd5ec2a23d0763b"
+    ],
+    "implications": [
+      "local deterministic evidence does not prove external behavior"
+    ],
+    "program_context": [
+      "status-current first-increment review transaction"
+    ],
+    "recovery": [
+      "preserve exact prefixes and retry only identical bytes"
+    ],
+    "repairs_and_renewed_verification": [
+      "none"
+    ],
+    "requirements_and_acceptance": [
+      "all required raw review scopes reconciled"
+    ],
+    "residual_risks_and_deferred_work": [
+      "independent review is not claimed"
+    ],
+    "reviewer_roles_findings_dispositions": [
+      "requirements-initial: controller-self-review; non-independent; reduced assurance",
+      "architecture-initial: controller-self-review; non-independent; reduced assurance",
+      "test-evidence-initial: controller-self-review; non-independent; reduced assurance",
+      "no material findings"
+    ],
+    "schema_version": "implementation-review-packet/v1",
+    "workspace_and_logical_boundaries": [
+      "no staging, commit, or external action is authorized"
+    ]
+  },
+  "risk_predicates": [
+    {
+      "evidence": "the exact delta does not touch security-privacy",
+      "predicate": "security-privacy",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-security-privacy",
+      "touched": false
+    },
+    {
+      "evidence": "the exact delta does not touch public-api-compatibility",
+      "predicate": "public-api-compatibility",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-compatibility",
+      "touched": false
+    },
+    {
+      "evidence": "the exact delta does not touch concurrency-reliability-distributed-state",
+      "predicate": "concurrency-reliability-distributed-state",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-reliability",
+      "touched": false
+    },
+    {
+      "evidence": "the exact delta does not touch persistent-data-migrations",
+      "predicate": "persistent-data-migrations",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-persistent-data",
+      "touched": false
+    },
+    {
+      "evidence": "the exact delta does not touch accessibility",
+      "predicate": "accessibility",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-accessibility",
+      "touched": false
+    },
+    {
+      "evidence": "the exact delta does not touch platform-deployment-infrastructure",
+      "predicate": "platform-deployment-infrastructure",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-platform",
+      "touched": false
+    },
+    {
+      "evidence": "the exact delta does not touch payments-financial-state",
+      "predicate": "payments-financial-state",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-financial",
+      "touched": false
+    },
+    {
+      "evidence": "the exact delta does not touch performance",
+      "predicate": "performance",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-performance",
+      "touched": false
+    },
+    {
+      "evidence": "the exact delta does not touch provider-external-state",
+      "predicate": "provider-external-state",
+      "rationale": "no specialist scope selected",
+      "specialist_scope": "specialist-provider",
+      "touched": false
+    }
+  ],
+  "schema_version": "implementation-review-evidence/v1",
+  "semantic_naming": [
+    {
+      "basis_owner": "none",
+      "compatibility_class": "private",
+      "compatibility_disposition": "exact-plan-declared change",
+      "context": "status-current reviewed product delta",
+      "finding_id": "none",
+      "intention": "deliver one exact-plan-declared changed path",
+      "planning_term_basis": "none",
+      "status": "accepted",
+      "surface": "archive-output.txt",
+      "surface_kind": "path"
+    },
+    {
+      "basis_owner": "none",
+      "compatibility_class": "private",
+      "compatibility_disposition": "exact-plan-declared change",
+      "context": "status-current reviewed product delta",
+      "finding_id": "none",
+      "intention": "deliver one exact-plan-declared changed path",
+      "planning_term_basis": "none",
+      "status": "accepted",
+      "surface": "reviews/architecture.json",
+      "surface_kind": "path"
+    },
+    {
+      "basis_owner": "none",
+      "compatibility_class": "private",
+      "compatibility_disposition": "exact-plan-declared change",
+      "context": "status-current reviewed product delta",
+      "finding_id": "none",
+      "intention": "deliver one exact-plan-declared changed path",
+      "planning_term_basis": "none",
+      "status": "accepted",
+      "surface": "reviews/requirements.json",
+      "surface_kind": "path"
+    },
+    {
+      "basis_owner": "none",
+      "compatibility_class": "private",
+      "compatibility_disposition": "exact-plan-declared change",
+      "context": "status-current reviewed product delta",
+      "finding_id": "none",
+      "intention": "deliver one exact-plan-declared changed path",
+      "planning_term_basis": "none",
+      "status": "accepted",
+      "surface": "reviews/test-evidence.json",
+      "surface_kind": "path"
+    }
+  ],
+  "semantic_surfaces": [
+    {
+      "surface": "archive-output.txt",
+      "surface_kind": "path"
+    },
+    {
+      "surface": "reviews/architecture.json",
+      "surface_kind": "path"
+    },
+    {
+      "surface": "reviews/requirements.json",
+      "surface_kind": "path"
+    },
+    {
+      "surface": "reviews/test-evidence.json",
+      "surface_kind": "path"
+    }
+  ],
+  "test_first_evidence": [
+    {
+      "evidence_order": [
+        "red",
+        "green"
+      ],
+      "expected_failure": "archive output was missing",
+      "green_command": "python3 -m unittest tests.test_archive_output",
+      "green_exit_code": 0,
+      "intended_reason_match": true,
+      "observed_before_production_change": true,
+      "observed_failure": "archive output was missing",
+      "observed_green": "archive output test passed",
+      "purpose": "create the archive output",
+      "red_command": "python3 -m unittest tests.test_archive_output",
+      "red_exit_code": 1,
+      "schema_version": "implementation-execution-evidence/v1",
+      "slice_id": "archive-output"
+    }
+  ]
+}

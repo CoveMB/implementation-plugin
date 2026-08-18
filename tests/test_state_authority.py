@@ -12,6 +12,13 @@ from io import StringIO
 from pathlib import Path
 from unittest import mock
 
+from tests.program_bootstrap_support import (
+    BootstrapFixture,
+    canonical_json,
+    repository_snapshot,
+)
+from tests.test_program_activation import activated_program
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
@@ -36,6 +43,8 @@ try:
 finally:
     sys.path.remove(str(SCRIPT_ROOT))
 
+from tests.test_diff_disposition import awaiting_diff_program
+
 
 BASE_COMMIT = "b" * 40
 HEAD_COMMIT = "a" * 40
@@ -55,12 +64,256 @@ def write_json(path: Path, value: object) -> None:
     )
 
 
+class ManagedLifecycleWriteTests(unittest.TestCase):
+    def test_status_brief_must_match_the_status_current_increment_grant(self) -> None:
+        fixture = BootstrapFixture()
+        try:
+            program_root, observation = activated_program(fixture)
+            replacement = program_root / "program/substituted-brief.md"
+            replacement.write_text("# Substitute brief\n", encoding="utf-8")
+            status_path = program_root / "state/status.json"
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            status["brief_binding"] = {
+                **status["brief_binding"],
+                "path": "program/substituted-brief.md",
+                "sha256": sha256_file(replacement),
+            }
+            status_path.write_bytes(canonical_json(status))
+
+            issues = AUTHORITY.validate_state_authority(
+                program_root, observation
+            )
+
+            self.assertIn(
+                "status-current increment grant brief binding mismatch", issues
+            )
+        finally:
+            fixture.close()
+
+    def test_final_increment_derives_modify_review_and_closure_allocations(self) -> None:
+        fixture = BootstrapFixture()
+        try:
+            program_root = fixture.repository / "implementation-programs/ARCHIVE-PROGRAM"
+            program_root.parent.mkdir()
+            shutil.copytree(fixture.candidate, program_root)
+
+            required = AUTHORITY.required_future_lifecycle_writes(
+                program_root, fixture.repository, "ARCHIVE-INDEX"
+            )
+            by_disposition = {
+                disposition: {
+                    requirement.path
+                    for requirement in required
+                    if requirement.disposition == disposition
+                }
+                for disposition in ("Create", "Modify", "Preserve")
+            }
+            prefix = "implementation-programs/ARCHIVE-PROGRAM"
+            self.assertEqual(
+                by_disposition["Modify"],
+                {
+                    f"{prefix}/state/approvals.jsonl",
+                    f"{prefix}/state/status.json",
+                    f"{prefix}/state/action-authorizations.jsonl",
+                    f"{prefix}/state/increment-grants.jsonl",
+                    f"{prefix}/state/rollovers.jsonl",
+                    f"{prefix}/state/block-resolutions.jsonl",
+                },
+            )
+            self.assertEqual(
+                by_disposition["Create"],
+                {
+                    f"{prefix}/increments/ARCHIVE-INDEX/execution-baseline.json",
+                    f"{prefix}/increments/ARCHIVE-INDEX/review-evidence.json",
+                    f"{prefix}/increments/ARCHIVE-INDEX/review-packet.md",
+                    f"{prefix}/closure/reconciliation.json",
+                    f"{prefix}/closure/closure-packet.md",
+                },
+            )
+            self.assertEqual(by_disposition["Preserve"], set())
+        finally:
+            fixture.close()
+    def test_unique_traceability_successor_replaces_closure_with_navigation(self) -> None:
+        fixture = BootstrapFixture()
+        try:
+            program_root = fixture.repository / "implementation-programs/ARCHIVE-PROGRAM"
+            program_root.parent.mkdir()
+            shutil.copytree(fixture.candidate, program_root)
+            manifest = json.loads((program_root / "manifest.json").read_text(encoding="utf-8"))
+            traceability_path = program_root / manifest["logical_roles"]["traceability"]
+            traceability = json.loads(traceability_path.read_text(encoding="utf-8"))
+            traceability["atomic_requirements"][0]["assigned_increments"] = [
+                "ARCHIVE-INDEX"
+            ]
+            successor = copy.deepcopy(traceability["atomic_requirements"][0])
+            successor["id"] = "INTEGRITY-SUCCESSOR"
+            successor["assigned_increments"] = ["ARCHIVE-SUCCESSOR"]
+            traceability["atomic_requirements"].append(successor)
+            traceability_path.write_bytes(canonical_json(traceability))
+
+            required = AUTHORITY.required_future_lifecycle_writes(
+                program_root, fixture.repository, "ARCHIVE-INDEX"
+            )
+            create = {
+                requirement.path
+                for requirement in required
+                if requirement.disposition == "Create"
+            }
+            prefix = "implementation-programs/ARCHIVE-PROGRAM"
+            self.assertIn(
+                f"{prefix}/increments/ARCHIVE-INDEX/handoff.md", create
+            )
+            self.assertIn(
+                f"{prefix}/increments/ARCHIVE-SUCCESSOR/brief.md", create
+            )
+            self.assertFalse(any("/closure/" in path for path in create))
+        finally:
+            fixture.close()
+
+    def test_required_map_rejects_every_missing_or_misclassified_path(self) -> None:
+        required = (
+            AUTHORITY.ManagedWriteRequirement("state/status.json", "Modify"),
+            AUTHORITY.ManagedWriteRequirement("review/evidence.json", "Create"),
+        )
+        valid = AUTHORITY.ExactFileMap(
+            create=("review/evidence.json",),
+            modify=("state/status.json",),
+            preserve=("catalog.txt",),
+        )
+        self.assertEqual(
+            AUTHORITY.validate_required_managed_file_map(valid, required), []
+        )
+        for candidate in (
+            AUTHORITY.ExactFileMap((), valid.modify, valid.preserve),
+            AUTHORITY.ExactFileMap(
+                ("review/evidence.json", "state/status.json"), (), valid.preserve
+            ),
+        ):
+            with self.subTest(candidate=candidate):
+                self.assertTrue(
+                    AUTHORITY.validate_required_managed_file_map(candidate, required)
+                )
+
+    def test_multiple_traceability_successors_fail_closed(self) -> None:
+        fixture = BootstrapFixture()
+        try:
+            program_root = fixture.repository / "implementation-programs/ARCHIVE-PROGRAM"
+            program_root.parent.mkdir()
+            shutil.copytree(fixture.candidate, program_root)
+            manifest = json.loads((program_root / "manifest.json").read_text(encoding="utf-8"))
+            traceability_path = program_root / manifest["logical_roles"]["traceability"]
+            traceability = json.loads(traceability_path.read_text(encoding="utf-8"))
+            for increment_id in ("ARCHIVE-NEXT-A", "ARCHIVE-NEXT-B"):
+                successor = copy.deepcopy(traceability["atomic_requirements"][0])
+                successor["id"] = f"INTEGRITY-{increment_id}"
+                successor["assigned_increments"] = [increment_id]
+                traceability["atomic_requirements"].append(successor)
+            traceability_path.write_bytes(canonical_json(traceability))
+
+            with self.assertRaisesRegex(ValueError, "more than one successor"):
+                AUTHORITY.required_future_lifecycle_writes(
+                    program_root, fixture.repository, "ARCHIVE-INDEX"
+                )
+        finally:
+            fixture.close()
+
+
 def write_json_lines(path: Path, records: list[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
         encoding="utf-8",
     )
+
+
+class DeferredMutationGuardTests(unittest.TestCase):
+    def test_generic_new_program_diff_acceptance_stops_before_any_write(self) -> None:
+        fixture, program_root, observation = awaiting_diff_program()
+        try:
+            status_path = program_root / "state/status.json"
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            request = AUTHORITY.TransitionRequest(
+                expected_status_sha256=sha256_file(status_path),
+                expected_state_sequence=status["state_sequence"],
+                target_program_state="active",
+                target_increment_id=status["current_increment_id"],
+                target_increment_state="accepted",
+                transition_event_id="DIRECT-DIFF-ACCEPTANCE",
+                action_authorization_id=None,
+                evidence={"action_scope": "accept current increment"},
+                authority_kind="approval-event",
+            )
+            before = repository_snapshot(program_root)
+            with self.assertRaisesRegex(
+                ValueError, "typed-diff-disposition-required"
+            ):
+                AUTHORITY.apply_state_transition(program_root, request, observation)
+            self.assertEqual(repository_snapshot(program_root), before)
+        finally:
+            fixture.close()
+
+    def test_new_program_blocked_and_superseded_transitions_stop_before_writes(self) -> None:
+        cases = (
+            ("blocked", "blocked", "blocked-transaction-required"),
+            ("superseded", "superseded", "program-revision-workflow-required"),
+        )
+        for program_state, increment_state, expected in cases:
+            with self.subTest(program_state=program_state):
+                fixture = BootstrapFixture()
+                try:
+                    program_root, observation = activated_program(fixture)
+                    status_path = program_root / "state/status.json"
+                    status = json.loads(status_path.read_text(encoding="utf-8"))
+                    request = AUTHORITY.TransitionRequest(
+                        expected_status_sha256=sha256_file(status_path),
+                        expected_state_sequence=status["state_sequence"],
+                        target_program_state=program_state,
+                        target_increment_id=status["current_increment_id"],
+                        target_increment_state=increment_state,
+                        transition_event_id="DIRECT-DEFERRED-MUTATION",
+                        action_authorization_id=None,
+                        evidence={"action_scope": "deferred mutation"},
+                    )
+                    before = repository_snapshot(program_root)
+                    with self.assertRaisesRegex(ValueError, expected):
+                        AUTHORITY.apply_state_transition(
+                            program_root, request, observation
+                        )
+                    self.assertEqual(repository_snapshot(program_root), before)
+                finally:
+                    fixture.close()
+
+    def test_new_program_transition_out_of_blocked_stops_before_writes(self) -> None:
+        fixture = BootstrapFixture()
+        try:
+            program_root, observation = activated_program(fixture)
+            status_path = program_root / "state/status.json"
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            status.update(
+                program_state="blocked",
+                current_increment_state="blocked",
+                blocked_context={
+                    "resume_program_state": "active",
+                    "resume_increment_state": "preparing",
+                },
+            )
+            status_path.write_bytes(canonical_json(status))
+            request = AUTHORITY.TransitionRequest(
+                expected_status_sha256=sha256_file(status_path),
+                expected_state_sequence=status["state_sequence"],
+                target_program_state="active",
+                target_increment_id=status["current_increment_id"],
+                target_increment_state="preparing",
+                transition_event_id="DIRECT-BLOCK-RESOLUTION",
+                action_authorization_id=None,
+                evidence={"action_scope": "resolve block"},
+            )
+            before = repository_snapshot(program_root)
+            with self.assertRaisesRegex(ValueError, "blocked-transaction-required"):
+                AUTHORITY.apply_state_transition(program_root, request, observation)
+            self.assertEqual(repository_snapshot(program_root), before)
+        finally:
+            fixture.close()
 
 
 class StateAuthorityFixture:
@@ -677,6 +930,97 @@ class AtomicPersistenceTests(unittest.TestCase):
         self.assertEqual(path.read_bytes(), old_bytes)
         self.assertEqual(list(self.root.glob(".status.json.*.tmp")), [])
 
+    def test_compare_and_swap_rechecks_the_target_immediately_before_replace(self) -> None:
+        path = self.root / "status.json"
+        write_json(path, {"schema_version": "record/v1", "value": 1})
+        old_sha256 = sha256_file(path)
+
+        with (
+            mock.patch.object(
+                AUTHORITY,
+                "sha256_file",
+                side_effect=(old_sha256, "f" * 64),
+            ),
+            mock.patch.object(AUTHORITY.os, "replace") as replace,
+        ):
+            with self.assertRaisesRegex(ValueError, "digest changed"):
+                AUTHORITY.atomic_replace_json(
+                    path,
+                    {"schema_version": "record/v1", "value": 2},
+                    old_sha256,
+                )
+
+        replace.assert_not_called()
+
+    def test_atomic_replace_syncs_file_and_parent_directory(self) -> None:
+        path = self.root / "status.json"
+        write_json(path, {"schema_version": "record/v1", "value": 1})
+
+        with mock.patch.object(
+            AUTHORITY.os, "fsync", wraps=AUTHORITY.os.fsync
+        ) as fsync:
+            AUTHORITY.atomic_replace_json(
+                path,
+                {"schema_version": "record/v1", "value": 2},
+                sha256_file(path),
+            )
+
+        self.assertGreaterEqual(fsync.call_count, 2)
+
+    def test_windows_named_mutex_runs_compare_and_swap_without_fcntl(self) -> None:
+        path = self.root / "status.json"
+        write_json(path, {"schema_version": "record/v1", "value": 1})
+        windows_backend = mock.Mock()
+        windows_backend.CreateMutexW.return_value = 71
+        windows_backend.WaitForSingleObject.return_value = 0
+        windows_backend.ReleaseMutex.return_value = 1
+        windows_backend.CloseHandle.return_value = 1
+        file_events: list[str] = []
+        real_close = AUTHORITY.os.close
+        real_replace = AUTHORITY.os.replace
+
+        def close_descriptor(descriptor: int) -> None:
+            file_events.append("close")
+            real_close(descriptor)
+
+        def replace_file(source: object, target: object) -> None:
+            file_events.append("replace")
+            real_replace(source, target)
+
+        with (
+            mock.patch.object(AUTHORITY, "_WINDOWS", True),
+            mock.patch.object(AUTHORITY, "_fcntl", None),
+            mock.patch.object(AUTHORITY, "_kernel32", windows_backend),
+            mock.patch.object(AUTHORITY.os, "close", side_effect=close_descriptor),
+            mock.patch.object(AUTHORITY.os, "replace", side_effect=replace_file),
+        ):
+            receipt = AUTHORITY.atomic_replace_json(
+                path,
+                {"schema_version": "record/v1", "value": 2},
+                sha256_file(path),
+            )
+
+        self.assertEqual(receipt.current_sha256, sha256_file(path))
+        windows_backend.CreateMutexW.assert_called_once()
+        windows_backend.WaitForSingleObject.assert_called_once_with(71, 0xFFFFFFFF)
+        windows_backend.ReleaseMutex.assert_called_once_with(71)
+        windows_backend.CloseHandle.assert_called_once_with(71)
+        self.assertLess(file_events.index("close"), file_events.index("replace"))
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows rename semantics")
+    def test_native_windows_compare_and_swap_replaces_closed_destination(self) -> None:
+        path = self.root / "status.json"
+        write_json(path, {"schema_version": "record/v1", "value": 1})
+
+        receipt = AUTHORITY.atomic_replace_json(
+            path,
+            {"schema_version": "record/v1", "value": 2},
+            sha256_file(path),
+        )
+
+        self.assertEqual(receipt.current_sha256, sha256_file(path))
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["value"], 2)
+
     def test_atomic_json_line_append_preserves_prefix_and_rejects_duplicate_id(self) -> None:
         path = self.root / "events.jsonl"
         path.write_text('{"event_id":"FIRST"}\n', encoding="utf-8")
@@ -700,6 +1044,30 @@ class AtomicPersistenceTests(unittest.TestCase):
                 path, {"event_id": "THIRD"}, sha256_file(path)
             )
         self.assertEqual(path.read_bytes(), old_bytes)
+
+
+class ClosureStorageResolutionTests(unittest.TestCase):
+    def test_manifest_owned_closure_paths_resolve_without_existing_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_json(
+                root / "manifest.json",
+                {
+                    "closure_storage": {
+                        "schema_version": "implementation-closure-storage/v1",
+                        "root": "closure",
+                        "reconciliation_filename": "reconciliation.json",
+                        "packet_filename": "closure-packet.md",
+                    }
+                },
+            )
+            self.assertEqual(
+                AUTHORITY.resolve_program_closure_paths(root),
+                {
+                    "reconciliation": root / "closure/reconciliation.json",
+                    "packet": root / "closure/closure-packet.md",
+                },
+            )
 
 
 class StateApplicationAndCliTests(StateAuthorityTestCase):
