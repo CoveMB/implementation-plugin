@@ -8,7 +8,7 @@
       "name": "implementation-plugin",
       "source": "./",
       "description": "Run approved implementation programs one reviewable increment at a time.",
-      "version": "0.1.0"
+      "version": "0.1.1"
     }
   ]
 }
