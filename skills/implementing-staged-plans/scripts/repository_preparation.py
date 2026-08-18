@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -23,6 +24,7 @@ from program_authority import (
 )
 from state_authority import (
     ActionBinding,
+    ExactFileMap,
     RepositoryObservation,
     decide_action_authorization,
     validate_state_authority,
@@ -31,6 +33,7 @@ from state_authority import (
 
 REPOSITORY_INSPECTION_SCHEMA = "implementation-repository-inspection/v1"
 EVIDENCE_RECORD_SCHEMA = "implementation-evidence-record/v1"
+EXECUTION_BASELINE_SCHEMA = "implementation-execution-baseline/v1"
 
 DRIFT_CATEGORIES = frozenset(
     {"benign", "reconcilable-relevant", "base-invalidating"}
@@ -134,6 +137,43 @@ class RepositoryInspection:
     git_common_directory: str
     selected_base_is_ancestor: bool
     status_format: str
+
+
+@dataclass(frozen=True)
+class ExecutionPathBaseline:
+    path: str
+    disposition: str
+    sha256: str | None
+
+
+@dataclass(frozen=True)
+class UserWorkBaseline:
+    path: str
+    categories: tuple[str, ...]
+    sha256: str | None
+
+
+@dataclass(frozen=True)
+class ExecutionBaseline:
+    schema_version: str
+    program_id: str
+    program_revision: int
+    increment_id: str
+    exact_file_plan_sha256: str
+    current_increment_authority_binding: dict[str, object]
+    workspace_observation: dict[str, object]
+    file_map: ExactFileMap
+    path_baselines: tuple[ExecutionPathBaseline, ...]
+    user_work_baselines: tuple[UserWorkBaseline, ...]
+    inherited_paths: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ExecutionWorkspaceAssessment:
+    valid: bool
+    issues: tuple[str, ...]
+    product_delta: tuple[dict[str, object], ...]
+    product_delta_sha256: str
 
 
 @dataclass(frozen=True)
@@ -508,6 +548,61 @@ def _dirty_paths(observation: RepositoryObservation) -> set[str]:
     )
 
 
+def validate_repository_stability(
+    previous: RepositoryInspection,
+    current: RepositoryInspection,
+    *,
+    owned_prefixes: Sequence[str] = (),
+) -> list[str]:
+    """Reject repository drift while ignoring only one transaction's owned paths."""
+    issues: list[str] = []
+
+    def unowned(paths: Sequence[str]) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                path
+                for path in paths
+                if not any(
+                    path == prefix.rstrip("/")
+                    or path.startswith(prefix.rstrip("/") + "/")
+                    for prefix in owned_prefixes
+                )
+            )
+        )
+
+    for label, expected, actual in (
+        ("repository", previous.observation.repository, current.observation.repository),
+        ("workspace", previous.observation.path, current.observation.path),
+        ("branch", previous.observation.branch, current.observation.branch),
+        ("base", previous.observation.base_commit, current.observation.base_commit),
+        ("head", previous.observation.head_commit, current.observation.head_commit),
+        ("staged paths", previous.observation.staged_paths, current.observation.staged_paths),
+        ("modified paths", previous.observation.modified_paths, current.observation.modified_paths),
+        (
+            "untracked paths",
+            unowned(previous.observation.untracked_paths),
+            unowned(current.observation.untracked_paths),
+        ),
+        (
+            "conflicted paths",
+            previous.observation.conflicted_paths,
+            current.observation.conflicted_paths,
+        ),
+        (
+            "active Git operation",
+            previous.observation.active_git_operation,
+            current.observation.active_git_operation,
+        ),
+    ):
+        if expected != actual:
+            issues.append(
+                f"repository drift: {label} changed from {expected!r} to {actual!r}"
+            )
+    if previous.selected_base_is_ancestor != current.selected_base_is_ancestor:
+        issues.append("repository drift: selected-base ancestry changed")
+    return sorted(set(issues))
+
+
 def classify_repository_drift(context: DriftContext) -> DriftAssessment:
     """Classify repository movement with fail-closed qualitative precedence."""
     previous = context.previous
@@ -834,6 +929,339 @@ def _section_body(markdown: str, heading: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def _normalized_file_map_path(raw_path: str) -> str:
+    if not raw_path or "\\" in raw_path:
+        raise ValueError("exact-file map path must be a relative POSIX path")
+    path = PurePosixPath(raw_path)
+    if (
+        path.is_absolute()
+        or path.as_posix() != raw_path
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        raise ValueError(f"exact-file map path is unsafe: {raw_path!r}")
+    return raw_path
+
+
+def parse_exact_file_map(markdown: str) -> ExactFileMap:
+    """Parse exactly one disposition-aware file map from an exact plan."""
+    file_map_matches = list(
+        re.finditer(r"^## File map\s*$", markdown, flags=re.MULTILINE)
+    )
+    if len(file_map_matches) != 1:
+        raise ValueError("exact-file plan must contain exactly one ## File map")
+    start = file_map_matches[0].end()
+    next_heading = re.search(r"^## ", markdown[start:], flags=re.MULTILINE)
+    end = start + next_heading.start() if next_heading else len(markdown)
+    body = markdown[start:end]
+    headings = list(
+        re.finditer(r"^### (Create|Modify|Preserve)\s*$", body, flags=re.MULTILINE)
+    )
+    if tuple(match.group(1) for match in headings) != (
+        "Create",
+        "Modify",
+        "Preserve",
+    ):
+        raise ValueError(
+            "exact-file map must contain one ordered Create, Modify, and Preserve section"
+        )
+
+    parsed: dict[str, tuple[str, ...]] = {}
+    seen: set[str] = set()
+    for index, match in enumerate(headings):
+        disposition = match.group(1)
+        section_end = headings[index + 1].start() if index + 1 < len(headings) else len(body)
+        section = body[match.end() : section_end]
+        paths: list[str] = []
+        for line in section.splitlines():
+            if not re.match(r"^\s*-\s+", line):
+                continue
+            matches = re.findall(r"`([^`]+)`", line)
+            if len(matches) != 1:
+                raise ValueError(
+                    f"exact-file map {disposition} entries require one backticked path"
+                )
+            path = _normalized_file_map_path(matches[0])
+            if path in seen:
+                raise ValueError(f"exact-file map path is duplicated: {path}")
+            seen.add(path)
+            paths.append(path)
+        if not paths:
+            raise ValueError(f"exact-file map {disposition} section must not be empty")
+        parsed[disposition] = tuple(paths)
+    return ExactFileMap(
+        create=parsed["Create"],
+        modify=parsed["Modify"],
+        preserve=parsed["Preserve"],
+    )
+
+
+def execution_baseline_from_value(value: object) -> ExecutionBaseline:
+    """Parse the persisted execution baseline into its typed contract."""
+    if not isinstance(value, dict):
+        raise ValueError("execution baseline must be an object")
+    if value.get("schema_version") != EXECUTION_BASELINE_SCHEMA:
+        raise ValueError("unsupported execution baseline schema")
+    try:
+        file_map_value = value["file_map"]
+        path_values = value["path_baselines"]
+        user_values = value["user_work_baselines"]
+        inherited_values = value["inherited_paths"]
+        if not isinstance(file_map_value, dict):
+            raise TypeError("file_map")
+        if not isinstance(path_values, list):
+            raise TypeError("path_baselines")
+        if not isinstance(user_values, list):
+            raise TypeError("user_work_baselines")
+        if not isinstance(inherited_values, list):
+            raise TypeError("inherited_paths")
+        file_map = ExactFileMap(
+            create=tuple(file_map_value["create"]),
+            modify=tuple(file_map_value["modify"]),
+            preserve=tuple(file_map_value["preserve"]),
+        )
+        path_baselines = tuple(
+            ExecutionPathBaseline(
+                path=str(item["path"]),
+                disposition=str(item["disposition"]),
+                sha256=item.get("sha256"),
+            )
+            for item in path_values
+            if isinstance(item, dict)
+        )
+        user_baselines = tuple(
+            UserWorkBaseline(
+                path=str(item["path"]),
+                categories=tuple(item["categories"]),
+                sha256=item.get("sha256"),
+            )
+            for item in user_values
+            if isinstance(item, dict)
+        )
+        authority = value["current_increment_authority_binding"]
+        workspace = value["workspace_observation"]
+        if not isinstance(authority, dict) or not isinstance(workspace, dict):
+            raise TypeError("binding")
+        baseline = ExecutionBaseline(
+            schema_version=str(value["schema_version"]),
+            program_id=str(value["program_id"]),
+            program_revision=int(value["program_revision"]),
+            increment_id=str(value["increment_id"]),
+            exact_file_plan_sha256=str(value["exact_file_plan_sha256"]),
+            current_increment_authority_binding=dict(authority),
+            workspace_observation=dict(workspace),
+            file_map=file_map,
+            path_baselines=path_baselines,
+            user_work_baselines=user_baselines,
+            inherited_paths=tuple(str(path) for path in inherited_values),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("execution baseline structure is invalid") from error
+    expected_paths = {
+        *(baseline.file_map.create),
+        *(baseline.file_map.modify),
+        *(baseline.file_map.preserve),
+    }
+    actual_paths = {item.path for item in baseline.path_baselines}
+    if len(actual_paths) != len(baseline.path_baselines) or not actual_paths.issubset(
+        expected_paths
+    ):
+        raise ValueError("execution baseline path inventory does not match its file map")
+    dispositions = {
+        path: disposition
+        for disposition, paths in (
+            ("Create", baseline.file_map.create),
+            ("Modify", baseline.file_map.modify),
+            ("Preserve", baseline.file_map.preserve),
+        )
+        for path in paths
+    }
+    if any(dispositions[item.path] != item.disposition for item in baseline.path_baselines):
+        raise ValueError("execution baseline path disposition mismatch")
+    if len({item.path for item in baseline.user_work_baselines}) != len(
+        baseline.user_work_baselines
+    ):
+        raise ValueError("execution baseline user-work inventory is duplicated")
+    if baseline.inherited_paths:
+        raise ValueError("first-increment execution baseline inherited_paths must be empty")
+    return baseline
+
+
+def _relative_control_prefix(program_root: Path, workspace_root: Path) -> str:
+    try:
+        return Path(program_root).resolve().relative_to(workspace_root.resolve()).as_posix()
+    except ValueError as error:
+        raise ValueError("program root must be inside the selected workspace") from error
+
+
+def _without_control_paths(paths: Sequence[str], control_prefix: str) -> set[str]:
+    return {
+        path
+        for path in paths
+        if path != control_prefix and not path.startswith(control_prefix + "/")
+    }
+
+
+def _file_digest(path: Path) -> str | None:
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        return None
+    return sha256_file(path) if path.is_file() else None
+
+
+def validate_execution_workspace(
+    program_root: Path,
+    baseline: ExecutionBaseline,
+    inspection: RepositoryInspection,
+    *,
+    increment_state: str,
+) -> ExecutionWorkspaceAssessment:
+    """Validate live product paths against the status-current execution baseline."""
+    issues: list[str] = []
+    observation = inspection.observation
+    workspace = Path(observation.path)
+    recorded = baseline.workspace_observation
+    for field, actual in (
+        ("repository", observation.repository),
+        ("path", observation.path),
+        ("branch", observation.branch),
+        ("base_commit", observation.base_commit),
+        ("head_commit", observation.head_commit),
+    ):
+        if recorded.get(field) != actual:
+            issues.append(f"execution workspace {field} drift")
+    if not inspection.selected_base_is_ancestor:
+        issues.append("execution workspace selected base is no longer an ancestor")
+    if observation.active_git_operation != recorded.get("active_git_operation"):
+        issues.append("execution workspace active Git operation changed")
+
+    control_prefix = _relative_control_prefix(Path(program_root), workspace)
+    current_staged = _without_control_paths(observation.staged_paths, control_prefix)
+    recorded_staged = _without_control_paths(
+        tuple(recorded.get("staged_paths", ())), control_prefix
+    )
+    if current_staged != recorded_staged:
+        issues.append("execution workspace has new or changed staged paths")
+    current_conflicted = _without_control_paths(
+        observation.conflicted_paths, control_prefix
+    )
+    recorded_conflicted = _without_control_paths(
+        tuple(recorded.get("conflicted_paths", ())), control_prefix
+    )
+    if current_conflicted != recorded_conflicted:
+        issues.append("execution workspace has new or changed conflicted paths")
+
+    current_dirty = _without_control_paths(
+        (
+            *observation.staged_paths,
+            *observation.modified_paths,
+            *observation.untracked_paths,
+            *observation.conflicted_paths,
+        ),
+        control_prefix,
+    )
+    recorded_dirty = _without_control_paths(
+        (
+            *tuple(recorded.get("staged_paths", ())),
+            *tuple(recorded.get("modified_paths", ())),
+            *tuple(recorded.get("untracked_paths", ())),
+            *tuple(recorded.get("conflicted_paths", ())),
+        ),
+        control_prefix,
+    )
+    product_paths = set(baseline.file_map.create) | set(baseline.file_map.modify)
+    unexpected_dirty = current_dirty - recorded_dirty - product_paths
+    if unexpected_dirty:
+        issues.append(
+            "execution workspace has unmapped dirty paths: "
+            + ", ".join(sorted(unexpected_dirty))
+        )
+    missing_user_dirty = recorded_dirty - current_dirty
+    if missing_user_dirty:
+        issues.append(
+            "execution workspace no longer preserves pre-existing user work: "
+            + ", ".join(sorted(missing_user_dirty))
+        )
+
+    user_by_path = {item.path: item for item in baseline.user_work_baselines}
+    if set(user_by_path) != recorded_dirty:
+        issues.append("execution baseline user-work inventory does not match launch dirt")
+    for relative, item in user_by_path.items():
+        path = workspace / relative
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            issues.append(f"pre-existing user work path is unsafe: {relative}")
+            continue
+        actual = sha256_file(path) if path.is_file() else None
+        if actual != item.sha256:
+            issues.append(f"pre-existing user work changed: {relative}")
+
+    baselines = {item.path: item for item in baseline.path_baselines}
+    product_delta: list[dict[str, object]] = []
+    later_states = {
+        "reviewing",
+        "remediating",
+        "verified",
+        "awaiting-diff-approval",
+        "accepted",
+    }
+    if increment_state not in {"authorized", "implementing", *later_states}:
+        issues.append(f"execution workspace state is unsupported: {increment_state}")
+    for disposition, paths in (
+        ("Create", baseline.file_map.create),
+        ("Modify", baseline.file_map.modify),
+        ("Preserve", baseline.file_map.preserve),
+    ):
+        for relative in paths:
+            if relative == control_prefix or relative.startswith(control_prefix + "/"):
+                continue
+            path = workspace / relative
+            entry = baselines.get(relative)
+            if entry is None:
+                issues.append(f"execution baseline is missing product path: {relative}")
+                continue
+            if path.is_symlink() or (path.exists() and not path.is_file()):
+                issues.append(f"execution path is unsafe: {relative}")
+                continue
+            actual = sha256_file(path) if path.is_file() else None
+            changed = actual != entry.sha256
+            if disposition == "Preserve" and changed:
+                issues.append(f"preserved path changed: {relative}")
+            elif disposition == "Create":
+                if increment_state == "authorized" and actual is not None:
+                    issues.append(f"authorized workspace already created path: {relative}")
+                elif increment_state in later_states and actual is None:
+                    issues.append(f"reviewing workspace is missing Create path: {relative}")
+                elif actual is not None:
+                    product_delta.append(
+                        {"path": relative, "disposition": disposition, "sha256": actual}
+                    )
+            elif disposition == "Modify":
+                if actual is None:
+                    issues.append(f"execution workspace deleted Modify path: {relative}")
+                elif increment_state == "authorized" and changed:
+                    issues.append(f"authorized workspace changed Modify path: {relative}")
+                elif increment_state in later_states and not changed:
+                    issues.append(f"reviewing workspace has unchanged Modify path: {relative}")
+                elif changed:
+                    product_delta.append(
+                        {"path": relative, "disposition": disposition, "sha256": actual}
+                    )
+    product_delta.sort(key=lambda item: (str(item["path"]), str(item["disposition"])))
+    delta_sha256 = hashlib.sha256(
+        json.dumps(
+            product_delta,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    unique_issues = tuple(sorted(set(issues)))
+    return ExecutionWorkspaceAssessment(
+        valid=not unique_issues,
+        issues=unique_issues,
+        product_delta=tuple(product_delta),
+        product_delta_sha256=delta_sha256,
+    )
+
+
 def _validate_plan_naming_table(markdown: str) -> list[str]:
     body = _section_body(markdown, "Semantic naming inventory")
     rows = [line for line in body.splitlines() if line.strip().startswith("|")]
@@ -896,14 +1324,10 @@ def validate_exact_file_plan(
         if not _section_body(markdown, section):
             issues.append(f"exact-file plan section {section!r} is missing or empty")
     file_map = _section_body(markdown, "File map")
-    for disposition in ("Create", "Modify", "Preserve"):
-        match = re.search(
-            rf"^### (?:Already )?{disposition}[^\n]*\n(.*?)(?=^### |\Z)",
-            file_map,
-            flags=re.MULTILINE | re.DOTALL | re.IGNORECASE,
-        )
-        if match is None or "`" not in match.group(1):
-            issues.append(f"exact-file plan file map needs a non-empty {disposition.lower()} map")
+    try:
+        parse_exact_file_map(markdown)
+    except ValueError as error:
+        issues.append(str(error))
     if "interface" not in file_map.lower() and "### exact preparation contracts" not in markdown.lower():
         issues.append("exact-file plan must name explicit interfaces")
     commands = _section_body(markdown, "Commands and expected evidence")

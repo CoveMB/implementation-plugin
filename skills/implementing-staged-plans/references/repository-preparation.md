@@ -56,11 +56,15 @@ Coordinate-shaped names such as a phase, task, step, wave, sprint, priority, or 
 
 Create the exact-file plan just in time from current repository evidence. Bind the program, revision, increment, source, program and semantic digests, workspace path, branch, base and head, and preparation evidence. Include global constraints; requirements and acceptance; non-empty create, modify, and preserve maps; interfaces; semantic naming inventory; test-first or alternative verification slices; exact commands and expected evidence; review predicates; logical commit boundaries; rollback and recovery; risks, exclusions, and amendment rules; and the required approval gate.
 
-Reject a missing, symlinked, stale, digest-mismatched, or structurally incomplete plan. A content-valid plan is not write authority.
+The plan contains exactly one `## File map`, followed by exactly one ordered `### Create`, `### Modify`, and `### Preserve`. Each entry is a normalized repository-relative POSIX path in one backticked bullet. Paths cannot escape the repository, traverse `.` or `..`, use backslashes, or appear in more than one disposition.
+
+For new-model programs, compare the parsed map with the manifest-derived lifecycle requirements before any plan, baseline, approval, authorization, review, acceptance, rollover, blocked-resolution, or closure sink writes. Final increments allocate closure files and no successor navigation. Nonfinal increments with one traceability successor allocate the current handoff and successor brief and no closure files. Allocation records ownership; it does not grant write authority.
+
+Reject a missing, symlinked, stale, digest-mismatched, or structurally incomplete plan. Before the first plan write, validate every manifest-derived future lifecycle allocation, every product path disposition, the status-current increment grant, and the complete execution-baseline and action-authorization candidates. Bind pre-existing user work separately so it cannot be claimed as Create or Modify. A content-valid plan is not write authority.
 
 ## Approval and Action Gate
 
-Before production changes, require an exact plan approval bound to the current tuple and a separate action authorization naming the requested writes and verification. Approval mode controls interruption and diff acceptance only. Use the state-authority procedure for lifecycle and append-only governance writes.
+Before production changes, always require the status-current increment grant, validated exact plan, execution baseline, and separate plan-bound action authorization naming the requested writes and verification. Standard mode additionally requires its exact prompt-bound plan-approval event. Pre-approve and full-increment omit only that routine plan question and do not invent an approval event. Approval mode controls interruption and diff acceptance; it never removes write ownership, baseline validation, action authority, or the user diff decision.
 
 ## Validation Commands
 
@@ -76,7 +80,7 @@ Record commands, relevant inputs, exit status, and concise output. Static valida
 
 ## Hard Stops
 
-Stop for ambiguous repository identity, stale or contradictory authority, selected-workspace mismatch, base-invalidating drift, unowned overlap, unavailable required evidence, a program amendment, missing safeguards, missing plan approval, missing action authorization, or any action outside the named increment. Do not infer commit or external-action authority.
+Stop for ambiguous repository identity, stale or contradictory authority, selected-workspace mismatch, base-invalidating drift, unowned overlap, unavailable required evidence, a program amendment, missing safeguards, a mode-required plan approval, missing execution baseline, missing action authorization, or any action outside the named increment. Do not infer commit or external-action authority.
 
 ## Bounded Result
 

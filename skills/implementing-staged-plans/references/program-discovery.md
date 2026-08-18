@@ -10,13 +10,20 @@ Every repository, manifest, program root, and manifest-owned logical role must r
 
 ## Deterministic Classification
 
-- No manifests: return `new-program-bootstrap-possible`, require the authoritative source-plan path, and perform no program write. A supplied source plan must be a regular non-symlink file; validation only makes the bootstrap route ready.
-- One valid `active` or `blocked` program: select it, inspect its bound workspace afresh, validate program and state authority, and build resume expectations from the manifest, persisted status, and fresh observation. Do not request the original documentation-plan path.
+- No manifests: return `new-program-bootstrap-possible`, require the authoritative source-plan path, and perform no program write. A supplied source plan must be a regular non-symlink file; validation returns `new-program-bootstrap-ready` without creating authority.
+- A new-program proposal at sequence zero uses proposal validation. An empty proposal returns `program-activation-ready`. An ordered program-approval, workspace-approval, or first-increment-grant prefix returns `program-activation-retry-ready`; an out-of-order, duplicate, unrelated, or divergent prefix fails closed.
+- Approved new-program status selects approved validation. Discovery inspects manifest-allocated plan, baseline, review, acceptance, closure, approval, authorization, and grant prefixes before applying generic state rejection. Exact controlled prefixes route to the corresponding `*-retry-ready` transaction; unsafe, malformed, unexpected, or state-incompatible artifacts stop without repair.
+- A new-model accepted status with an exact `accept-stop` binding returns `accepted-stop`. Closure files are a retryable preparation prefix. Complete closure preparation returns `closure-approval-ready`; an exact approval prefix returns `closure-approval-retry-ready`. Closed and superseded programs are non-controlling terminal history.
+- A new-model rollover or block-resolution prefix is preserved and returns `continuation-recovery-required` or `blocked-recovery-required`. Plan A does not write or complete either deferred Plan B operation.
+- Classify caller intent with `classify_requested_program_operation`. Plan A supports only `create`, `activate`, and `continue` routing. A live `revise` or `supersede` intent returns `program-revision-workflow-required`; `cancel` and every other mutation return `unsupported-program-mutation`. Classification is pure and always stops before any unsupported live write.
+- One valid legacy `active` or `blocked` program: select it, inspect its bound workspace afresh, validate program and state authority, and build resume expectations from the manifest, persisted status, and fresh observation. An accepted legacy automatic mode stops at `legacy-rollover-upgrade-required` before successor writes. Do not request the original documentation-plan path.
 - More than one valid `active` or `blocked` program: return sorted manifest candidates and stop for human selection.
-- Only `closed` programs: return the sorted closed manifests and stop until the user states new-program or closed-program inspection intent.
+- Only legacy `closed` programs: return the sorted closed manifests and stop until the user states new-program or closed-program inspection intent. Only new-model `closed` or `superseded` programs return `terminal-programs` and require explicit new-program or terminal-inspection intent.
 - Any invalid candidate or unsupported controlling state: return the evidence and stop. Do not choose around it.
 
 An explicit valid manifest takes precedence over convention and instruction candidates. A selected resumable program does not inherit write, approval, commit, installation, cleanup, external-action, or publication authority from discovery.
+
+The legacy caller-authored rollover writer is quarantined at its persistence entry point and always returns `legacy-rollover-upgrade-required`. Accepted legacy state remains readable; historical closed and superseded records remain terminal evidence. Read compatibility does not reactivate an unsafe writer.
 
 ## Resume Evidence
 
@@ -34,4 +41,4 @@ Add `--manifest <path>` for explicit selection, repeat `--instruction-manifest <
 
 ## Bounded Result
 
-Return the selected manifest or candidate lists, persisted program state, exact resume expectations when applicable, material issues, required human input, next legal action, and stop requirement. Continue only through the separately authorized focused procedure for that next action.
+Return the selected manifest or candidate lists, persisted program state, exact legacy resume expectations when applicable, material issues, required human input, one next legal action, and the truthful stop requirement. Discovery never adopts, deletes, overwrites, appends, or replaces transaction bytes. Continue only through the separately authorized typed procedure for the returned action.

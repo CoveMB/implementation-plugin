@@ -32,15 +32,18 @@ Unknown actions fail closed.
 
 Compound persistence is available only with `implementation-program-status/v2`. Keep accepted v1 records unchanged and dual-read them elsewhere.
 
-For an approved exact-file plan plus its expected execution grant, persist in this order:
+For a new-model program in `approval:standard`, the typed plan materializer persists in exactly this order:
 
 1. append or adopt the exact approved event;
-2. apply or adopt the approval-driven status transition;
-3. append or adopt each exact action-authorization record.
+2. create or adopt the execution baseline;
+3. append or adopt the exact plan-bound action-authorization record;
+4. replace or adopt the `authorized` status last.
 
-The status transition records the approval event and checkpoint identifier, then binds the expected execution-authorization identifier and scope. It does not claim that the later JSON Lines append already exists. Repository preparation therefore validates the bound grant itself before any implementation write.
+The `approval:pre-approve` and `approval:full-increment` modes omit only the exact-plan question and approval event. They still create or adopt the exact plan, execution baseline, plan-bound action authorization, and `authorized` status in that order. The status binds records that already exist; it never claims a future append.
 
-Each file operation is atomic, but the sequence is not a multi-file transaction. A failure returns completed steps, exact file receipts, the failed step, and `requires_retry`. Preserve partial records. On retry, adopt byte-for-byte identical records only. An already-applied transition must match the complete authority object, expected execution identifier and scope, plan-state updates, previous lifecycle state, checkpoint, event, sequence, and prior digest. Reject every substitution, identifier conflict, or digest conflict. Never delete, roll back, duplicate, or silently skip a partial write.
+The generic compound-checkpoint persistence API remains a legacy-program compatibility path. It rejects new-model manifests with `new-program-plan-materialization-required`; it cannot restore the former approval → status → action ordering.
+
+Each file operation is atomic, but the sequence is not a multi-file transaction. Preserve partial records. New-model discovery reconstructs the controlling exact-plan transaction and classifies only byte-identical ordered prefixes as retry-ready. A divergent plan, approval, baseline, action record, or status returns the corresponding recovery-required stop. Never delete, roll back, duplicate, or silently skip a partial write.
 
 ## Preserve Narrow Gates
 

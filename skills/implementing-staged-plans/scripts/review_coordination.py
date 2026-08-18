@@ -28,6 +28,7 @@ from repository_preparation import (
 
 REVIEW_EVIDENCE_SCHEMA = "implementation-review-evidence/v1"
 REVIEW_PACKET_SCHEMA = "implementation-review-packet/v1"
+RAW_REVIEW_REPORT_SCHEMA = "implementation-raw-review-report/v1"
 REQUIRED_REVIEW_SCOPES = ("requirements", "architecture", "test-evidence")
 RISK_REVIEW_SCOPES = MappingProxyType(
     {
@@ -239,6 +240,81 @@ class ReviewPacket:
 
 def _nonempty(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def load_raw_review_report(path: Path, expected_scope: str) -> dict[str, object]:
+    """Load one status-current raw report without accepting caller-selected shape."""
+    report_path = Path(path)
+    if report_path.is_symlink() or not report_path.is_file():
+        raise ValueError(f"raw {expected_scope} report must be a regular non-symlink file")
+    try:
+        value = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"raw {expected_scope} report is invalid") from error
+    if not isinstance(value, dict):
+        raise ValueError(f"raw {expected_scope} report must be an object")
+    allowed = {
+        "schema_version",
+        "scope",
+        "program_id",
+        "program_revision",
+        "increment_id",
+        "reviewer_role",
+        "independent",
+        "reduced_assurance",
+        "persisted_at",
+        "reconciled_at",
+        "review_basis",
+        "prior_conclusions_withheld",
+        "findings",
+        "risk_predicates",
+        "test_first_evidence",
+        "alternative_verification",
+        "recovery_domains",
+        "final_verification",
+        "remediation_cycles",
+    }
+    if set(value).difference(allowed):
+        raise ValueError(f"raw {expected_scope} report has unknown fields")
+    required = {
+        "schema_version",
+        "scope",
+        "program_id",
+        "program_revision",
+        "increment_id",
+        "reviewer_role",
+        "independent",
+        "reduced_assurance",
+        "persisted_at",
+        "reconciled_at",
+        "review_basis",
+        "prior_conclusions_withheld",
+        "findings",
+    }
+    missing = required.difference(value)
+    if missing:
+        raise ValueError(f"raw {expected_scope} report is missing required fields")
+    if value.get("schema_version") != RAW_REVIEW_REPORT_SCHEMA:
+        raise ValueError(f"raw {expected_scope} report has unsupported schema")
+    if value.get("scope") != expected_scope:
+        raise ValueError(f"raw report scope is not {expected_scope}")
+    if not isinstance(value.get("findings"), list):
+        raise ValueError(f"raw {expected_scope} report findings must be a list")
+    if expected_scope == "architecture" and not isinstance(
+        value.get("risk_predicates"), list
+    ):
+        raise ValueError("raw architecture report must classify every risk predicate")
+    if expected_scope == "test-evidence":
+        for field in (
+            "test_first_evidence",
+            "alternative_verification",
+            "recovery_domains",
+            "final_verification",
+            "remediation_cycles",
+        ):
+            if field not in value:
+                raise ValueError(f"raw test-evidence report is missing {field}")
+    return value
 
 
 def _tuple_strings(value: object, *, allow_empty: bool = False) -> bool:

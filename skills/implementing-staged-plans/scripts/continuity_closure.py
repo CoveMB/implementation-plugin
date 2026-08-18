@@ -4,10 +4,8 @@
 import argparse
 import hashlib
 import json
-import os
 import re
 import sys
-import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
@@ -17,7 +15,6 @@ from typing import Any
 from state_authority import (
     APPROVAL_MODE_POLICIES,
     approval_mode_policy,
-    atomic_replace_json,
     validate_state_authority,
 )
 
@@ -851,68 +848,12 @@ def validate_continuation_authority(
     return sorted(set(issues))
 
 
-def _safe_path(root: Path, relative_path: str) -> Path:
-    if not _nonempty(relative_path):
-        raise ValueError("managed relative path is required")
-    relative = Path(relative_path)
-    if relative.is_absolute() or ".." in relative.parts:
-        raise ValueError("managed path must stay beneath the root")
-    if not root.is_dir() or root.is_symlink():
-        raise ValueError("managed root must be a regular non-symlink directory")
-    target = root / relative
-    parent = root
-    for part in relative.parts[:-1]:
-        parent = parent / part
-        if parent.exists() and (parent.is_symlink() or not parent.is_dir()):
-            raise ValueError("managed path traverses a symlink or non-directory")
-    return target
-
-
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(65536), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def _atomic_create_text(path: Path, value: str) -> str:
-    if path.exists() or path.is_symlink():
-        raise ValueError(f"{path}: target already exists")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temporary:
-            temporary_path = Path(temporary.name)
-            temporary.write(value)
-            temporary.flush()
-            os.fsync(temporary.fileno())
-        if path.exists():
-            raise ValueError(f"{path}: target appeared before creation")
-        os.replace(temporary_path, path)
-        temporary_path = None
-    finally:
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink()
-            except FileNotFoundError:
-                pass
-    return _sha256_file(path)
-
-
-def _replace_json_through_state_authority(
-    path: Path, value: Mapping[str, object], expected_sha256: str
-) -> str:
-    return atomic_replace_json(
-        path, dict(value), expected_sha256
-    ).current_sha256
 
 
 def apply_increment_rollover(
@@ -938,88 +879,9 @@ def apply_increment_rollover(
     matching_authorization_ids: tuple[str, ...],
     fail_after_writes: int | None = None,
 ) -> ContinuityWriteReceipt:
-    if len(matching_authorization_ids) != 1 or not _nonempty(
-        matching_authorization_ids[0]
-    ):
-        raise ValueError("exactly one rollover action authorization is required")
-    if current_increment_state != "accepted":
-        raise ValueError("current increment must be accepted before rollover")
-    if not _nonempty(expected_current_increment_id) or not _nonempty(next_increment_id):
-        raise ValueError("current and next increment ids are required")
-    if current_increment_id != expected_current_increment_id:
-        raise ValueError("current increment binding changed")
-    if expected_current_increment_id == next_increment_id:
-        raise ValueError("rollover must advance to a different increment")
-    if expected_current_increment_id not in next_increment_dependencies:
-        raise ValueError("next increment dependency does not include the accepted increment")
-    if fail_after_writes is not None and (
-        not _is_int(fail_after_writes) or fail_after_writes < 0
-    ):
-        raise ValueError("fail_after_writes must be a non-negative integer")
-    handoff_issues = validate_handoff(handoff_record)
-    brief_issues = validate_increment_brief(brief_record)
-    if handoff_issues or brief_issues:
-        raise ValueError("; ".join([*handoff_issues, *brief_issues]))
-    if render_handoff(handoff_record) != handoff_markdown:
-        raise ValueError("handoff Markdown does not match the validated record")
-    if render_increment_brief(brief_record) != brief_markdown:
-        raise ValueError("brief Markdown does not match the validated record")
-    root = Path(root)
-    paths = (
-        _safe_path(root, handoff_relative_path),
-        _safe_path(root, brief_relative_path),
-        _safe_path(root, manifest_relative_path),
-        _safe_path(root, status_relative_path),
+    raise ValueError(
+        "legacy-rollover-upgrade-required: caller-authored rollover persistence is disabled"
     )
-    if not _nonempty(handoff_markdown) or not _nonempty(brief_markdown):
-        raise ValueError("validated handoff and brief markdown are required")
-    for path, expected_sha256 in (
-        (paths[2], expected_manifest_sha256),
-        (paths[3], expected_status_sha256),
-    ):
-        if not path.is_file() or path.is_symlink():
-            raise ValueError(f"{path}: expected a regular non-symlink file")
-        if _sha256_file(path) != expected_sha256:
-            raise ValueError(f"{path}: digest changed")
-    navigation_exists = tuple(path.exists() or path.is_symlink() for path in paths[:2])
-    if navigation_exists == (False, False):
-        navigation_writes = (
-            (handoff_relative_path, lambda: _atomic_create_text(paths[0], handoff_markdown)),
-            (brief_relative_path, lambda: _atomic_create_text(paths[1], brief_markdown)),
-        )
-    elif navigation_exists == (True, True):
-        expected_navigation = (
-            (paths[0], handoff_markdown.encode("utf-8")),
-            (paths[1], brief_markdown.encode("utf-8")),
-        )
-        for path, expected_bytes in expected_navigation:
-            if path.is_symlink() or not path.is_file():
-                raise ValueError("existing rollover navigation must be regular non-symlink files")
-            try:
-                actual_bytes = path.read_bytes()
-            except OSError as error:
-                raise ValueError(
-                    f"existing rollover navigation could not be read: {error.__class__.__name__}"
-                ) from error
-            if actual_bytes != expected_bytes:
-                raise ValueError("existing rollover navigation does not match validated bytes")
-        navigation_writes = ()
-    else:
-        raise ValueError("rollover navigation targets must both be absent or both be exact")
-    writes = (
-        *navigation_writes,
-        (manifest_relative_path, lambda: _replace_json_through_state_authority(paths[2], manifest_value, expected_manifest_sha256)),
-        (status_relative_path, lambda: _replace_json_through_state_authority(paths[3], status_value, expected_status_sha256)),
-    )
-    completed: list[tuple[str, str]] = []
-    for index, (relative_path, writer) in enumerate(writes):
-        if fail_after_writes is not None and index >= fail_after_writes:
-            return ContinuityWriteReceipt(tuple(completed), relative_path, True)
-        try:
-            completed.append((relative_path, writer()))
-        except (OSError, ValueError):
-            return ContinuityWriteReceipt(tuple(completed), relative_path, True)
-    return ContinuityWriteReceipt(tuple(completed), None, False)
 
 
 def validate_closure_reconciliation(candidate: ClosureReconciliation) -> list[str]:
@@ -1068,13 +930,25 @@ def validate_closure_reconciliation(candidate: ClosureReconciliation) -> list[st
             if not isinstance(item, tuple) or len(item) != 2 or not _nonempty(item[0]) or not _is_sha256(item[1]):
                 issues.append("accepted artifact binding is invalid")
         labels = [item[0] for item in candidate.accepted_artifact_bindings if isinstance(item, tuple) and len(item) == 2]
-        expected_labels = {
+        review_packet_labels = {
+            f"{increment_id}:review-packet"
+            for increment_id in candidate.accepted_increment_ids
+        }
+        packet_and_addendum_labels = {
             f"{increment_id}:{role}"
             for increment_id in candidate.accepted_increment_ids
             for role in ("review-packet", "handoff-addendum")
         }
-        if len(labels) != len(set(labels)) or set(labels) != expected_labels:
-            issues.append("packet and addendum bindings must cover every accepted increment exactly")
+        label_set = frozenset(labels)
+        if (
+            len(labels) != len(label_set)
+            or label_set
+            not in {frozenset(review_packet_labels), frozenset(packet_and_addendum_labels)}
+        ):
+            issues.append(
+                "review-packet bindings, with optional complete addendum coverage, "
+                "must cover every accepted increment exactly"
+            )
     if set(candidate.approved_amendment_ids) != set(candidate.resolved_amendment_ids):
         issues.append("every approved amendment must be resolved exactly")
     for item in candidate.deferrals:

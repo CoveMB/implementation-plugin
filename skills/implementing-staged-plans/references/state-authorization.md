@@ -55,11 +55,23 @@ Use `decide_action_authorization` for the requested action and scope. A valid `i
 
 Approval policies contain no action grants. Approval of any mode never authorizes a commit, pull request, merge, publication, release, deployment, migration, destructive operation, provider mutation, or external-state change. Expired, rejected, revoked, stale, schema-less, or conflicting grants fail closed.
 
+## Allocate lifecycle writes before authority
+
+For a new-model exact plan, derive the required control-plane paths with `required_future_lifecycle_writes`. The resolver accepts the program root, selected workspace root, and status-current increment identifier. It derives paths only from manifest logical roles, immutable increment and closure storage descriptors, status-current identity, and traceability.
+
+The file map must classify approvals, status, action authorizations, increment grants, rollovers, and block resolutions as `Modify`. It must classify the current execution baseline, review evidence, and review packet as `Create`. A traceability-allocated successor adds the current handoff and successor brief as `Create`; a final increment instead adds the manifest-derived reconciliation and closure packet. These alternatives are mutually exclusive.
+
+`validate_required_managed_file_map` rejects a missing or misclassified required path. Extra product paths remain subject to repository ownership and action-authorization checks. Declaring a managed path allocates ownership only. In particular, declaring rollover, block-resolution, closure, approval, or status paths grants no permission to write them.
+
 ## Persist one transition
 
 Before `apply_state_transition`, revalidate authority and provide a `TransitionRequest` with the expected status digest and sequence, target program and increment states, exact transition event, schema-appropriate authority, and the controlling action scope in its evidence.
 
-Legacy `implementation-program-status/v1` transitions keep their existing action-authorization contract. New v2 status is dual-read and records an explicit authority union. The exact approval-driven edges are program approval to active, plan approval to authorized, diff approval to accepted, and closure approval to closed. Those governance transitions rely on the matching approved event and do not falsely claim `modify-workspace` authority. Every other declared state change still requires an exact live `modify-workspace` authorization. Plan approval also binds the separately expected execution-authorization identifier and scope; it does not make that future grant exist.
+Legacy `implementation-program-status/v1` transitions keep their existing action-authorization contract. New v2 status is dual-read and records an explicit authority union. The exact approval-driven edges are program approval to active, standard-mode plan approval to authorized, diff approval to accepted, and closure approval to closed. Those governance transitions rely on the matching approved event and do not falsely claim `modify-workspace` authority. Every other declared state change still requires an exact live `modify-workspace` authorization.
+
+New-model diff acceptance uses [`diff_disposition.py`](../scripts/diff_disposition.py), not the generic transition sink. Its acyclic base seed binds the prior status, review evidence and packet, final verification, exact plan, execution baseline, and accepted product delta. It derives the checkpoint, then approval event, then accepted status. The accepted `implementation-diff-disposition-binding/v1` excludes its own status digest and submitted-prompt digest. The exact prompt contains only **Accept and stop** in Plan A. Direct submission appends or adopts the prompt-bound diff approval, then replaces status last. It cannot inspect or start a successor.
+
+For a new-model manifest, `apply_state_transition` rejects generic diff acceptance with `typed-diff-disposition-required`. It rejects every direct transition into or out of `blocked` with `blocked-transaction-required`, and every direct supersession with `program-revision-workflow-required`, before general transition validation or persistence. Plan A has no typed blocked or revision writer. New-model closure likewise uses only the typed closure preparation and exact approval sinks. These guards do not change accepted legacy read validation or legacy state-transition compatibility.
 
 The transition must be a declared matrix edge and satisfy its conditional evidence gates. Blocked state may resume only to its recorded legal target. Terminal state has no same-entity outgoing edge. Starting another increment is a separate operation and requires renewed one-increment authority or suitable conversation-bound full authority.
 
@@ -69,4 +81,4 @@ State replacement uses a same-directory temporary file, flush and file sync, dig
 
 The CLI provides `validate-state`, `check-action`, `select-workspace`, and `transition-state`. Mutating commands require explicit JSON requests. Exit status `0` means valid or authorized, `1` means invariant failure or no authorization, and `2` means usage error.
 
-After verification, modes with user diff acceptance stop at `awaiting-diff-approval`. Do not accept the diff, begin another increment, close the program, or perform any consequential action without the separate exact authority for that operation.
+After verification, modes with user diff acceptance stop at `awaiting-diff-approval`. Present the exact disposition prompt. Accept-stop authority accepts only the current increment and does not authorize continuation, closure, staging, a commit, or another consequential action.
