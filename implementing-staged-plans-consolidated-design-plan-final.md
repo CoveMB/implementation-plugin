@@ -1,12 +1,33 @@
 # Implementing Staged Plans — Consolidated Design Plan
 
 **Date:** 2026-08-07  
-**Last amended:** 2026-08-08 — semantic implementation naming boundary  
-**Status:** Proposed consolidated design for approval  
+**Last amended:** 2026-08-18 — Plan A version 0.1.1 lifecycle alignment
+**Status:** Historical consolidated design with the implemented Plan A boundary below
 **Scope:** Architecture and behavior of the `implementing-staged-plans` skill. This is not an exact-file implementation plan for a specific repository.  
 **Source basis:** Consolidates the strongest elements of the prior proposed design and copy-ready increment prompts, with a revised lean-prompt model.
 
 ---
+
+## Implemented Plan A boundary
+
+The current 0.1.1 implementation routes **Create a New Program**, **Activate a
+Generated Program**, **Before Production Modification**, **Prepare Review and
+Diff Disposition**, and **Close a Final Program** in that order. Program genesis
+publishes only an owner-bound control plane. Direct submission of one exact
+launch prompt persists separate typed approval, workspace-selection, and grant
+receipts. Exact planning owns an execution baseline. Review preparation is a
+typed status-last transaction. Diff disposition is `accept-stop` and is
+independent of any successor. Final closure derives its two paths from
+`implementation-closure-storage/v1` and requires a separate exact approval.
+
+The 0.1.1 persistence boundary does not implement successor rollover, blocked
+recovery, program revision, supersession, or cancellation. Those requests stop
+at `legacy-rollover-upgrade-required`, `blocked-transaction-required`,
+`program-revision-workflow-required`, or `unsupported-program-mutation`.
+Handoffs and prompts remain navigation-only; direct user submission plus current
+typed authority is the mutation boundary. Where the historical design below
+describes a live continuation or blocked/revision writer, this implemented Plan
+A boundary controls until Plan B replaces it.
 
 ## 1. Purpose
 
