@@ -227,6 +227,37 @@ def write_json_lines(path: Path, records: list[dict[str, object]]) -> None:
 
 
 class DeferredMutationGuardTests(unittest.TestCase):
+    def test_new_program_state_rejects_malformed_authority_bindings(self) -> None:
+        fixture, program_root, observation = awaiting_diff_program()
+        try:
+            status_path = program_root / "state/status.json"
+            original = json.loads(status_path.read_text(encoding="utf-8"))
+            cases = (
+                (
+                    "transition authority",
+                    "v2 transition authority is invalid",
+                    lambda status: status["transition_authority"].update(event_id=""),
+                ),
+                (
+                    "execution authorization",
+                    "v2 execution authorization binding is invalid",
+                    lambda status: status["execution_authorization"].update(scope=""),
+                ),
+            )
+            for label, expected, mutate in cases:
+                with self.subTest(label=label):
+                    candidate = copy.deepcopy(original)
+                    mutate(candidate)
+                    status_path.write_bytes(canonical_json(candidate))
+
+                    issues = AUTHORITY.validate_state_authority(
+                        program_root, observation
+                    )
+
+                    self.assertIn(expected, issues)
+        finally:
+            fixture.close()
+
     def test_generic_new_program_diff_acceptance_stops_before_any_write(self) -> None:
         fixture, program_root, observation = awaiting_diff_program()
         try:
@@ -642,7 +673,7 @@ class ApprovalModeTests(unittest.TestCase):
     def test_default_applies_only_when_creating_new_state(self) -> None:
         self.assertEqual(
             AUTHORITY.approval_mode_policy(None, creating=True).mode,
-            "approval:standard",
+            "approval:full-increment",
         )
         with self.assertRaisesRegex(ValueError, "persisted approval mode"):
             AUTHORITY.approval_mode_policy(None)

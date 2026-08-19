@@ -1195,6 +1195,9 @@ def _bootstrap_prefix_disposition(repository: Path) -> tuple[str | None, tuple[s
         or len(owner_token) != 16
         or not isinstance(program_id, str)
         or not program_id
+        or "/" in program_id
+        or "\\" in program_id
+        or program_id in {".", ".."}
         or target_value != f"implementation-programs/{program_id}"
         or staging.name != f".implementation-program-{program_id}-{owner_token}"
         or not isinstance(inventory_value, list)

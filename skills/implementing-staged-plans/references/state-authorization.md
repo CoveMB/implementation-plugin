@@ -33,7 +33,7 @@ Approval modes control routine interruption, diff acceptance, and continuation o
 - `approval:full-diff` may accept one verified, packet-bound diff automatically; it does not continue to another increment.
 - `approval:full` may automatically accept a verified, packet-bound diff and continue only while the same conversation remains suitable.
 
-An omitted mode defaults to `approval:standard` only when creating new state. Never default an omitted or unknown mode in persisted state. An explicit user gate remains controlling even when the mode would normally omit that pause.
+An omitted mode defaults to `approval:full-increment` only while constructing new state and before any proposal bytes exist. Persist the selected mode explicitly. Never default an omitted or unknown mode in persisted state. An explicit user gate remains controlling even when the mode would normally omit that pause.
 
 ## Bind approvals exactly
 

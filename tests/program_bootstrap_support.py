@@ -134,7 +134,7 @@ def raw_review_report(scope: str) -> dict[str, object]:
                     "domain": "source-code",
                     "touched": True,
                     "disposition": "recoverable",
-                    "mechanism": "restore the exact pre-write bytes",
+                    "mechanism": "remove exact-plan Create paths; restore exact pre-write bytes for Modify paths",
                     "verification": "rerun the bound deterministic test",
                     "limitation": "does not recover external state",
                     "required_authority": "modify-workspace",

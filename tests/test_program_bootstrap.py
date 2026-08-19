@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import stat
 import subprocess
 import sys
 import unittest
@@ -107,6 +108,63 @@ class PublicationTests(ProgramBootstrapTestCase):
                 result = self.retry_in_subprocess()
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertTrue((self.fixture.program_root / "manifest.json").is_file())
+
+    def test_failed_write_removes_only_the_partial_file_created_by_this_call(self) -> None:
+        real_write = os.write
+        write_count = 0
+
+        def fail_after_partial_write(descriptor: int, payload) -> int:
+            nonlocal write_count
+            write_count += 1
+            if write_count == 1:
+                return real_write(descriptor, bytes(payload[:1]))
+            raise OSError("injected write failure")
+
+        with mock.patch.object(BOOTSTRAP.os, "write", side_effect=fail_after_partial_write):
+            with self.assertRaisesRegex(OSError, "injected write failure"):
+                self.publish()
+
+        staging_root = next(self.fixture.repository.glob(".implementation-program-*"))
+        self.assertFalse((staging_root / ".publication-owner.json").exists())
+
+        self.publish()
+        self.assertTrue((self.fixture.program_root / "manifest.json").is_file())
+
+    def test_failed_fsync_removes_only_the_file_created_by_this_call(self) -> None:
+        real_fsync = os.fsync
+
+        def fail_file_fsync(descriptor: int) -> None:
+            if stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise OSError("injected fsync failure")
+            real_fsync(descriptor)
+
+        with mock.patch.object(BOOTSTRAP.os, "fsync", side_effect=fail_file_fsync):
+            with self.assertRaisesRegex(OSError, "injected fsync failure"):
+                self.publish()
+
+        staging_root = next(self.fixture.repository.glob(".implementation-program-*"))
+        self.assertFalse((staging_root / ".publication-owner.json").exists())
+
+    def test_failed_write_preserves_a_foreign_replacement_file(self) -> None:
+        foreign_bytes = b"foreign replacement\n"
+
+        def replace_before_failure(descriptor: int, payload) -> int:
+            staging_root = next(
+                self.fixture.repository.glob(".implementation-program-*")
+            )
+            owner_path = staging_root / ".publication-owner.json"
+            owner_path.unlink()
+            owner_path.write_bytes(foreign_bytes)
+            raise OSError("injected write failure after replacement")
+
+        with mock.patch.object(BOOTSTRAP.os, "write", side_effect=replace_before_failure):
+            with self.assertRaisesRegex(OSError, "after replacement"):
+                self.publish()
+
+        staging_root = next(self.fixture.repository.glob(".implementation-program-*"))
+        self.assertEqual(
+            (staging_root / ".publication-owner.json").read_bytes(), foreign_bytes
+        )
 
     def test_divergent_prefix_is_preserved_and_requires_recovery(self) -> None:
         with mock.patch.object(

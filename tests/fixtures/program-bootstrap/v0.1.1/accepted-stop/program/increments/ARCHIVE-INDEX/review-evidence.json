@@ -4,7 +4,7 @@
     "baseline_failures": [
       "none"
     ],
-    "candidate_sha256": "6eb9ebda65e5170a6a3372c5a7be048791ea1ef702102dab2cd5ec2a23d0763b",
+    "candidate_sha256": "e911e0e67198cf4313b6674fe3c0b4f48c83ed40a979975ccc7396c352d4f0d6",
     "commands": [
       {
         "command": "python3 -m unittest tests.test_archive_output",
@@ -36,7 +36,7 @@
       "disposition": "recoverable",
       "domain": "source-code",
       "limitation": "does not recover external state",
-      "mechanism": "restore the exact pre-write bytes",
+      "mechanism": "remove exact-plan Create paths; restore exact pre-write bytes for Modify paths",
       "required_authority": "modify-workspace",
       "touched": true,
       "verification": "rerun the bound deterministic test"
@@ -86,7 +86,7 @@
       "reduced_assurance": true,
       "report_id": "requirements-initial",
       "review_basis": "bounded requirements review of the exact current delta",
-      "reviewed_candidate_sha256": "6eb9ebda65e5170a6a3372c5a7be048791ea1ef702102dab2cd5ec2a23d0763b",
+      "reviewed_candidate_sha256": "e911e0e67198cf4313b6674fe3c0b4f48c83ed40a979975ccc7396c352d4f0d6",
       "reviewer_role": "controller-self-review",
       "scope": "requirements"
     },
@@ -102,7 +102,7 @@
       "reduced_assurance": true,
       "report_id": "architecture-initial",
       "review_basis": "bounded architecture review of the exact current delta",
-      "reviewed_candidate_sha256": "6eb9ebda65e5170a6a3372c5a7be048791ea1ef702102dab2cd5ec2a23d0763b",
+      "reviewed_candidate_sha256": "e911e0e67198cf4313b6674fe3c0b4f48c83ed40a979975ccc7396c352d4f0d6",
       "reviewer_role": "controller-self-review",
       "scope": "architecture"
     },
@@ -113,12 +113,12 @@
       "persisted_at": "2026-08-18T10:00:00Z",
       "prior_conclusions_withheld": false,
       "raw_report_path": "reviews/test-evidence.json",
-      "raw_report_sha256": "2af3214c6fc9f8ca5ef88997df4cad4a97097581d543bef1dbf573b4ea947714",
+      "raw_report_sha256": "446730926de626aa15e321a62f36fc4bce53b6c9d45b6701cfc4f71ab890bed5",
       "reconciled_at": "2026-08-18T10:10:00Z",
       "reduced_assurance": true,
       "report_id": "test-evidence-initial",
       "review_basis": "bounded test-evidence review of the exact current delta",
-      "reviewed_candidate_sha256": "6eb9ebda65e5170a6a3372c5a7be048791ea1ef702102dab2cd5ec2a23d0763b",
+      "reviewed_candidate_sha256": "e911e0e67198cf4313b6674fe3c0b4f48c83ed40a979975ccc7396c352d4f0d6",
       "reviewer_role": "controller-self-review",
       "scope": "test-evidence"
     }
@@ -127,7 +127,7 @@
     "baseline_failures": [
       "none"
     ],
-    "candidate_sha256": "6eb9ebda65e5170a6a3372c5a7be048791ea1ef702102dab2cd5ec2a23d0763b",
+    "candidate_sha256": "e911e0e67198cf4313b6674fe3c0b4f48c83ed40a979975ccc7396c352d4f0d6",
     "changed_files_by_purpose": [
       "archive-output.txt: exact-plan-declared product or review input",
       "reviews/architecture.json: exact-plan-declared product or review input",
@@ -164,7 +164,7 @@
       "test-evidence"
     ],
     "identity_and_outcome": [
-      "reviewed candidate 6eb9ebda65e5170a6a3372c5a7be048791ea1ef702102dab2cd5ec2a23d0763b"
+      "reviewed candidate e911e0e67198cf4313b6674fe3c0b4f48c83ed40a979975ccc7396c352d4f0d6"
     ],
     "implications": [
       "local deterministic evidence does not prove external behavior"

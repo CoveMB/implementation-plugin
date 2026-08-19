@@ -295,6 +295,36 @@ class DiscoveryFixture:
 
 
 class ProgramDiscoveryTests(unittest.TestCase):
+    def test_publication_recovery_rejects_unsafe_program_id_before_target_access(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            owner_token = "0" * 16
+            staging = repository / f".implementation-program-..-{owner_token}"
+            staging.mkdir()
+            (staging / ".publication-owner.json").write_bytes(
+                canonical_json(
+                    {
+                        "schema_version": "implementation-proposal-publication-owner/v1",
+                        "owner_token": owner_token,
+                        "program_id": "..",
+                        "target": "implementation-programs/..",
+                        "inventory": [
+                            {"path": "manifest.json", "sha256": "0" * 64}
+                        ],
+                    }
+                )
+            )
+
+            result = DISCOVERY.discover_programs(repository)
+
+            self.assertEqual(
+                result.disposition, "proposal-publication-recovery-required"
+            )
+            self.assertEqual(
+                result.issues,
+                ("proposal-publication owner receipt is invalid",),
+            )
+
     def test_no_manifest_is_a_possible_bootstrap_requiring_source_plan(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)

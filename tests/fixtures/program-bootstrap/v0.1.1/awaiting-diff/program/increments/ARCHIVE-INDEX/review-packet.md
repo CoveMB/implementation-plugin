@@ -2,7 +2,7 @@
 
 ## Identity and outcome
 
-- reviewed candidate 6eb9ebda65e5170a6a3372c5a7be048791ea1ef702102dab2cd5ec2a23d0763b
+- reviewed candidate e911e0e67198cf4313b6674fe3c0b4f48c83ed40a979975ccc7396c352d4f0d6
 
 ## Changes and rationale
 

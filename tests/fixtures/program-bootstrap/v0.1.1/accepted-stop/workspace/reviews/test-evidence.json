@@ -35,7 +35,7 @@
       "disposition": "recoverable",
       "domain": "source-code",
       "limitation": "does not recover external state",
-      "mechanism": "restore the exact pre-write bytes",
+      "mechanism": "remove exact-plan Create paths; restore exact pre-write bytes for Modify paths",
       "required_authority": "modify-workspace",
       "touched": true,
       "verification": "rerun the bound deterministic test"

@@ -112,10 +112,11 @@ Modes do not grant action authority.
 | `approval:full-diff` | One increment | No | Policy permits automatic acceptance only after verification and a valid bound packet | The 0.1.1 typed route still ends at `accept-stop`; it cannot begin another increment |
 | `approval:full` | Future multi-increment policy | No | Policy permits automatic acceptance only after verification and a valid bound packet | Plan A does not persist continuation; the Plan B route is required |
 
-When new state omits a mode, the default is `approval:standard`. Persisted state
-with a missing or unknown mode is invalid and is not silently defaulted. An
-explicit user-requested gate always remains in force, even if the selected mode
-would normally omit that pause.
+When a direct creation request omits a mode, proposal construction defaults to
+`approval:full-increment` before producing any bytes. The selected mode is then
+persisted explicitly. Persisted state with a missing or unknown mode is invalid
+and is not silently defaulted. An explicit user-requested gate always remains in
+force, even if the selected mode would normally omit that pause.
 
 ## Three different kinds of permission
 

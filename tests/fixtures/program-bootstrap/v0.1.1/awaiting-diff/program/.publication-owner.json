@@ -46,13 +46,13 @@
     },
     {
       "path": "state/workspace.json",
-      "sha256": "074c78ccadb3d8925ce4bfb1bc55425573da5c00bcc5aeabc87853a9dd4e5e57"
+      "sha256": "eb530b3d39e8f7bb57803da422d48cf19683b7781bcb5d93f5f66840b0d4fc51"
     }
   ],
-  "owner_token": "afd35c4e8f8a3d99",
+  "owner_token": "2729214f78e691d7",
   "program_id": "ARCHIVE-PROGRAM",
   "program_revision": 1,
-  "request_sha256": "afd35c4e8f8a3d99d06b36ca4c18720619f1aeaf521021d8f1a159fff132c74f",
+  "request_sha256": "2729214f78e691d74bde465f42d13ee44f90e8ea0d1f14aa3074af69873cd254",
   "schema_version": "implementation-proposal-publication-owner/v1",
   "target": "implementation-programs/ARCHIVE-PROGRAM"
 }

@@ -21,6 +21,8 @@ Use [Program discovery](references/program-discovery.md) before bootstrap or res
 
 Creation requires explicit create intent, the exact authoritative source-plan path, and a fresh read-only repository observation. Initial authorization is creation-only control-plane authority: it may publish an owner-bound proposal beneath the conventional program root, but it never approves implementation, Git work, installation, or external action.
 
+When the direct creation request omits an approval mode, select `approval:full-increment` before building any proposal bytes. Persist that explicit selection in every bound artifact; a missing or unknown mode in persisted state is invalid and must never be defaulted during discovery or resume.
+
 Build the complete source snapshot, source metadata, traceability, approved-program proposal, immutable manifest, initial workspace proposal, first brief, empty ledgers, and sequence-zero status in memory. Publish through [`program_bootstrap.py`](scripts/program_bootstrap.py), with `manifest.json` last as the discovery commit point. Adopt only an exact owner-bound prefix; preserve and stop on any divergent, unsafe, or foreign-owned byte.
 
 ## Activate a Generated Program

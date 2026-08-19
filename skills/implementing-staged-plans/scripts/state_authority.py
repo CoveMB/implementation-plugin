@@ -532,7 +532,7 @@ def approval_mode_policy(
     """Resolve an approval mode without defaulting persisted state."""
     if mode is None:
         if creating:
-            return APPROVAL_MODE_POLICIES["approval:standard"]
+            return APPROVAL_MODE_POLICIES["approval:full-increment"]
         raise ValueError("persisted approval mode is required")
     try:
         return APPROVAL_MODE_POLICIES[mode]
@@ -944,6 +944,68 @@ def validate_state(
         if status_program.get("semantic_requirements_sha256") != semantic:
             issues.append("status semantic requirements digest mismatch")
 
+    if status.get("schema_version") == STATUS_SCHEMA_V2:
+        transition_authority = status.get("transition_authority")
+        approved_plan = status.get("approved_exact_file_plan_sha256")
+        if (
+            isinstance(approved_plan, str)
+            and approved_plan
+            and transition_authority is None
+        ):
+            issues.append("v2 approved state requires transition authority")
+        if transition_authority is not None:
+            authority_kind = (
+                transition_authority.get("kind")
+                if isinstance(transition_authority, dict)
+                else None
+            )
+            event_id = (
+                transition_authority.get("event_id")
+                if isinstance(transition_authority, dict)
+                else None
+            )
+            checkpoint_id = (
+                transition_authority.get("checkpoint_id")
+                if isinstance(transition_authority, dict)
+                else None
+            )
+            authorization_id = (
+                transition_authority.get("authorization_id")
+                if isinstance(transition_authority, dict)
+                else None
+            )
+            authority_invalid = (
+                authority_kind not in {"approval-event", "action-authorization"}
+                or not isinstance(event_id, str)
+                or not event_id
+                or (
+                    checkpoint_id is not None
+                    and (not isinstance(checkpoint_id, str) or not checkpoint_id)
+                )
+                or (
+                    authority_kind == "approval-event"
+                    and authorization_id is not None
+                )
+                or (
+                    authority_kind == "action-authorization"
+                    and (
+                        not isinstance(authorization_id, str)
+                        or not authorization_id
+                    )
+                )
+            )
+            if authority_invalid:
+                issues.append("v2 transition authority is invalid")
+        execution_authorization = status.get("execution_authorization")
+        if execution_authorization is not None and (
+            not isinstance(execution_authorization, dict)
+            or not isinstance(execution_authorization.get("authorization_id"), str)
+            or not execution_authorization.get("authorization_id")
+            or not isinstance(execution_authorization.get("scope"), str)
+            or not execution_authorization.get("scope")
+        ):
+            issues.append("v2 execution authorization binding is invalid")
+
     logical_roles = manifest.get("logical_roles")
     if not isinstance(logical_roles, dict):
         return sorted(set([*issues, "manifest logical_roles must be an object"]))
@@ -1038,67 +1100,6 @@ def validate_state(
             digest = previous.get("status_sha256")
             if not isinstance(digest, str) or len(digest) != 64:
                 issues.append("previous state digest invalid")
-    if status.get("schema_version") == STATUS_SCHEMA_V2:
-        transition_authority = status.get("transition_authority")
-        approved_plan = status.get("approved_exact_file_plan_sha256")
-        if (
-            isinstance(approved_plan, str)
-            and approved_plan
-            and transition_authority is None
-        ):
-            issues.append("v2 approved state requires transition authority")
-        if transition_authority is not None:
-            authority_kind = (
-                transition_authority.get("kind")
-                if isinstance(transition_authority, dict)
-                else None
-            )
-            event_id = (
-                transition_authority.get("event_id")
-                if isinstance(transition_authority, dict)
-                else None
-            )
-            checkpoint_id = (
-                transition_authority.get("checkpoint_id")
-                if isinstance(transition_authority, dict)
-                else None
-            )
-            authorization_id = (
-                transition_authority.get("authorization_id")
-                if isinstance(transition_authority, dict)
-                else None
-            )
-            authority_invalid = (
-                authority_kind not in {"approval-event", "action-authorization"}
-                or not isinstance(event_id, str)
-                or not event_id
-                or (
-                    checkpoint_id is not None
-                    and (not isinstance(checkpoint_id, str) or not checkpoint_id)
-                )
-                or (
-                    authority_kind == "approval-event"
-                    and authorization_id is not None
-                )
-                or (
-                    authority_kind == "action-authorization"
-                    and (
-                        not isinstance(authorization_id, str)
-                        or not authorization_id
-                    )
-                )
-            )
-            if authority_invalid:
-                issues.append("v2 transition authority is invalid")
-        execution_authorization = status.get("execution_authorization")
-        if execution_authorization is not None and (
-            not isinstance(execution_authorization, dict)
-            or not isinstance(execution_authorization.get("authorization_id"), str)
-            or not execution_authorization.get("authorization_id")
-            or not isinstance(execution_authorization.get("scope"), str)
-            or not execution_authorization.get("scope")
-        ):
-            issues.append("v2 execution authorization binding is invalid")
     return sorted(set(issues))
 
 

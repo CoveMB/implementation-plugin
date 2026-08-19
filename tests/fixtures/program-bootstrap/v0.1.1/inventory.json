@@ -2,23 +2,23 @@
   "files": [
     {
       "path": "accepted-stop/program/.publication-owner.json",
-      "sha256": "bbb21a75c87742c32bc766a0e9432f73ca66ac18780d82742435467b422bf525"
+      "sha256": "3a35aff0bb60576c40a597442ff6a1b60920a926eff10587ce47da335f4c207b"
     },
     {
       "path": "accepted-stop/program/increments/ARCHIVE-INDEX/exact-file-plan.md",
-      "sha256": "0dd1cda5f5f370b691e77ca04dd250b200b2af64303c4342c504249c0ac76426"
+      "sha256": "4271ba24aa1d3b9b4de38eba8522d27aa7ee245947cc07af56627374e0b75959"
     },
     {
       "path": "accepted-stop/program/increments/ARCHIVE-INDEX/execution-baseline.json",
-      "sha256": "d1bee2c5aeb383f0766a9b83ff88e16c0e0511020cbe6c3d4e2df570349863b0"
+      "sha256": "f1c69d1e0fa56d11dabe315a7a0f7931698771ae0ef2e3ef2b058e08d6f8a0fc"
     },
     {
       "path": "accepted-stop/program/increments/ARCHIVE-INDEX/review-evidence.json",
-      "sha256": "f345439f215824855707cb998ed2aede685e99587172a3624082ef084e3bcccb"
+      "sha256": "0eb8d405cfdbbd7d60b135c62c64f15eb8f2ad1aac96d979c2b7747bd451b79d"
     },
     {
       "path": "accepted-stop/program/increments/ARCHIVE-INDEX/review-packet.md",
-      "sha256": "cdd5c03d226c9967b0541f789584738ab4684de524ffc349e94c4890bc6c79e2"
+      "sha256": "d66784d1e978facda87719903b383c51d3322849b9797ba624e40578635ecd32"
     },
     {
       "path": "accepted-stop/program/manifest.json",
@@ -42,11 +42,11 @@
     },
     {
       "path": "accepted-stop/program/state/action-authorizations.jsonl",
-      "sha256": "96f8aaf438827aee01dcb63f625a6680ca1cbd08d94c0e09292ad0522501e705"
+      "sha256": "50925be67b90df67125f42294b80f0b5ca25629cce6262bed5da24229e2c7f52"
     },
     {
       "path": "accepted-stop/program/state/approvals.jsonl",
-      "sha256": "b7f46ba34ce8b1a406e663f87013e88c0f6eebaa0a35189041dc5b6e936dbdd6"
+      "sha256": "d1c6b77c6e4f837adbcdd9b7af6d739a12df82c54b3181124a9f1a08a4b404a1"
     },
     {
       "path": "accepted-stop/program/state/block-resolutions.jsonl",
@@ -54,7 +54,7 @@
     },
     {
       "path": "accepted-stop/program/state/increment-grants.jsonl",
-      "sha256": "b1c8e24773dea164e2203e54ea43572f65ca032a6adfee714d6d64947d3e8a8e"
+      "sha256": "96e6b3e772c7ce26ef6b9dfbb349aa6a2093643f65f9e91abae0e259d5958f9a"
     },
     {
       "path": "accepted-stop/program/state/rollovers.jsonl",
@@ -62,11 +62,11 @@
     },
     {
       "path": "accepted-stop/program/state/status.json",
-      "sha256": "68428e94454755e8211af6913a74af2877e84176f53e0254019001dbf23e818c"
+      "sha256": "ef0b66cac80a0866504e936dfea1c3f2a784e62413c3f3490bb2a37c0c027980"
     },
     {
       "path": "accepted-stop/program/state/workspace.json",
-      "sha256": "074c78ccadb3d8925ce4bfb1bc55425573da5c00bcc5aeabc87853a9dd4e5e57"
+      "sha256": "eb530b3d39e8f7bb57803da422d48cf19683b7781bcb5d93f5f66840b0d4fc51"
     },
     {
       "path": "accepted-stop/workspace/archive-output.txt",
@@ -82,27 +82,27 @@
     },
     {
       "path": "accepted-stop/workspace/reviews/test-evidence.json",
-      "sha256": "2af3214c6fc9f8ca5ef88997df4cad4a97097581d543bef1dbf573b4ea947714"
+      "sha256": "446730926de626aa15e321a62f36fc4bce53b6c9d45b6701cfc4f71ab890bed5"
     },
     {
       "path": "awaiting-diff/program/.publication-owner.json",
-      "sha256": "bbb21a75c87742c32bc766a0e9432f73ca66ac18780d82742435467b422bf525"
+      "sha256": "3a35aff0bb60576c40a597442ff6a1b60920a926eff10587ce47da335f4c207b"
     },
     {
       "path": "awaiting-diff/program/increments/ARCHIVE-INDEX/exact-file-plan.md",
-      "sha256": "0dd1cda5f5f370b691e77ca04dd250b200b2af64303c4342c504249c0ac76426"
+      "sha256": "4271ba24aa1d3b9b4de38eba8522d27aa7ee245947cc07af56627374e0b75959"
     },
     {
       "path": "awaiting-diff/program/increments/ARCHIVE-INDEX/execution-baseline.json",
-      "sha256": "d1bee2c5aeb383f0766a9b83ff88e16c0e0511020cbe6c3d4e2df570349863b0"
+      "sha256": "f1c69d1e0fa56d11dabe315a7a0f7931698771ae0ef2e3ef2b058e08d6f8a0fc"
     },
     {
       "path": "awaiting-diff/program/increments/ARCHIVE-INDEX/review-evidence.json",
-      "sha256": "f345439f215824855707cb998ed2aede685e99587172a3624082ef084e3bcccb"
+      "sha256": "0eb8d405cfdbbd7d60b135c62c64f15eb8f2ad1aac96d979c2b7747bd451b79d"
     },
     {
       "path": "awaiting-diff/program/increments/ARCHIVE-INDEX/review-packet.md",
-      "sha256": "cdd5c03d226c9967b0541f789584738ab4684de524ffc349e94c4890bc6c79e2"
+      "sha256": "d66784d1e978facda87719903b383c51d3322849b9797ba624e40578635ecd32"
     },
     {
       "path": "awaiting-diff/program/manifest.json",
@@ -126,11 +126,11 @@
     },
     {
       "path": "awaiting-diff/program/state/action-authorizations.jsonl",
-      "sha256": "96f8aaf438827aee01dcb63f625a6680ca1cbd08d94c0e09292ad0522501e705"
+      "sha256": "50925be67b90df67125f42294b80f0b5ca25629cce6262bed5da24229e2c7f52"
     },
     {
       "path": "awaiting-diff/program/state/approvals.jsonl",
-      "sha256": "b1a58b5fcc6c612e78670b6598f91b2c2f464258ddf14b1caf33e5b5d4271ec3"
+      "sha256": "51cf820713874732a308bb7e81f29374fc93d3e0d1f0110e622555e5992f06af"
     },
     {
       "path": "awaiting-diff/program/state/block-resolutions.jsonl",
@@ -138,7 +138,7 @@
     },
     {
       "path": "awaiting-diff/program/state/increment-grants.jsonl",
-      "sha256": "b1c8e24773dea164e2203e54ea43572f65ca032a6adfee714d6d64947d3e8a8e"
+      "sha256": "96e6b3e772c7ce26ef6b9dfbb349aa6a2093643f65f9e91abae0e259d5958f9a"
     },
     {
       "path": "awaiting-diff/program/state/rollovers.jsonl",
@@ -146,11 +146,11 @@
     },
     {
       "path": "awaiting-diff/program/state/status.json",
-      "sha256": "8572a4d59599610a9bacd11d42a2c921123d39c036e7f6fb869057a93a3b09a2"
+      "sha256": "935882c7f262148ae894b015a21530e521dbc2480296093c17d8daed486655a2"
     },
     {
       "path": "awaiting-diff/program/state/workspace.json",
-      "sha256": "074c78ccadb3d8925ce4bfb1bc55425573da5c00bcc5aeabc87853a9dd4e5e57"
+      "sha256": "eb530b3d39e8f7bb57803da422d48cf19683b7781bcb5d93f5f66840b0d4fc51"
     },
     {
       "path": "awaiting-diff/workspace/archive-output.txt",
@@ -166,7 +166,7 @@
     },
     {
       "path": "awaiting-diff/workspace/reviews/test-evidence.json",
-      "sha256": "2af3214c6fc9f8ca5ef88997df4cad4a97097581d543bef1dbf573b4ea947714"
+      "sha256": "446730926de626aa15e321a62f36fc4bce53b6c9d45b6701cfc4f71ab890bed5"
     },
     {
       "path": "fixture-contract.json",

@@ -178,6 +178,31 @@ def _create_or_adopt(path: Path, payload: bytes) -> bool:
                 f"proposal-publication-recovery-required: divergent {path}"
             )
         return False
+    except BaseException:
+        opened_identity: tuple[int, int] | None = None
+        if descriptor is not None:
+            try:
+                opened = os.fstat(descriptor)
+                opened_identity = (opened.st_dev, opened.st_ino)
+            except OSError:
+                pass
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            descriptor = None
+        if opened_identity is not None:
+            try:
+                current = path.lstat()
+                if (
+                    stat.S_ISREG(current.st_mode)
+                    and (current.st_dev, current.st_ino) == opened_identity
+                ):
+                    path.unlink()
+                    _fsync_directory(path.parent)
+            except OSError:
+                pass
+        raise
     finally:
         if descriptor is not None:
             os.close(descriptor)
