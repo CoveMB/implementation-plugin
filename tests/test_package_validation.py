@@ -1,9 +1,10 @@
 import importlib.util
 import io
 import json
+import os
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -538,6 +539,33 @@ class CompletePackageTests(PackageValidationTestCase):
         self.assertNotIn(relative, digests)
         self.assert_issue_contains(issues, f"{relative}: could not be read")
 
+    def test_package_digest_inventory_reports_unscannable_directory_relatively(
+        self,
+    ) -> None:
+        self.fixture.write_valid_package()
+        target = (
+            self.fixture.root
+            / "skills/implementing-staged-plans/scripts"
+        )
+        real_scandir = os.scandir
+
+        def scandir(path):
+            if Path(path) == target:
+                raise OSError("injected scan failure")
+            return real_scandir(path)
+
+        with mock.patch.object(os, "scandir", side_effect=scandir):
+            _digests, issues = VALIDATOR._package_file_inventory(
+                self.fixture.root
+            )
+
+        self.assertIn(
+            "skills/implementing-staged-plans/scripts: could not be scanned: "
+            "injected scan failure",
+            issues,
+        )
+        self.assertFalse(any(str(self.fixture.root) in issue for issue in issues))
+
     def test_installed_comparison_reports_changed_missing_unexpected_and_symlink(self) -> None:
         self.fixture.write_valid_package()
         with tempfile.TemporaryDirectory() as directory:
@@ -591,6 +619,20 @@ class CompletePackageTests(PackageValidationTestCase):
         issue_lines = output.getvalue().splitlines()
         self.assertGreater(len(issue_lines), 1)
         self.assertEqual(issue_lines, sorted(issue_lines))
+
+    def test_cli_help_preserves_argparse_success_status(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            return_code = VALIDATOR.main(["--help"])
+
+        self.assertEqual(return_code, 0)
+        self.assertIn("usage: validate_package.py", output.getvalue())
+
+        errors = io.StringIO()
+        with redirect_stderr(errors):
+            invalid_return_code = VALIDATOR.main(["--unknown-option"])
+        self.assertEqual(invalid_return_code, 1)
+        self.assertIn("unrecognized arguments", errors.getvalue())
 
 
 if __name__ == "__main__":

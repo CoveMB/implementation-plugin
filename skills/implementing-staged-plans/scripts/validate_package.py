@@ -222,7 +222,10 @@ def _package_file_inventory(root: Path) -> tuple[dict[str, str], list[str]]:
             try:
                 entries = sorted(os.scandir(directory), key=lambda entry: entry.name)
             except OSError as error:
-                issues.append(f"{directory}: could not be scanned: {error}")
+                issues.append(
+                    f"{directory.relative_to(root).as_posix()}: "
+                    f"could not be scanned: {error}"
+                )
                 continue
             child_directories: list[Path] = []
             for entry in entries:
@@ -540,8 +543,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--compare-installed")
     try:
         arguments = parser.parse_args(list(sys.argv[1:] if argv is None else argv))
-    except SystemExit:
-        return 1
+    except SystemExit as error:
+        return 0 if error.code == 0 else 1
     repository_root = Path(arguments.repository_root).resolve()
     issues = validate_package(repository_root)
     if arguments.compare_installed is not None:

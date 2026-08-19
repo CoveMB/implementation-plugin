@@ -1607,10 +1607,23 @@ def validate_state_authority(
                                 if isinstance(remediation, dict)
                                 else None
                             )
+                            initial_product_delta_sha256 = (
+                                remediation.get("initial_product_delta_sha256")
+                                if isinstance(remediation, dict)
+                                else None
+                            )
                             remediation_valid = (
                                 isinstance(remediation, dict)
                                 and remediation.get("schema_version")
                                 == "implementation-review-remediation/v1"
+                                and isinstance(
+                                    initial_product_delta_sha256, str
+                                )
+                                and len(initial_product_delta_sha256) == 64
+                                and all(
+                                    character in "0123456789abcdef"
+                                    for character in initial_product_delta_sha256
+                                )
                                 and isinstance(unresolved_finding_ids, list)
                                 and bool(unresolved_finding_ids)
                                 and all(
@@ -1621,7 +1634,7 @@ def validate_state_authority(
                                 and review_binding.get("schema_version")
                                 == "implementation-review-remediation/v1"
                                 and review_binding.get("candidate_sha256")
-                                == remediation.get("initial_product_delta_sha256")
+                                == initial_product_delta_sha256
                                 and review_binding.get(
                                     "unresolved_material_findings"
                                 )

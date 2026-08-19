@@ -284,6 +284,10 @@ def _reconciled_review_history(
     replacements: dict[str, ReviewFinding] = {}
     for finding in current_findings:
         if finding.finding_id not in referenced:
+            if finding.report_id in follow_up_report_ids:
+                raise ValueError(
+                    "review follow-up report declares an unreferenced finding"
+                )
             continue
         if (
             finding.report_id not in follow_up_report_ids
@@ -542,20 +546,28 @@ def build_review_remediation(
     )
     state = status.get("current_increment_state")
     if state == "remediating":
-        state_issues = validate_state_authority(root, normalized)
-        if state_issues:
-            raise ValueError("; ".join(state_issues))
         binding = status.get("review_remediation_binding")
+        initial_product_delta_sha256 = (
+            binding.get("initial_product_delta_sha256")
+            if isinstance(binding, dict)
+            else None
+        )
         if (
             not isinstance(binding, dict)
             or binding.get("schema_version") != REVIEW_REMEDIATION_SCHEMA
             or not isinstance(binding.get("unresolved_finding_ids"), list)
+            or not isinstance(initial_product_delta_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", initial_product_delta_sha256)
+            is None
         ):
             raise ValueError("review-remediation-recovery-required: status binding differs")
+        state_issues = validate_state_authority(root, normalized)
+        if state_issues:
+            raise ValueError("; ".join(state_issues))
         return ReviewRemediationCandidate(
             remediating_status=status,
             remediating_status_bytes=_canonical_json_bytes(status),
-            product_delta_sha256=str(binding["initial_product_delta_sha256"]),
+            product_delta_sha256=initial_product_delta_sha256,
             unresolved_finding_ids=tuple(binding["unresolved_finding_ids"]),
         )
     if state != "reviewing":

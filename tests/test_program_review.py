@@ -420,6 +420,50 @@ class ProgramReviewTests(unittest.TestCase):
         finally:
             fixture.close()
 
+    def test_review_remediation_rejects_unreferenced_follow_up_finding(self) -> None:
+        fixture, program_root, observation = reviewing_program(self.add_open_finding)
+        try:
+            REVIEW.persist_review_remediation(program_root, observation)
+            (fixture.repository / "archive-output.txt").write_text(
+                "repaired archive output\n", encoding="utf-8"
+            )
+            self.repair_open_finding(fixture)
+            requirements_path = fixture.repository / "reviews/requirements.json"
+            requirements = json.loads(
+                requirements_path.read_text(encoding="utf-8")
+            )
+            requirements["findings"].append(
+                {
+                    "finding_id": "F-NEW",
+                    "report_id": "requirements-follow-up",
+                    "scope": "requirements",
+                    "classification": "material",
+                    "summary": "new unrelated issue",
+                    "evidence": "new evidence",
+                    "impact": "new impact",
+                    "confidence": "high",
+                    "remediation": "new remediation",
+                    "disposition": "open",
+                    "affected_requirement_or_invariant": "different invariant",
+                    "severity": "high",
+                    "inspection_path": "archive-output.txt",
+                    "decision_reference": "none",
+                }
+            )
+            requirements_path.write_bytes(canonical_json(requirements))
+            repaired = ACTIVATION.inspect_repository(
+                fixture.repository, fixture.head
+            ).observation
+            status_path = program_root / "state/status.json"
+            before = status_path.read_bytes()
+
+            with self.assertRaisesRegex(ValueError, "unreferenced finding"):
+                REVIEW.return_review_to_reviewing(program_root, repaired)
+
+            self.assertEqual(status_path.read_bytes(), before)
+        finally:
+            fixture.close()
+
     def test_review_remediation_status_boundaries_are_idempotent(self) -> None:
         fixture, program_root, observation = reviewing_program(self.add_open_finding)
         try:
@@ -453,6 +497,36 @@ class ProgramReviewTests(unittest.TestCase):
             before = status_path.read_bytes()
 
             with self.assertRaisesRegex(ValueError, "transition authority"):
+                REVIEW.persist_review_remediation(program_root, observation)
+
+            self.assertEqual(status_path.read_bytes(), before)
+        finally:
+            fixture.close()
+
+    def test_malformed_rebound_remediation_status_uses_typed_recovery_error(
+        self,
+    ) -> None:
+        fixture, program_root, observation = reviewing_program(self.add_open_finding)
+        try:
+            REVIEW.persist_review_remediation(program_root, observation)
+            status_path = program_root / "state/status.json"
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            binding = status["review_remediation_binding"]
+            binding.pop("initial_product_delta_sha256")
+            status["review_binding"]["candidate_sha256"] = None
+            status["transition_authority"]["event_id"] = REVIEW._identifier(
+                "review-remediation", binding
+            )
+            status_path.write_bytes(canonical_json(status))
+            before = status_path.read_bytes()
+            self.assertIn(
+                "remediating state requires an exact review remediation binding",
+                REVIEW.validate_state_authority(program_root, observation),
+            )
+
+            with self.assertRaisesRegex(
+                ValueError, "review-remediation-recovery-required"
+            ):
                 REVIEW.persist_review_remediation(program_root, observation)
 
             self.assertEqual(status_path.read_bytes(), before)
