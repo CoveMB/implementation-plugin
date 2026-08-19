@@ -1,0 +1,15 @@
+{
+  "findings": [],
+  "increment_id": "ARCHIVE-INDEX",
+  "independent": false,
+  "persisted_at": "2026-08-18T10:00:00Z",
+  "prior_conclusions_withheld": false,
+  "program_id": "ARCHIVE-PROGRAM",
+  "program_revision": 1,
+  "reconciled_at": "2026-08-18T10:10:00Z",
+  "reduced_assurance": true,
+  "review_basis": "bounded requirements review of the exact current delta",
+  "reviewer_role": "controller-self-review",
+  "schema_version": "implementation-raw-review-report/v1",
+  "scope": "requirements"
+}

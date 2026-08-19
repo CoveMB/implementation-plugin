@@ -15,12 +15,49 @@ from typing import Any
 
 
 MANIFEST_NAME = "manifest.json"
+PROPOSAL_VALIDATION_MODE = "proposal"
+APPROVED_VALIDATION_MODE = "approved"
+VALIDATION_MODES = frozenset({PROPOSAL_VALIDATION_MODE, APPROVED_VALIDATION_MODE})
+CLOSURE_STORAGE_SCHEMA = "implementation-closure-storage/v1"
+INCREMENT_STORAGE_SCHEMA = "implementation-increment-storage/v1"
+NEW_PROGRAM_MANIFEST_SCHEMA = "implementation-program-manifest/v2"
+SUPPORTED_NEW_PROGRAM_APPROVAL_MODES = frozenset(
+    {"approval:standard", "approval:pre-approve", "approval:full-increment"}
+)
 REQUIRED_LOGICAL_ROLES = (
     "canonical_source_snapshot",
     "source_metadata",
     "approved_program",
     "traceability",
     "approvals",
+)
+NEW_PROGRAM_LOGICAL_ROLES = (
+    *REQUIRED_LOGICAL_ROLES,
+    "action_authorizations",
+    "increment_grants",
+    "rollovers",
+    "block_resolutions",
+    "workspace",
+    "status",
+)
+NEW_PROGRAM_LEDGER_ROLES = (
+    "approvals",
+    "action_authorizations",
+    "increment_grants",
+    "rollovers",
+    "block_resolutions",
+)
+INCREMENT_STORAGE_FILENAME_FIELDS = (
+    "brief_filename",
+    "exact_file_plan_filename",
+    "execution_baseline_filename",
+    "review_evidence_filename",
+    "review_packet_filename",
+    "handoff_filename",
+)
+CLOSURE_STORAGE_FILENAME_FIELDS = (
+    "reconciliation_filename",
+    "packet_filename",
 )
 SEMANTIC_FIELDS = (
     "id",
@@ -203,6 +240,94 @@ def resolve_managed_path(
     if require_file and candidate.is_symlink():
         return None, [f"{role}: symlink files are not allowed"]
     return candidate, []
+
+
+def _resolve_storage_descriptor(
+    program_root: Path,
+    descriptor: object,
+    *,
+    label: str,
+    schema: str,
+    filename_fields: Sequence[str],
+) -> tuple[dict[str, Path], list[str]]:
+    """Resolve an immutable storage descriptor without requiring future files."""
+    if not isinstance(descriptor, dict):
+        return {}, [f"{label} must be an object"]
+    expected_fields = frozenset({"schema_version", "root", *filename_fields})
+    issues = _validate_exact_fields(descriptor, expected_fields, label)
+    if descriptor.get("schema_version") != schema:
+        issues.append(f"{label} schema_version must be {schema}")
+
+    root_value = descriptor.get("root")
+    if not _is_non_empty_string(root_value):
+        issues.append(f"{label} root must be a non-empty relative POSIX path")
+        return {}, sorted(set(issues))
+    raw_root = str(root_value)
+    root_path = PurePosixPath(raw_root)
+    if (
+        "\\" in raw_root
+        or root_path.is_absolute()
+        or root_path.as_posix() != raw_root
+        or any(part in ("", ".", "..") for part in root_path.parts)
+    ):
+        issues.append(f"{label} root must stay under the program root")
+        return {}, sorted(set(issues))
+
+    storage_root = program_root.joinpath(*root_path.parts)
+    if _contains_symlink(storage_root, program_root):
+        issues.append(f"{label} root must not contain a symlink")
+    elif storage_root.exists() and not storage_root.is_dir():
+        issues.append(f"{label} root must be a directory when it exists")
+
+    paths: dict[str, Path] = {}
+    for field in filename_fields:
+        value = descriptor.get(field)
+        if not _is_non_empty_string(value):
+            issues.append(f"{label} {field} must be a non-empty filename")
+            continue
+        filename = str(value)
+        pure_filename = PurePosixPath(filename)
+        if (
+            "\\" in filename
+            or pure_filename.is_absolute()
+            or len(pure_filename.parts) != 1
+            or pure_filename.name in ("", ".", "..")
+        ):
+            issues.append(f"{label} {field} must be one relative filename")
+            continue
+        candidate = storage_root / filename
+        if _contains_symlink(candidate, program_root):
+            issues.append(f"{label} {field} must not contain a symlink")
+            continue
+        if candidate.exists() and (candidate.is_symlink() or not candidate.is_file()):
+            issues.append(f"{label} {field} must be a regular file when it exists")
+            continue
+        paths[field] = candidate
+
+    if len(set(paths.values())) != len(paths):
+        issues.append(f"{label} resolves duplicate paths")
+    return paths, sorted(set(issues))
+
+
+def resolve_program_closure_paths(program_root: Path) -> dict[str, Path]:
+    """Resolve manifest-owned new-model closure paths without creating them."""
+    root = Path(program_root)
+    manifest, issues = load_json_object(root / MANIFEST_NAME)
+    if manifest is None:
+        raise ValueError("; ".join(issues))
+    paths, path_issues = _resolve_storage_descriptor(
+        root,
+        manifest.get("closure_storage"),
+        label="closure_storage",
+        schema=CLOSURE_STORAGE_SCHEMA,
+        filename_fields=CLOSURE_STORAGE_FILENAME_FIELDS,
+    )
+    if path_issues:
+        raise ValueError("; ".join(path_issues))
+    return {
+        "reconciliation": paths["reconciliation_filename"],
+        "packet": paths["packet_filename"],
+    }
 
 
 def compute_semantic_requirements_digest(
@@ -600,15 +725,166 @@ def validate_program_approval(
         issues.append("conflicting current program approval records")
     if matching:
         approval_id = matching[0].get("event_id")
-        if coverage.get("approval_event_id") != approval_id:
+        if (
+            manifest.get("schema_version") != NEW_PROGRAM_MANIFEST_SCHEMA
+            and coverage.get("approval_event_id") != approval_id
+        ):
             issues.append("coverage approval_event_id mismatch")
     return issues
 
 
+def _validate_new_manifest_contract(
+    root: Path,
+    manifest: dict[str, Any],
+    logical_roles: dict[str, Any],
+) -> list[str]:
+    issues: list[str] = []
+    if manifest.get("schema_version") != NEW_PROGRAM_MANIFEST_SCHEMA:
+        return issues
+    if manifest.get("approval_mode") not in SUPPORTED_NEW_PROGRAM_APPROVAL_MODES:
+        issues.append("new program approval_mode is unsupported")
+    for forbidden in ("program_status", "current_increment"):
+        if forbidden in manifest:
+            issues.append(f"new manifest must not contain mutable {forbidden}")
+    if any(
+        role in logical_roles for role in ("closure_reconciliation", "closure_packet")
+    ):
+        issues.append("new manifest must not duplicate closure logical roles")
+
+    role_values = [
+        value
+        for role in NEW_PROGRAM_LOGICAL_ROLES
+        if isinstance((value := logical_roles.get(role)), str)
+    ]
+    if len(role_values) != len(set(role_values)):
+        issues.append("new manifest logical roles must resolve to unique paths")
+
+    increment_paths, increment_issues = _resolve_storage_descriptor(
+        root,
+        manifest.get("increment_storage"),
+        label="increment_storage",
+        schema=INCREMENT_STORAGE_SCHEMA,
+        filename_fields=INCREMENT_STORAGE_FILENAME_FIELDS,
+    )
+    closure_paths, closure_issues = _resolve_storage_descriptor(
+        root,
+        manifest.get("closure_storage"),
+        label="closure_storage",
+        schema=CLOSURE_STORAGE_SCHEMA,
+        filename_fields=CLOSURE_STORAGE_FILENAME_FIELDS,
+    )
+    issues.extend(increment_issues)
+    issues.extend(closure_issues)
+    all_storage_paths = [*increment_paths.values(), *closure_paths.values()]
+    if len(all_storage_paths) != len(set(all_storage_paths)):
+        issues.append("increment and closure storage resolve duplicate paths")
+    return sorted(set(issues))
+
+
+def _validate_proposal_workspace(
+    manifest: dict[str, Any], workspace: dict[str, Any]
+) -> list[str]:
+    issues: list[str] = []
+    if workspace.get("schema_version") != "implementation-workspace-proposal/v1":
+        issues.append(
+            "proposal workspace schema_version must be implementation-workspace-proposal/v1"
+        )
+    if workspace.get("program_id") != manifest.get("program_id"):
+        issues.append("proposal workspace program_id mismatch")
+    if workspace.get("program_revision") != manifest.get("program_revision"):
+        issues.append("proposal workspace program_revision mismatch")
+    repository = workspace.get("repository")
+    if not isinstance(repository, dict) or not _is_non_empty_string(
+        repository.get("identity")
+    ):
+        issues.append("proposal workspace repository identity is required")
+    selected = workspace.get("implementation_workspace")
+    if not isinstance(selected, dict):
+        issues.append("proposal implementation_workspace must be an object")
+    else:
+        for field in ("path", "branch", "base_commit", "head_commit_at_selection"):
+            if not _is_non_empty_string(selected.get(field)):
+                issues.append(f"proposal workspace {field} is required")
+    existing = workspace.get("pre_existing_work_at_selection")
+    if not isinstance(existing, dict):
+        issues.append("proposal pre_existing_work_at_selection must be an object")
+    else:
+        for field in (
+            "staged_paths",
+            "modified_paths",
+            "untracked_paths",
+            "conflicted_paths",
+        ):
+            if not _string_list(existing.get(field)):
+                issues.append(f"proposal workspace {field} must be a string list")
+        if existing.get("active_git_operation") is not None:
+            issues.append("proposal workspace active_git_operation must be null")
+    for forbidden in (
+        "selection_authority",
+        "selection_approval_event_id",
+        "action_authorization_id",
+    ):
+        if forbidden in workspace:
+            issues.append(f"proposal workspace must not claim {forbidden}")
+    return sorted(set(issues))
+
+
+def _validate_proposal_status(
+    manifest: dict[str, Any],
+    traceability: dict[str, Any],
+    status: dict[str, Any],
+) -> list[str]:
+    issues: list[str] = []
+    expected_values = {
+        "schema_version": "implementation-program-status/v2",
+        "program_id": manifest.get("program_id"),
+        "program_revision": manifest.get("program_revision"),
+        "state_sequence": 0,
+        "program_state": "awaiting-program-approval",
+        "current_increment_state": "not-started",
+        "approval_mode": manifest.get("approval_mode"),
+    }
+    for field, expected in expected_values.items():
+        if status.get(field) != expected:
+            issues.append(f"proposal status {field} must be {expected!r}")
+    if not _is_non_empty_string(status.get("current_increment_id")):
+        issues.append("proposal status current_increment_id is required")
+    if status.get("source_binding") != manifest.get("source_binding"):
+        issues.append("proposal status source_binding mismatch")
+    program_binding = status.get("program_binding")
+    manifest_program = manifest.get("program_binding")
+    coverage = traceability.get("coverage_assertion")
+    expected_program_binding = {
+        "sha256": (
+            manifest_program.get("sha256") if isinstance(manifest_program, dict) else None
+        ),
+        "semantic_requirements_sha256": (
+            coverage.get("semantic_requirements_sha256")
+            if isinstance(coverage, dict)
+            else None
+        ),
+    }
+    if program_binding != expected_program_binding:
+        issues.append("proposal status program_binding mismatch")
+    if isinstance(coverage, dict) and not _is_non_empty_string(
+        coverage.get("approval_event_id")
+    ):
+        issues.append("proposal reserves a future approval_event_id")
+    return sorted(set(issues))
+
+
 def validate_program_authority(
-    program_root: Path, *, allow_incomplete: bool = False
+    program_root: Path,
+    *,
+    validation_mode: str = APPROVED_VALIDATION_MODE,
+    allow_incomplete: bool = False,
 ) -> list[str]:
     """Validate the complete current program authority binding."""
+    if validation_mode not in VALIDATION_MODES:
+        return [
+            "validation mode must be one of "
+            f"{sorted(VALIDATION_MODES)!r}; found {validation_mode!r}"
+        ]
     root = Path(program_root)
     manifest, issues = load_json_object(root / MANIFEST_NAME)
     if manifest is None:
@@ -617,15 +893,24 @@ def validate_program_authority(
     if not isinstance(logical_roles, dict):
         return ["manifest logical_roles must be an object"]
 
+    new_manifest = manifest.get("schema_version") == NEW_PROGRAM_MANIFEST_SCHEMA
+    if validation_mode == PROPOSAL_VALIDATION_MODE and not new_manifest:
+        issues.append("proposal validation requires implementation-program-manifest/v2")
+    if new_manifest:
+        issues.extend(_validate_new_manifest_contract(root, manifest, logical_roles))
+        if allow_incomplete:
+            issues.append("allow_incomplete is a legacy preparation mode")
+
     resolved_roles: dict[str, Path] = {}
-    for role in REQUIRED_LOGICAL_ROLES:
+    required_roles = NEW_PROGRAM_LOGICAL_ROLES if new_manifest else REQUIRED_LOGICAL_ROLES
+    for role in required_roles:
         path, path_issues = resolve_managed_path(
             root, logical_roles.get(role), role=f"logical role {role}"
         )
         issues.extend(path_issues)
         if path is not None:
             resolved_roles[role] = path
-    if len(resolved_roles) != len(REQUIRED_LOGICAL_ROLES):
+    if len(resolved_roles) != len(required_roles):
         return sorted(set(issues))
 
     metadata, metadata_issues = load_json_object(resolved_roles["source_metadata"])
@@ -636,6 +921,16 @@ def validate_program_authority(
     issues.extend(approval_load_issues)
     if metadata is None or traceability is None or approvals is None:
         return sorted(set(issues))
+
+    new_ledgers: dict[str, list[dict[str, Any]]] = {"approvals": approvals}
+    if new_manifest:
+        for role in NEW_PROGRAM_LEDGER_ROLES:
+            if role == "approvals":
+                continue
+            records, load_issues = load_json_lines(resolved_roles[role])
+            issues.extend(load_issues)
+            if records is not None:
+                new_ledgers[role] = records
 
     source_lines, source_issues = validate_source_binding(
         manifest,
@@ -674,7 +969,21 @@ def validate_program_authority(
             issues.append("traceability binding digest mismatch")
         if program_binding.get("machine_complete_traceability") is not True:
             issues.append("manifest must bind machine_complete_traceability true")
+    if validation_mode == APPROVED_VALIDATION_MODE and not allow_incomplete:
         issues.extend(validate_program_approval(manifest, traceability, approvals))
+    if new_manifest and validation_mode == PROPOSAL_VALIDATION_MODE:
+        for role in NEW_PROGRAM_LEDGER_ROLES:
+            records = new_ledgers.get(role)
+            if records is not None and records:
+                issues.append(f"proposal {role} ledger must be empty")
+        workspace, workspace_issues = load_json_object(resolved_roles["workspace"])
+        status, status_issues = load_json_object(resolved_roles["status"])
+        issues.extend(workspace_issues)
+        issues.extend(status_issues)
+        if workspace is not None:
+            issues.extend(_validate_proposal_workspace(manifest, workspace))
+        if status is not None:
+            issues.extend(_validate_proposal_status(manifest, traceability, status))
     issues.extend(_validate_prior_revision(root, traceability))
     return sorted(set(issues))
 

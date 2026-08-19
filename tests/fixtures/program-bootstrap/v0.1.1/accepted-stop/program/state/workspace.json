@@ -1,0 +1,21 @@
+{
+  "implementation_workspace": {
+    "base_commit": "26d48190f7643e19dc9999c22654529f8286274d",
+    "branch": "archive-maintenance",
+    "head_commit_at_selection": "26d48190f7643e19dc9999c22654529f8286274d",
+    "path": "/private/var/folders/4b/92vv49v10lj3j8mwm6k0q8qh0000gn/T/tmpcy_txmee/repository"
+  },
+  "pre_existing_work_at_selection": {
+    "active_git_operation": null,
+    "conflicted_paths": [],
+    "modified_paths": [],
+    "staged_paths": [],
+    "untracked_paths": []
+  },
+  "program_id": "ARCHIVE-PROGRAM",
+  "program_revision": 1,
+  "repository": {
+    "identity": "/private/var/folders/4b/92vv49v10lj3j8mwm6k0q8qh0000gn/T/tmpcy_txmee/repository"
+  },
+  "schema_version": "implementation-workspace-proposal/v1"
+}

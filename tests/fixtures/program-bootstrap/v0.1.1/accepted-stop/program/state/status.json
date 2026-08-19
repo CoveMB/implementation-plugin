@@ -1,0 +1,125 @@
+{
+  "activation_binding": {
+    "increment_grant_id": "INCREMENT-GRANT-b45735b8fdf75bc6aa2f26cd",
+    "launch_checkpoint_id": "LAUNCH-CHECKPOINT-2f96ba9d142df75a9a5199b8",
+    "prior_status_sequence": 0,
+    "prior_status_sha256": "ef8ccbcdd0d3e7ca2b97dabf58dd4d1075a5cefa9be7cc1bad7f121a9ba0dccb",
+    "program_approval_event_id": "PROGRAM-APPROVAL-0d382d997dd750c64716ab36",
+    "schema_version": "implementation-program-activation-binding/v1",
+    "submitted_prompt_sha256": "4900ca5311cc987bed859c359640695533db93c48652a95111c938863a32e121",
+    "workspace_approval_event_id": "WORKSPACE-APPROVAL-b5d17b976a354cf5314a7bbe"
+  },
+  "approval_mode": "approval:standard",
+  "approved_exact_file_plan_sha256": "4271ba24aa1d3b9b4de38eba8522d27aa7ee245947cc07af56627374e0b75959",
+  "brief_binding": {
+    "head_commit": "26d48190f7643e19dc9999c22654529f8286274d",
+    "path": "program/implementation-program.md",
+    "sha256": "3702df1a6c7e863a829dd0e00b78f4116a444fc6ef43b362c5a941b3c0131bc3",
+    "workspace_sha256": "eb530b3d39e8f7bb57803da422d48cf19683b7781bcb5d93f5f66840b0d4fc51"
+  },
+  "current_increment_authority_binding": {
+    "grant_id": "INCREMENT-GRANT-b45735b8fdf75bc6aa2f26cd",
+    "grant_sha256": "96e6b3e772c7ce26ef6b9dfbb349aa6a2093643f65f9e91abae0e259d5958f9a",
+    "increment_id": "ARCHIVE-INDEX",
+    "kind": "increment-grant",
+    "schema_version": "implementation-current-increment-authority-binding/v1"
+  },
+  "current_increment_id": "ARCHIVE-INDEX",
+  "current_increment_state": "accepted",
+  "diff_disposition_binding": {
+    "accepted_product_delta_sha256": "e911e0e67198cf4313b6674fe3c0b4f48c83ed40a979975ccc7396c352d4f0d6",
+    "approval_event_id": "DIFF-APPROVAL-9ef80322166bbbf986f1e50f",
+    "base_seed_sha256": "749b11000503e282b73418947176c182572f53e233639c4b3065ce695372dd6a",
+    "checkpoint_id": "DIFF-CHECKPOINT-1a2b83417ab85f7189beff00",
+    "decision": "accept-stop",
+    "exact_file_plan_sha256": "4271ba24aa1d3b9b4de38eba8522d27aa7ee245947cc07af56627374e0b75959",
+    "execution_baseline_sha256": "f1c69d1e0fa56d11dabe315a7a0f7931698771ae0ef2e3ef2b058e08d6f8a0fc",
+    "increment_id": "ARCHIVE-INDEX",
+    "prior_status_sequence": 7,
+    "prior_status_sha256": "935882c7f262148ae894b015a21530e521dbc2480296093c17d8daed486655a2",
+    "program_id": "ARCHIVE-PROGRAM",
+    "program_revision": 1,
+    "review_evidence_sha256": "0eb8d405cfdbbd7d60b135c62c64f15eb8f2ad1aac96d979c2b7747bd451b79d",
+    "review_packet_sha256": "d66784d1e978facda87719903b383c51d3322849b9797ba624e40578635ecd32",
+    "schema_version": "implementation-diff-disposition-binding/v1",
+    "verification_sha256": "ba1432bf1a67f572a0f09c7f758177ca796e906e2874139a055daf2ec23b3d46"
+  },
+  "execution_authorization": {
+    "authorization_id": "PLAN-ACTION-d0ca304febddaf5a7586cf22",
+    "scope": "implement the bound exact-file plan"
+  },
+  "execution_baseline_binding": {
+    "path": "increments/ARCHIVE-INDEX/execution-baseline.json",
+    "sha256": "f1c69d1e0fa56d11dabe315a7a0f7931698771ae0ef2e3ef2b058e08d6f8a0fc"
+  },
+  "execution_transition_binding": {
+    "authorization_id": "PLAN-ACTION-d0ca304febddaf5a7586cf22",
+    "event_id": "EXECUTION-TRANSITION-d37bada1724b7997e80044f6",
+    "prior_increment_state": "implementing",
+    "prior_status_sha256": "1eb56a4e80f0fd50ae0ea3c190912526ed770f825533aeb6a3eef73e373e10d2",
+    "product_delta_sha256": "e911e0e67198cf4313b6674fe3c0b4f48c83ed40a979975ccc7396c352d4f0d6",
+    "schema_version": "implementation-execution-transition/v1",
+    "target_increment_state": "reviewing"
+  },
+  "pending_exact_file_plan_sha256": null,
+  "plan_preparation_binding": {
+    "action_authorization_id": "PLAN-ACTION-d0ca304febddaf5a7586cf22",
+    "action_authorization_sha256": "50925be67b90df67125f42294b80f0b5ca25629cce6262bed5da24229e2c7f52",
+    "checkpoint_id": "PLAN-CHECKPOINT-35021e8aae988cf2d9a669af",
+    "exact_file_plan_path": "increments/ARCHIVE-INDEX/exact-file-plan.md",
+    "exact_file_plan_sha256": "4271ba24aa1d3b9b4de38eba8522d27aa7ee245947cc07af56627374e0b75959",
+    "execution_baseline_path": "increments/ARCHIVE-INDEX/execution-baseline.json",
+    "execution_baseline_sha256": "f1c69d1e0fa56d11dabe315a7a0f7931698771ae0ef2e3ef2b058e08d6f8a0fc",
+    "file_map_sha256": "8286cb73504c4a5bcdc7a47f81129b02d09bcd029648c94f0227cb3c6fdf3ae8",
+    "plan_approval_event_id": "PLAN-APPROVAL-b3a54f016e0219b62a229eb1",
+    "prior_status_sequence": 1,
+    "prior_status_sha256": "0236f1264dd683ed5b510f077c655e8acc1b241d015d3749e82232acd1d3d495",
+    "schema_version": "implementation-exact-plan-preparation/v1"
+  },
+  "previous_state": {
+    "schema_version": "implementation-program-status/v2",
+    "state_sequence": 7,
+    "status_sha256": "935882c7f262148ae894b015a21530e521dbc2480296093c17d8daed486655a2"
+  },
+  "program_binding": {
+    "semantic_requirements_sha256": "5b669e2f72f340dd221be4a983d6f557dc0c1fa2972baed4c3aa868f829e59ea",
+    "sha256": "3702df1a6c7e863a829dd0e00b78f4116a444fc6ef43b362c5a941b3c0131bc3"
+  },
+  "program_id": "ARCHIVE-PROGRAM",
+  "program_revision": 1,
+  "program_state": "active",
+  "review_evidence_binding": {
+    "candidate_sha256": "e911e0e67198cf4313b6674fe3c0b4f48c83ed40a979975ccc7396c352d4f0d6",
+    "path": "increments/ARCHIVE-INDEX/review-evidence.json",
+    "sha256": "0eb8d405cfdbbd7d60b135c62c64f15eb8f2ad1aac96d979c2b7747bd451b79d"
+  },
+  "review_packet_binding": {
+    "candidate_sha256": "e911e0e67198cf4313b6674fe3c0b4f48c83ed40a979975ccc7396c352d4f0d6",
+    "path": "increments/ARCHIVE-INDEX/review-packet.md",
+    "sha256": "d66784d1e978facda87719903b383c51d3322849b9797ba624e40578635ecd32"
+  },
+  "review_preparation_binding": {
+    "evidence_path": "increments/ARCHIVE-INDEX/review-evidence.json",
+    "evidence_sha256": "0eb8d405cfdbbd7d60b135c62c64f15eb8f2ad1aac96d979c2b7747bd451b79d",
+    "increment_id": "ARCHIVE-INDEX",
+    "packet_path": "increments/ARCHIVE-INDEX/review-packet.md",
+    "packet_sha256": "d66784d1e978facda87719903b383c51d3322849b9797ba624e40578635ecd32",
+    "prior_status_sequence": 5,
+    "prior_status_sha256": "9af1341ae1a676dabeacbd0a49f0fd29cef711f218aaea52786ce5f1b244e104",
+    "product_delta_sha256": "e911e0e67198cf4313b6674fe3c0b4f48c83ed40a979975ccc7396c352d4f0d6",
+    "program_id": "ARCHIVE-PROGRAM",
+    "program_revision": 1,
+    "schema_version": "implementation-review-preparation/v1"
+  },
+  "schema_version": "implementation-program-status/v2",
+  "source_binding": {
+    "sha256": "2dab0af58f832caef7eea74640dac0c36b3fae60087ba9df83d0522530e79ffb",
+    "source_id": "ARCHIVE-SOURCE"
+  },
+  "state_sequence": 8,
+  "transition_authority": {
+    "checkpoint_id": "DIFF-CHECKPOINT-1a2b83417ab85f7189beff00",
+    "event_id": "DIFF-APPROVAL-9ef80322166bbbf986f1e50f",
+    "kind": "approval-event"
+  }
+}

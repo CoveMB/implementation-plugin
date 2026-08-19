@@ -9,6 +9,8 @@ from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 from unittest import mock
 
+from tests.program_bootstrap_support import repository_snapshot
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
@@ -307,9 +309,10 @@ class BriefAndHandoffTests(unittest.TestCase):
 
 
 class ContinuationAndResumeTests(unittest.TestCase):
-    def test_full_mode_continues_only_in_a_suitable_same_conversation(self) -> None:
+    def test_legacy_full_mode_stops_in_a_suitable_same_conversation(self) -> None:
         allowed, issues = CONTINUITY.evaluate_continuation(assessment())
-        self.assertTrue(allowed, issues)
+        self.assertFalse(allowed)
+        self.assertIn("one-increment approval mode requires a stop", issues)
         for predicate in CONTINUITY.CONVERSATION_SUITABILITY_PREDICATES:
             changed = tuple(
                 (name, False, "boundary reached") if name == predicate else item
@@ -321,7 +324,13 @@ class ContinuationAndResumeTests(unittest.TestCase):
             self.assertIn("handoff", " ".join(issues).lower())
 
     def test_one_increment_modes_stop_and_new_conversation_requires_brief_plus_authority(self) -> None:
-        for mode in ("approval:standard", "approval:pre-approve", "approval:full-increment", "approval:full-diff"):
+        for mode in (
+            "approval:standard",
+            "approval:pre-approve",
+            "approval:full-increment",
+            "approval:full-diff",
+            "approval:full",
+        ):
             with self.subTest(mode=mode):
                 self.assertFalse(CONTINUITY.evaluate_continuation(assessment(approval_mode=mode))[0])
         resumed = assessment(same_conversation=False, explicit_renewed_authority=True)
@@ -329,6 +338,11 @@ class ContinuationAndResumeTests(unittest.TestCase):
         for changed in (
             replace(resumed, explicit_renewed_authority=False),
             replace(resumed, submitted_brief_sha256="0" * 64),
+            assessment(
+                explicit_renewed_authority=True,
+                submitted_brief_sha256="a" * 64,
+                expected_brief_sha256="b" * 64,
+            ),
         ):
             self.assertFalse(CONTINUITY.evaluate_continuation(changed)[0])
 
@@ -519,6 +533,19 @@ class ContinuationAndResumeTests(unittest.TestCase):
 
 
 class RolloverTests(unittest.TestCase):
+    def test_legacy_rollover_writer_is_quarantined_before_any_write(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            values = self.rollover_values(root)
+            before = repository_snapshot(root)
+
+            with self.assertRaisesRegex(
+                ValueError, "legacy-rollover-upgrade-required"
+            ):
+                CONTINUITY.apply_increment_rollover(**values)
+
+            self.assertEqual(repository_snapshot(root), before)
+
     def rollover_values(self, root: Path):
         (root / "state").mkdir(exist_ok=True)
         manifest_path = root / "manifest.json"
@@ -547,235 +574,6 @@ class RolloverTests(unittest.TestCase):
             "matching_authorization_ids": ("CATALOG-ROLLOVER",),
         }
 
-    def test_rollover_writes_navigation_before_controlling_state(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "state").mkdir()
-            manifest_path = root / "manifest.json"
-            status_path = root / "state/status.json"
-            manifest_path.write_text('{"current_increment":"archive-scan"}\n', encoding="utf-8")
-            status_path.write_text('{"current_increment_state":"accepted"}\n', encoding="utf-8")
-            receipt = CONTINUITY.apply_increment_rollover(
-                root,
-                handoff_relative_path="increments/archive-scan/handoff.md",
-                handoff_record=handoff(),
-                handoff_markdown=CONTINUITY.render_handoff(handoff()),
-                brief_relative_path="increments/catalog-index/brief.md",
-                brief_record=brief(),
-                brief_markdown=CONTINUITY.render_increment_brief(brief()),
-                manifest_relative_path="manifest.json",
-                expected_manifest_sha256=hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
-                manifest_value={"current_increment": "catalog-index"},
-                status_relative_path="state/status.json",
-                expected_status_sha256=hashlib.sha256(status_path.read_bytes()).hexdigest(),
-                status_value={"current_increment_state": "preparing"},
-                current_increment_state="accepted",
-                current_increment_id="archive-scan",
-                expected_current_increment_id="archive-scan",
-                next_increment_id="catalog-index",
-                next_increment_dependencies=("archive-scan",),
-                matching_authorization_ids=("CATALOG-ROLLOVER",),
-            )
-            self.assertEqual(tuple(path for path, _ in receipt.completed_writes), (
-                "increments/archive-scan/handoff.md",
-                "increments/catalog-index/brief.md",
-                "manifest.json",
-                "state/status.json",
-            ))
-            generated_prompt = (
-                root / "increments/catalog-index/brief.md"
-            ).read_text(encoding="utf-8")
-            self.assertEqual(
-                generated_prompt.splitlines()[0],
-                "$implementing-staged-plans",
-            )
-            self.assertFalse(receipt.requires_fresh_resume)
-
-    def test_rollover_adopts_exact_existing_navigation_without_rewrite(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            values = self.rollover_values(root)
-            handoff_path = root / values["handoff_relative_path"]
-            brief_path = root / values["brief_relative_path"]
-            handoff_path.parent.mkdir(parents=True)
-            brief_path.parent.mkdir(parents=True)
-            handoff_path.write_text(values["handoff_markdown"], encoding="utf-8")
-            brief_path.write_text(values["brief_markdown"], encoding="utf-8")
-            navigation_before = {
-                path: (path.stat().st_ino, hashlib.sha256(path.read_bytes()).hexdigest())
-                for path in (handoff_path, brief_path)
-            }
-
-            receipt = CONTINUITY.apply_increment_rollover(**values)
-
-            self.assertEqual(
-                tuple(path for path, _ in receipt.completed_writes),
-                ("manifest.json", "state/status.json"),
-            )
-            self.assertFalse(receipt.requires_fresh_resume)
-            self.assertEqual(
-                navigation_before,
-                {
-                    path: (path.stat().st_ino, hashlib.sha256(path.read_bytes()).hexdigest())
-                    for path in (handoff_path, brief_path)
-                },
-            )
-
-    def test_rollover_rejects_changed_mixed_or_symlinked_existing_navigation(self) -> None:
-        for case in ("changed", "mixed", "symlink"):
-            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                values = self.rollover_values(root)
-                handoff_path = root / values["handoff_relative_path"]
-                brief_path = root / values["brief_relative_path"]
-                handoff_path.parent.mkdir(parents=True)
-                brief_path.parent.mkdir(parents=True)
-                handoff_path.write_text(values["handoff_markdown"], encoding="utf-8")
-                if case == "changed":
-                    brief_path.write_text("changed\n", encoding="utf-8")
-                elif case == "mixed":
-                    pass
-                else:
-                    outside = root / "outside.md"
-                    outside.write_text(values["brief_markdown"], encoding="utf-8")
-                    brief_path.symlink_to(outside)
-                manifest_before = (root / "manifest.json").read_bytes()
-                status_before = (root / "state/status.json").read_bytes()
-
-                with self.assertRaises(ValueError):
-                    CONTINUITY.apply_increment_rollover(**values)
-
-                self.assertEqual((root / "manifest.json").read_bytes(), manifest_before)
-                self.assertEqual((root / "state/status.json").read_bytes(), status_before)
-
-    def test_existing_navigation_interruption_reports_only_controlling_writes(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            values = self.rollover_values(root)
-            for path, markdown in (
-                (root / values["handoff_relative_path"], values["handoff_markdown"]),
-                (root / values["brief_relative_path"], values["brief_markdown"]),
-            ):
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(markdown, encoding="utf-8")
-            navigation_before = {
-                path: path.read_bytes()
-                for path in (
-                    root / values["handoff_relative_path"],
-                    root / values["brief_relative_path"],
-                )
-            }
-            values["fail_after_writes"] = 1
-
-            receipt = CONTINUITY.apply_increment_rollover(**values)
-
-            self.assertEqual(
-                tuple(path for path, _ in receipt.completed_writes),
-                ("manifest.json",),
-            )
-            self.assertEqual(receipt.failed_path, "state/status.json")
-            self.assertTrue(receipt.requires_fresh_resume)
-            self.assertEqual(
-                navigation_before,
-                {path: path.read_bytes() for path in navigation_before},
-            )
-
-    def test_partial_rollover_is_inert_and_requires_fresh_resume(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "state").mkdir()
-            manifest_path = root / "manifest.json"
-            status_path = root / "state/status.json"
-            manifest_path.write_text('{"current_increment":"archive-scan"}\n', encoding="utf-8")
-            status_path.write_text('{"current_increment_state":"accepted"}\n', encoding="utf-8")
-            unrelated = root / "notes.txt"
-            unrelated.write_text("user-owned\n", encoding="utf-8")
-            receipt = CONTINUITY.apply_increment_rollover(
-                root,
-                handoff_relative_path="increments/archive-scan/handoff.md",
-                handoff_record=handoff(),
-                handoff_markdown=CONTINUITY.render_handoff(handoff()),
-                brief_relative_path="increments/catalog-index/brief.md",
-                brief_record=brief(),
-                brief_markdown=CONTINUITY.render_increment_brief(brief()),
-                manifest_relative_path="manifest.json",
-                expected_manifest_sha256=hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
-                manifest_value={"current_increment": "catalog-index"},
-                status_relative_path="state/status.json",
-                expected_status_sha256=hashlib.sha256(status_path.read_bytes()).hexdigest(),
-                status_value={"current_increment_state": "preparing"},
-                current_increment_state="accepted",
-                current_increment_id="archive-scan",
-                expected_current_increment_id="archive-scan",
-                next_increment_id="catalog-index",
-                next_increment_dependencies=("archive-scan",),
-                matching_authorization_ids=("CATALOG-ROLLOVER",),
-                fail_after_writes=1,
-            )
-            self.assertTrue(receipt.requires_fresh_resume)
-            self.assertEqual(receipt.failed_path, "increments/catalog-index/brief.md")
-            self.assertEqual(unrelated.read_text(encoding="utf-8"), "user-owned\n")
-            self.assertEqual(json.loads(status_path.read_text())["current_increment_state"], "accepted")
-
-    def test_rollover_rejects_missing_authority_illegal_state_and_existing_target(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "exists.md").write_text("owned\n", encoding="utf-8")
-            common = {
-                "root": root,
-                "handoff_relative_path": "exists.md",
-                "handoff_record": handoff(),
-                "handoff_markdown": CONTINUITY.render_handoff(handoff()),
-                "brief_relative_path": "brief.md",
-                "brief_record": brief(),
-                "brief_markdown": CONTINUITY.render_increment_brief(brief()),
-                "manifest_relative_path": "manifest.json",
-                "expected_manifest_sha256": "0" * 64,
-                "manifest_value": {},
-                "status_relative_path": "status.json",
-                "expected_status_sha256": "0" * 64,
-                "status_value": {},
-                "current_increment_state": "accepted",
-                "current_increment_id": "archive-scan",
-                "expected_current_increment_id": "archive-scan",
-                "next_increment_id": "catalog-index",
-                "next_increment_dependencies": ("archive-scan",),
-                "matching_authorization_ids": ("CATALOG-ROLLOVER",),
-            }
-            with self.assertRaises(ValueError):
-                CONTINUITY.apply_increment_rollover(**common)
-            with self.assertRaisesRegex(ValueError, "authorization"):
-                CONTINUITY.apply_increment_rollover(**{**common, "handoff_relative_path": "handoff.md", "matching_authorization_ids": ()})
-
-    def test_rollover_rejects_symlink_parent_before_writing(self) -> None:
-        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside_directory:
-            root = Path(directory)
-            values = self.rollover_values(root)
-            (root / "linked").symlink_to(Path(outside_directory), target_is_directory=True)
-            values.update(
-                handoff_relative_path="linked/handoff.md",
-                brief_relative_path="increments/catalog-index/brief.md",
-            )
-            with self.assertRaisesRegex(ValueError, "symlink"):
-                CONTINUITY.apply_increment_rollover(**values)
-            self.assertFalse((Path(outside_directory) / "handoff.md").exists())
-
-    def test_rollover_preflights_controlling_digests_before_navigation(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            values = self.rollover_values(root)
-            values["expected_manifest_sha256"] = "0" * 64
-            with self.assertRaisesRegex(ValueError, "digest changed"):
-                CONTINUITY.apply_increment_rollover(**values)
-            self.assertFalse((root / values["handoff_relative_path"]).exists())
-            self.assertFalse((root / values["brief_relative_path"]).exists())
-
-    def test_rollover_requires_rendered_bytes_to_match_validated_records(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            values = self.rollover_values(Path(directory))
-            values["brief_markdown"] += "unexpected policy\n"
-            with self.assertRaisesRegex(ValueError, "brief Markdown"):
-                CONTINUITY.apply_increment_rollover(**values)
 
 
 class ClosureAndLaterActionTests(unittest.TestCase):

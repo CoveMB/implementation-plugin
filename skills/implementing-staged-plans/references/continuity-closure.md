@@ -4,7 +4,7 @@ Use this procedure to generate lean navigation artifacts, decide whether convers
 
 ## Prerequisites and Current Truth
 
-Load the manifest-owned source, approved program revision, traceability, workspace, status, approvals, authorizations, current brief and plan, latest accepted review packet and addendum, and latest accepted handoff. Inspect the repository again for identity, path, branch, base, head, dirty paths, conflicts, and active operations.
+Load the manifest-owned source, approved program revision, traceability, workspace, status, approvals, authorizations, current brief and plan, and latest accepted review packet. Load an accepted addendum and handoff only when an earlier rollover created them. Inspect the repository again for identity, path, branch, base, head, dirty paths, conflicts, and active operations.
 
 Persisted state and current repository observations control. A brief or handoff is a navigation aid. Reject unsupported schemas, missing or duplicate matching records, changed bytes, stale observations, symlinks, path escape, and conflicting bindings.
 
@@ -26,7 +26,7 @@ The next legal action explains navigation only. It never renews conversational a
 
 For automatic continuation, record evidence for each approved suitability predicate: program-part boundary, risk or architecture domain, workspace or base, superseded discussion, evidence or expertise, and lossless summary. A failed or missing predicate requires a durable handoff.
 
-One-increment modes stop after their increment. `approval:full` can continue automatically only within the same suitable conversation. In every new conversation, require the submitted matching brief and explicit renewed user authority even when the requested mode remains `approval:full`.
+Every approval mode stops after its current increment. A successor requires the submitted matching brief and explicit renewed user authority, including when a persisted legacy program remains in `approval:full`; conversation suitability alone never supplies successor authority.
 
 ## Revalidate a Resume
 
@@ -36,17 +36,17 @@ Build renewed authority from the complete validated `ResumeContext`, the current
 
 Do not use handoff prose to repair a controlling mismatch. Return the first authority boundary and the smallest legal recovery action.
 
-## Apply an Authorized Rollover
+## Defer Rollover to the Continuation Upgrade
 
-Rollover requires an accepted current increment, the exact dependent next increment, validated proposed handoff and brief bytes, expected digests for controlling files, and a matching write authorization. When both navigation paths are absent, create the handoff and brief before manifest and status updates. Persist one receipt per completed write.
+Version `0.1.1` does not apply a new-model rollover. The legacy caller-authored rollover surface stops before every write with `legacy-rollover-upgrade-required`. Keep an accepted current increment valid and preserve all existing bytes.
 
-When both navigation paths already exist, adopt them only if each is a regular non-symlink file and its bytes exactly match the validated rendering. Do not rewrite adopted navigation or report it as a completed write; advance only the controlling manifest and status. Mixed presence, changed bytes, symlinks, unsafe paths, or controlling digest drift fail before any write.
-
-If any write fails, retain completed files as inert evidence. Do not delete, overwrite, or roll back user work. Report the partial receipts and require a fresh resume validation before any retry.
+Prompt-bound successor authority, managed rollover records, and retry-safe successor status belong to the separately approved Plan B version `0.1.2` upgrade. Do not infer them from a handoff, brief, approval mode, or accepted status while running Plan A.
 
 ## Reconcile a Program
 
 Only after the final increment is accepted, account for every atomic requirement exactly once with an allowed disposition and evidence. Validate every accepted increment, review packet, addendum, approved amendment, decision, owned deferral, later-invalidation check, and material-finding disposition. Require fresh successful program-level commands completed after all contributing evidence and reassess architecture, documentation, operations, and recovery.
+
+For a new-model final first increment, use `program_closure.py`. It resolves both closure paths from the immutable manifest descriptor and requires both paths under the accepted exact plan's `Create` disposition. It does not create a handoff, successor brief, rollover, or later-action authority. A first-increment closure binds the accepted review packet; addendum coverage becomes mandatory only when accepted rollover history exists.
 
 Any unallocated requirement, incomplete accepted artifact, unresolved amendment, unowned deferral, material finding, stale verification, or missing reassessment blocks closure readiness. Reopen the smallest affected scope under separate authority.
 
@@ -55,6 +55,8 @@ Any unallocated requirement, incomplete accepted artifact, unresolved amendment,
 Render a deterministic packet bound to the exact reconciliation digest. Include final-increment acceptance, requirement and amendment outcomes, deferrals, accepted-packet integrity, fresh program verification, the four reassessments, findings and dispositions, residual risks, current active state, an explicit closure-approval request, and a stop as the next action.
 
 Final-increment acceptance leaves the program active. Moving to `awaiting-closure-approval` requires exact manifest-owned reconciliation and packet paths, matching digests, validated readiness, and zero blocking counts. Moving to `closed` requires one explicit `program-closure-approval` record bound to both exact digests.
+
+New-model preparation creates or adopts the canonical reconciliation, then the packet, and replaces status last. Exact partial prefixes are retryable. Changed files, unsafe paths, nonfinal allocation, stale accepted product bytes, or divergent prefixes are preserved and require typed recovery. The exact closure prompt appends or adopts the closure approval and replaces status with `closed` last. Replaying that prompt can only recover or report the same closure; it cannot authorize a commit or any consequential action.
 
 ## Decide a Later Action
 
@@ -71,7 +73,7 @@ The pure router only reports eligibility and returns an exact request-consumptio
 Run focused validation without bytecode output:
 
 ```bash
-rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_continuity_closure tests.test_state_authority -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_continuity_closure tests.test_program_closure tests.test_state_authority -v
 rtk env PYTHONDONTWRITEBYTECODE=1 python3 skills/implementing-staged-plans/scripts/continuity_closure.py validate-bundle <evidence.json> --brief <brief.md> --handoff <handoff.md>
 ```
 

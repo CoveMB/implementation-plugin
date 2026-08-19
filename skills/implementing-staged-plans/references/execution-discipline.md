@@ -1,10 +1,12 @@
 # Execution Discipline
 
-Use this procedure only after the current repository, program, workspace, exact-file plan, approval, and action authorization have been revalidated. The mechanical boundary is [`execution_discipline.py`](../scripts/execution_discipline.py). It validates caller-supplied evidence and decisions; it does not modify files, persist lifecycle state, stage paths, create commits, call a provider, or recover external state.
+Use this procedure only after the current repository, program, workspace, exact-file plan, execution baseline, and action authorization have been revalidated. Require an exact plan-approval event only when the persisted mode and status contract requires it. The mechanical boundary is [`execution_discipline.py`](../scripts/execution_discipline.py). It validates caller-supplied evidence and decisions; it does not modify files, persist lifecycle state, stage paths, create commits, call a provider, or recover external state.
 
 ## Prerequisites and bindings
 
-Load the manifest-owned current status, brief, preparation, exact-file plan, approvals, action authorizations, and workspace. Inspect the repository again immediately before the first production write. Require the selected branch, base, head, dirty inventory, operation state, source, program, semantic digest, plan digest, approval event, and authorized action scope to match. Stop on drift, overlap, ambiguity, a missing gate, or an action outside the bound file map.
+Load the manifest-owned current status, brief, preparation, exact-file plan, execution baseline, approvals, action authorizations, and workspace. Inspect the repository again immediately before the first production write. Standard mode requires the prompt-bound exact-plan approval event. Pre-approve and full-increment modes require the status-current increment grant, validated exact plan, execution baseline, and exact plan-bound action authorization without inventing a plan-approval event. In every mode require the selected branch, base, head, source, program, semantic digest, plan digest, baseline, and authorized action scope to match.
+
+Before the execution baseline exists, repository dirt must equal the normalized launch observation. After it exists, validate product paths by disposition and lifecycle state: `authorized` permits no product delta; `implementing` permits any subset of declared Create and Modify work; `reviewing` and later require every declared Create path to exist and every declared Modify path to differ from its baseline while Preserve remains byte-identical. Reject new staged, conflicted, unmapped, deleted, unsafe, or changed user-owned paths.
 
 ## Meaningful test-first evidence
 
@@ -20,7 +22,7 @@ Reuse accepted preparation validators instead of copying their ownership or over
 
 ## Semantic-surface coverage
 
-Inventory every created or renamed path, symbol, command, test or fixture, heading, schema or identifier, and generated path exactly once. Delegate contextual naming and compatibility decisions to repository preparation. Reject coordinate-shaped planning names unless a specific implementation-governance artifact or durable domain concept owns them. Existing public, persisted, generated, or external names require an explicit compatibility or migration disposition.
+Inventory every created or renamed symbol, command, test or fixture, heading, schema or identifier, and every created or generated path exactly once. Delegate contextual naming and compatibility decisions to repository preparation. A physical path rename is unsupported because Create/Modify/Preserve has no deletion or typed old/new migration disposition; it requires a future approved migration contract. Reject coordinate-shaped planning names unless a specific implementation-governance artifact or durable domain concept owns them. Existing public, persisted, generated, or external names require an explicit compatibility or migration disposition.
 
 ## Bounded approach autonomy
 

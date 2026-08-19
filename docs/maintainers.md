@@ -84,6 +84,18 @@ Validate the plugin's own package contract:
 PYTHONDONTWRITEBYTECODE=1 python3 skills/implementing-staged-plans/scripts/validate_package.py .
 ```
 
+To compare a caller-selected installed copy without discovering, installing, or
+repairing anything, supply its exact root explicitly:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 skills/implementing-staged-plans/scripts/validate_package.py . --compare-installed /absolute/path/to/installed/implementation-plugin
+```
+
+The parity inventory is deliberately limited to `.codex-plugin/plugin.json`
+and regular files under `skills/implementing-staged-plans/`. Repository docs,
+tests, plans, Git metadata, caches, runtime state, and `.claude-plugin/` are not
+installed-copy parity owners.
+
 Then run the complete unit-test suite once on the coherent tree:
 
 ```bash

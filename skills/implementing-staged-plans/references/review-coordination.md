@@ -2,7 +2,7 @@
 
 Use this procedure only after the current source, approved program, workspace, exact-file plan, and separate review/write authorization validate. Freeze the proposed logical diff before opening review and preserve every accepted or user-owned path outside the plan.
 
-The mechanical boundary is [`review_coordination.py`](../scripts/review_coordination.py). Its validators are deterministic and non-mutating. They validate supplied evidence; they do not establish reviewer identity, independence, expertise, or review quality.
+The evidence validator is [`review_coordination.py`](../scripts/review_coordination.py). The production writer is [`program_review.py`](../scripts/program_review.py). It derives the status-current evidence and packet paths only from immutable increment storage, resolves the three raw report paths only from the exact plan, validates the full bundle in memory, and then persists evidence → packet → `verified` status → `awaiting-diff-approval` status. It never accepts caller-selected evidence or packet paths. These mechanisms do not establish reviewer identity, independence, expertise, or review quality.
 
 ## Required and risk-triggered scopes
 
@@ -12,7 +12,7 @@ Classify every canonical risk predicate from the actual frozen diff. Add only th
 
 ## Raw report preservation
 
-Write each initial raw report before reconciliation. Record its regular path, digest, persistence time, scope, reviewer role, assurance status, and finding identifiers. Reconciliation and follow-up evidence belong in later records; never rewrite an initial report to hide a finding.
+Write each initial raw report before reconciliation at its exact-plan-declared path. The raw report binds the current program and increment and records its persistence time, scope, reviewer role, assurance status, and findings. The production writer independently derives its path and digest, rejects a missing, symlinked, unsafe, undeclared, stale, or replayed report, and never rewrites it.
 
 ## Truthful independence
 
@@ -20,7 +20,7 @@ Label controller self-review as non-independent with reduced assurance. Never in
 
 ## Contextual semantic naming
 
-Review every created or renamed path, symbol, command, test or fixture, heading, schema or identifier, and generated path in its implementation context. Record the surface kind, stable context, intention, compatibility disposition, and any finding. A planning coordinate is allowed only when it has a specific implementation-governance or durable-domain basis and named owner.
+Review every created or generated path and every created or renamed symbol, command, test or fixture, heading, schema or identifier in its implementation context. Physical path renames require a separate typed migration contract and are unsupported here. Record the surface kind, stable context, intention, compatibility disposition, and any finding. A planning coordinate is allowed only when it has a specific implementation-governance or durable-domain basis and named owner.
 
 ## Material findings
 
@@ -28,7 +28,7 @@ Classify only evidence-supported defects as material. Every material finding nee
 
 ## Remediation and renewed review
 
-Reconcile only after all initial reports are persisted. For each repaired material finding, capture one focused cycle: intended regression failure, observed failure, smallest repair, successful affected verification, and a renewed report for the affected scope. Preserve the initial report. Stop for a program amendment if repair changes approved requirements, acceptance, public behavior, protected contracts, risk posture, data ownership, dependencies, sequencing, or review cadence.
+Reconcile only after all initial reports are persisted. An open material finding enters the typed `reviewing -> remediating` transaction: status records the initial candidate digest, reports, findings, raw-report digests, and exact unresolved finding IDs before repair begins. For each repaired material finding, capture one focused cycle: intended regression failure, observed failure, smallest repair, successful affected verification, and a renewed report for the affected scope that names the initial finding ID. Preserve the initial report and every initial finding field; reconciliation changes only the disposition from `open` to `repaired`. The writer accepts `remediating -> reviewing` only when every initially unresolved finding has exactly one repaired follow-up, then binds both the retained remediation-history digest and repaired product delta for fresh final verification. Later states revalidate that history binding. A question or discussion does not close a finding or advance state. Stop for a program amendment if repair changes approved requirements, acceptance, public behavior, protected contracts, risk posture, data ownership, dependencies, sequencing, or review cadence.
 
 ## Fresh final verification
 
@@ -38,11 +38,11 @@ Final verification must complete after all repairs and reconciled reviews. Recor
 
 Build packet data from the reconciled structured evidence and render it deterministically. The packet must include identity and outcome; changes and rationale; program context; files by purpose; human review order; requirements and acceptance; exact commands and results; baseline failures; execution evidence; reviewer roles, findings, and dispositions; repairs and renewed verification; deviations and amendments; human judgment; edge cases and manual checks; implications; residual risks and deferred work; recovery; workspace and logical boundaries; and current state and next action.
 
-Require byte equality between the deterministic rendering and the persisted packet. A command-only packet is incomplete.
+Require byte equality between the deterministic rendering and the persisted packet. Evidence and packet use no-overwrite creation; retry adopts only exact bytes. Discovery reconstructs the candidate from the controlling reviewing or verified status and returns `review-preparation-recovery-required` for any divergent prefix. A command-only packet is incomplete.
 
 ## Lifecycle and authority boundary
 
-Review authorization does not authorize staging, a commit, diff acceptance, another increment, publication, deployment, migration, provider mutation, or other consequential action. Logical commit boundaries remain planning evidence until a separate exact commit grant exists. Apply lifecycle transitions only through accepted state authority and stop at the mode's required diff-approval boundary.
+Review authorization does not authorize staging, a commit, diff acceptance, another increment, publication, deployment, migration, provider mutation, or other consequential action. Logical commit boundaries remain planning evidence until a separate exact commit grant exists. The complete review sequence is `reviewing -> remediating -> reviewing -> verified -> awaiting-diff-approval` when material findings are open; without open findings it is `reviewing -> verified -> awaiting-diff-approval`. These edges are accepted only through their typed writer contexts; the generic transition sink fails before status persistence. Stop at `awaiting-diff-approval` for the direct user disposition.
 
 ## Validation commands
 

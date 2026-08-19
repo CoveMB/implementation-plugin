@@ -71,6 +71,14 @@ A new source or program revision receives new immutable paths and digests. Its t
 
 Never mutate a prior source, program, approval, accepted packet, or evidence record. A prior approval is stale for a changed source digest, program digest, semantic-requirements digest, or revision.
 
+## Publish before approval
+
+A new `implementation-program-manifest/v2` proposal is complete but unapproved. Its immutable manifest owns regular non-symlink paths for approvals, action authorizations, increment grants, rollovers, block resolutions, workspace, and status. It also owns `implementation-increment-storage/v1` and `implementation-closure-storage/v1` descriptors. The rollover and block-resolution ledgers begin empty, closure files remain absent until a final increment allocates them, and the manifest contains neither mutable `program_status` nor legacy `current_increment` data.
+
+Proposal validation requires complete source, program, and traceability bindings; empty authority ledgers; the unapproved workspace proposal; and sequence-zero `awaiting-program-approval` / `not-started` status. A reserved future approval identifier is not approval. Approved validation adds the exact event requirement below. Unknown validation modes fail closed.
+
+The closure resolver derives reconciliation and packet paths only from the immutable descriptor. It rejects missing or extra descriptor keys, absolute or escaping roots, separators in filenames, duplicate paths, symlinked ancestors, and non-regular existing entries. Legacy manifests continue to use their accepted closure logical roles.
+
 ## Bind initial program approval
 
 Before implementation, require one explicit approved event that exactly binds:
@@ -90,6 +98,8 @@ From the repository root, run:
 ```bash
 python3 skills/implementing-staged-plans/scripts/program_authority.py validate-program path/to/program-root
 ```
+
+Production callers select proposal or approved validation explicitly. The CLI remains approved validation by default.
 
 Use `--allow-incomplete` only during authorized preparation before human acceptance. It continues to enforce path, source, program, partition, atomic-record, and prior-evidence integrity while explicitly withholding final completeness and approval claims.
 

@@ -14,6 +14,10 @@ READER_DOCUMENTS = (
     Path("docs/troubleshooting.md"),
     Path("docs/maintainers.md"),
 )
+PLAN_A_GUIDES = (
+    Path("implementing-staged-plans-consolidated-design-plan-final.md"),
+    Path("implementing-staged-plans-bootstrap-execution-review-runbook.md"),
+)
 CODEX_MANIFEST = Path(".codex-plugin/plugin.json")
 CODEX_MARKETPLACE = Path(".agents/plugins/marketplace.json")
 CLAUDE_MANIFEST = Path(".claude-plugin/plugin.json")
@@ -43,11 +47,14 @@ class DistributionMetadataTests(unittest.TestCase):
         claude_marketplace = load_json(CLAUDE_MARKETPLACE)
 
         self.assertEqual(codex_manifest["name"], "implementation-plugin")
-        self.assertEqual(codex_manifest["version"], "0.1.0")
+        self.assertEqual(codex_manifest["version"], "0.1.1")
         self.assertEqual(codex_manifest["skills"], "./skills/")
         self.assertEqual(claude_manifest["name"], codex_manifest["name"])
         self.assertEqual(claude_manifest["version"], codex_manifest["version"])
         self.assertEqual(claude_manifest["skills"], codex_manifest["skills"])
+        self.assertEqual(
+            claude_manifest["description"], codex_manifest["description"]
+        )
         self.assertEqual(
             codex_marketplace["name"], "implementation-workflows"
         )
@@ -61,6 +68,14 @@ class DistributionMetadataTests(unittest.TestCase):
         self.assertEqual(
             claude_marketplace["plugins"][0]["name"],
             "implementation-plugin",
+        )
+        self.assertEqual(
+            claude_marketplace["plugins"][0]["version"],
+            codex_manifest["version"],
+        )
+        self.assertEqual(
+            claude_marketplace["plugins"][0]["description"],
+            codex_manifest["description"],
         )
 
 
@@ -147,7 +162,7 @@ class ReaderDocumentationTests(unittest.TestCase):
         for required_text in (
             "Claude Code in VS Code",
             "/plugins",
-            "claude --plugin-dir /absolute/path/to/implementation-plugin-0.1.0.zip",
+            "claude --plugin-dir /absolute/path/to/implementation-plugin-0.1.1.zip",
             "```powershell",
             "if (Test-Path $skillDestination)",
             'throw "Destination already exists: $skillDestination"',
@@ -161,6 +176,45 @@ class ReaderDocumentationTests(unittest.TestCase):
             installation.count("if (Test-Path $skillDestination)"),
             4,
         )
+
+    def test_plan_a_reader_routes_are_truthful_and_deferred_operations_are_named(self) -> None:
+        documents = {
+            path: reader_text(path)
+            for path in (
+                Path("docs/workflows.md"),
+                Path("docs/reference.md"),
+                Path("docs/troubleshooting.md"),
+                *PLAN_A_GUIDES,
+            )
+        }
+        combined = "\n".join(documents.values())
+        for required in (
+            "Create a New Program",
+            "Activate a Generated Program",
+            "Before Production Modification",
+            "Prepare Review and Diff Disposition",
+            "Close a Final Program",
+            "accept-stop",
+            "implementation-closure-storage/v1",
+            "legacy-rollover-upgrade-required",
+            "blocked-transaction-required",
+            "program-revision-workflow-required",
+            "unsupported-program-mutation",
+        ):
+            self.assertIn(required, combined)
+        self.assertNotIn("Accept an increment and authorize the next increment", combined)
+        self.assertNotIn("execute `INC-001` under `approval:full-increment`", combined)
+        continuity = reader_text(
+            Path("skills/implementing-staged-plans/references/continuity-closure.md")
+        )
+        self.assertNotIn("## Apply an Authorized Rollover", continuity)
+        self.assertIn("legacy-rollover-upgrade-required", continuity)
+        for path, text in documents.items():
+            with self.subTest(path=path):
+                self.assertNotRegex(
+                    text.lower(),
+                    r"(?:handoff|retrieved prompt|assistant-quoted prompt).*authoriz(?:e|es) mutation",
+                )
 
 
 if __name__ == "__main__":

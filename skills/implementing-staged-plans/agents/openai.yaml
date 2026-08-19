@@ -1,7 +1,7 @@
 interface:
   display_name: "Implementing Staged Plans"
-  short_description: "Advance approved plans in reviewable increments."
-  default_prompt: "Use $implementing-staged-plans to advance the next approved implementation increment."
+  short_description: "Create, activate, or continue implementation programs."
+  default_prompt: "Use $implementing-staged-plans to create, activate, or continue a repository-backed implementation program."
 
 policy:
   allow_implicit_invocation: false

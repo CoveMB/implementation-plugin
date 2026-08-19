@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
+import os
 import re
 import sys
 from collections.abc import Sequence
@@ -11,6 +14,10 @@ from pathlib import Path
 
 
 PLUGIN_MANIFEST = Path(".codex-plugin/plugin.json")
+CLAUDE_MANIFEST = Path(".claude-plugin/plugin.json")
+CLAUDE_MARKETPLACE = Path(".claude-plugin/marketplace.json")
+PACKAGE_CONTENT_ROOT = Path("skills/implementing-staged-plans")
+PACKAGE_VERSION = "0.1.1"
 SKILL_MARKDOWN = Path("skills/implementing-staged-plans/SKILL.md")
 OPENAI_METADATA = Path("skills/implementing-staged-plans/agents/openai.yaml")
 PROGRAM_AUTHORITY_REFERENCE = Path(
@@ -61,10 +68,22 @@ PROGRAM_DISCOVERY_REFERENCE = Path(
 PROGRAM_DISCOVERY_SCRIPT = Path(
     "skills/implementing-staged-plans/scripts/program_discovery.py"
 )
+PLAN_A_PRODUCTION_SCRIPTS = tuple(
+    Path(f"skills/implementing-staged-plans/scripts/{name}.py")
+    for name in (
+        "program_bootstrap",
+        "program_launch",
+        "program_activation",
+        "task_prompt",
+        "program_review",
+        "diff_disposition",
+        "program_closure",
+    )
+)
 
 EXPECTED_MANIFEST: dict[str, object] = {
     "name": "implementation-plugin",
-    "version": "0.1.0",
+    "version": PACKAGE_VERSION,
     "description": "Run approved implementation programs one reviewable increment at a time.",
     "skills": "./skills/",
 }
@@ -132,6 +151,128 @@ def validate_plugin_manifest(repository_root: Path) -> list[str]:
                 f"{expected_value!r}"
             )
     return issues
+
+
+def validate_distribution_identity(repository_root: Path) -> list[str]:
+    """Require the same package identity across all three version owners."""
+    issues: list[str] = []
+    codex, codex_issues = load_json_object(repository_root / PLUGIN_MANIFEST)
+    claude, claude_issues = load_json_object(repository_root / CLAUDE_MANIFEST)
+    marketplace, marketplace_issues = load_json_object(
+        repository_root / CLAUDE_MARKETPLACE
+    )
+    issues.extend((*codex_issues, *claude_issues, *marketplace_issues))
+    if codex is None or claude is None or marketplace is None:
+        return issues
+    expected_identity = {
+        "name": EXPECTED_MANIFEST["name"],
+        "version": PACKAGE_VERSION,
+        "description": EXPECTED_MANIFEST["description"],
+    }
+    for path, value in ((PLUGIN_MANIFEST, codex), (CLAUDE_MANIFEST, claude)):
+        for field, expected in expected_identity.items():
+            if value.get(field) != expected:
+                issues.append(
+                    f"{path.as_posix()} field {field} must equal {expected!r}"
+                )
+    plugins = marketplace.get("plugins")
+    if not isinstance(plugins, list) or len(plugins) != 1 or not isinstance(
+        plugins[0], dict
+    ):
+        issues.append(
+            f"{CLAUDE_MARKETPLACE.as_posix()} must contain exactly one plugin object"
+        )
+    else:
+        plugin = plugins[0]
+        for field, expected in expected_identity.items():
+            if plugin.get(field) != expected:
+                issues.append(
+                    f"{CLAUDE_MARKETPLACE.as_posix()} plugin {field} must equal {expected!r}"
+                )
+    return issues
+
+
+def _package_file_inventory(root: Path) -> tuple[dict[str, str], list[str]]:
+    digests: dict[str, str] = {}
+    issues: list[str] = []
+
+    def add_file(path: Path, relative: Path) -> None:
+        if path.is_symlink():
+            issues.append(f"{relative.as_posix()}: symlink is not allowed")
+        elif not path.is_file():
+            issues.append(f"{relative.as_posix()}: missing or non-regular file")
+        else:
+            try:
+                digests[relative.as_posix()] = hashlib.sha256(
+                    path.read_bytes()
+                ).hexdigest()
+            except OSError as error:
+                issues.append(f"{relative.as_posix()}: could not be read: {error}")
+
+    add_file(root / PLUGIN_MANIFEST, PLUGIN_MANIFEST)
+    skill_root = root / PACKAGE_CONTENT_ROOT
+    if skill_root.is_symlink() or not skill_root.is_dir():
+        issues.append(
+            f"{PACKAGE_CONTENT_ROOT.as_posix()}: missing, symlink, or non-directory"
+        )
+    else:
+        stack = [skill_root]
+        while stack:
+            directory = stack.pop()
+            try:
+                entries = sorted(os.scandir(directory), key=lambda entry: entry.name)
+            except OSError as error:
+                issues.append(
+                    f"{directory.relative_to(root).as_posix()}: "
+                    f"could not be scanned: {error}"
+                )
+                continue
+            child_directories: list[Path] = []
+            for entry in entries:
+                path = Path(entry.path)
+                relative = path.relative_to(root)
+                if entry.is_symlink():
+                    issues.append(f"{relative.as_posix()}: symlink is not allowed")
+                elif entry.is_file(follow_symlinks=False):
+                    add_file(path, relative)
+                elif entry.is_dir(follow_symlinks=False):
+                    child_directories.append(path)
+                else:
+                    issues.append(f"{relative.as_posix()}: non-regular entry")
+            stack.extend(reversed(child_directories))
+    return dict(sorted(digests.items())), issues
+
+
+def package_file_digests(root: Path) -> dict[str, str]:
+    """Return the deterministic package-content digest inventory."""
+    digests, issues = _package_file_inventory(Path(root))
+    if issues:
+        raise ValueError("; ".join(sorted(issues)))
+    return digests
+
+
+def validate_installed_copy(source_root: Path, installed_root: Path) -> list[str]:
+    """Compare only an explicitly supplied installed package path, read-only."""
+    source, source_issues = _package_file_inventory(Path(source_root))
+    installed, installed_issues = _package_file_inventory(Path(installed_root))
+    issues = [f"source {issue}" for issue in source_issues]
+    issues.extend(f"installed {issue}" for issue in installed_issues)
+    source_paths = set(source)
+    installed_paths = set(installed)
+    issues.extend(
+        f"installed package missing {path}"
+        for path in sorted(source_paths.difference(installed_paths))
+    )
+    issues.extend(
+        f"installed package has unexpected {path}"
+        for path in sorted(installed_paths.difference(source_paths))
+    )
+    issues.extend(
+        f"installed package changed {path}"
+        for path in sorted(source_paths.intersection(installed_paths))
+        if source[path] != installed[path]
+    )
+    return sorted(set(issues))
 
 
 def parse_skill_frontmatter(
@@ -372,6 +513,7 @@ def validate_authority_assets(repository_root: Path) -> list[str]:
         APPROVAL_CHECKPOINT_SCRIPT,
         PROGRAM_DISCOVERY_REFERENCE,
         PROGRAM_DISCOVERY_SCRIPT,
+        *PLAN_A_PRODUCTION_SCRIPTS,
     ):
         path = repository_root / relative_path
         if not path.is_file() or path.is_symlink():
@@ -385,6 +527,7 @@ def validate_package(repository_root: Path) -> list[str]:
     """Return all deterministic package validation issues."""
     issues = [
         *validate_plugin_manifest(repository_root),
+        *validate_distribution_identity(repository_root),
         *validate_skill_contract(repository_root),
         *validate_authority_assets(repository_root),
         *validate_markdown_links(repository_root),
@@ -395,13 +538,22 @@ def validate_package(repository_root: Path) -> list[str]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run package validation and return the documented CLI status."""
-    arguments = list(sys.argv[1:] if argv is None else argv)
-    if len(arguments) > 1:
-        print("usage: validate_package.py [repository-root]")
-        return 1
-
-    repository_root = Path(arguments[0] if arguments else ".").resolve()
+    parser = argparse.ArgumentParser(prog="validate_package.py")
+    parser.add_argument("repository_root", nargs="?", default=".")
+    parser.add_argument("--compare-installed")
+    try:
+        arguments = parser.parse_args(list(sys.argv[1:] if argv is None else argv))
+    except SystemExit as error:
+        return 0 if error.code == 0 else 1
+    repository_root = Path(arguments.repository_root).resolve()
     issues = validate_package(repository_root)
+    if arguments.compare_installed is not None:
+        issues.extend(
+            validate_installed_copy(
+                repository_root, Path(arguments.compare_installed).resolve()
+            )
+        )
+        issues = sorted(set(issues))
     if issues:
         for issue in issues:
             print(issue)

@@ -36,6 +36,13 @@ The current implementation plan for one increment, including the files and
 behavior expected to change. It is bound to the current program, workspace, and
 repository observation rather than acting as a timeless checklist.
 
+### Execution baseline
+
+The immutable pre-product-change snapshot of the exact plan, repository
+observation, path dispositions, and preserved user work. New-program status
+cannot become authorized until this baseline and its plan-bound action
+authorization are durable.
+
 ### Workspace binding
 
 The approved writable repository path, branch, base, current head, and recorded
@@ -76,35 +83,44 @@ reconciliation succeeds.
 
 ## Lifecycle at a glance
 
-At the program level, work moves from captured source and program approval to an
-active program, then to reconciliation, closure approval, and closed state.
+The implemented Plan A order is: **Create a New Program**, **Activate a
+Generated Program**, **Before Production Modification**, **Prepare Review and
+Diff Disposition**, then **Close a Final Program**. Creation publishes only the
+proposal control plane. Activation uses one exact prompt and separate typed
+receipts. Planning persists the execution baseline before product work. Review
+uses a typed preparation transaction. The only Plan A diff disposition is
+`accept-stop`. A final program derives its closure files from
+`implementation-closure-storage/v1` and closes only after another exact prompt.
 
-Within an active program, an increment is prepared, planned, authorized,
-implemented, reviewed, remediated when necessary, verified, and accepted. A
-change request returns it to preparation. A blocked or superseded state cannot
-be bypassed by changing the wording of a prompt.
+Every typed transaction writes controlling status last and adopts only
+byte-identical prefixes. A divergent prefix stops for recovery without cleanup.
 
 The skill always revalidates current repository facts and controlling records
 before relying on an earlier state.
 
 ## Approval modes
 
-Approval modes control routine pauses, who accepts a verified diff, and whether
-the workflow may continue to another increment. They do not grant action
-authority.
+Approval modes define policy, but the 0.1.1 Plan A persistence surface supports
+only first-increment `accept-stop`; successor continuation remains deferred.
+Modes do not grant action authority.
 
 | Mode | Scope | Routine plan pause | Diff acceptance | Continuation and mandatory stop |
 | --- | --- | --- | --- | --- |
 | `approval:standard` | One increment | Yes | User | Stops for plan approval, user-owned material decisions, contradictions, hard stops, and diff acceptance |
 | `approval:pre-approve` | One increment | No | User | Stops for user-owned decisions, program amendments, contradictions, hard stops, and diff acceptance |
 | `approval:full-increment` | One increment | No | User | Runs through verification, then stops for diff acceptance unless a hard stop occurs |
-| `approval:full-diff` | One increment | No | Automatic only after verification and a valid bound packet | Stops after accepting that one diff; it cannot begin the next increment |
-| `approval:full` | Multiple increments within one suitable conversation | No | Automatic only after verification and a valid bound packet | May continue in the same suitable conversation; stops at hard stops, program closure, later-action gates, or a new conversation requiring renewed authority |
+| `approval:full-diff` | Legacy current increment | No | Legacy policy permits automatic acceptance only after verification and a valid bound packet | Cannot begin another increment |
+| `approval:full` | Legacy current increment | No | Legacy policy permits automatic acceptance only after verification and a valid bound packet | Cannot begin another increment; discovery stops at `legacy-rollover-upgrade-required` |
 
-When new state omits a mode, the default is `approval:standard`. Persisted state
-with a missing or unknown mode is invalid and is not silently defaulted. An
-explicit user-requested gate always remains in force, even if the selected mode
-would normally omit that pause.
+New-program proposal construction, bootstrap, and launch reject
+`approval:full-diff` and `approval:full` before every write. Those modes are
+dual-read compatibility for already persisted legacy programs only.
+
+When a direct creation request omits a mode, proposal construction defaults to
+`approval:full-increment` before producing any bytes. The selected mode is then
+persisted explicitly. Persisted state with a missing or unknown mode is invalid
+and is not silently defaulted. An explicit user-requested gate always remains in
+force, even if the selected mode would normally omit that pause.
 
 ## Three different kinds of permission
 
@@ -137,6 +153,12 @@ The workflow stops instead of guessing when it finds:
 - missing, expired, revoked, rejected, ambiguous, or mismatched authority;
 - a user-owned decision or program amendment required by the selected mode; or
 - a requested Git, publication, provider, or external action outside the grant.
+
+The implemented deferred-operation stops are
+`legacy-rollover-upgrade-required`, `blocked-transaction-required`,
+`program-revision-workflow-required`, and `unsupported-program-mutation`.
+Accepted legacy programs and historical terminal records remain readable, but
+those read paths do not reactivate a mutation sink.
 
 The result should name the failed invariant and return the smallest action that
 can resolve it. The workflow does not manufacture replacement state to continue.

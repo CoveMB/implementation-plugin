@@ -1,0 +1,58 @@
+{
+  "inventory": [
+    {
+      "path": "manifest.json",
+      "sha256": "302d36472f6bbf87d3c2b6cd5cf43476318d9a5e8106242261c6ae2d5d6d526a"
+    },
+    {
+      "path": "program/implementation-program.md",
+      "sha256": "3702df1a6c7e863a829dd0e00b78f4116a444fc6ef43b362c5a941b3c0131bc3"
+    },
+    {
+      "path": "program/traceability.json",
+      "sha256": "6e091c96c93c513dd6b3734c29026d3bf9a8b2bbceaa8a29eaacd7e906f3d680"
+    },
+    {
+      "path": "source/implementation-plan.md",
+      "sha256": "2dab0af58f832caef7eea74640dac0c36b3fae60087ba9df83d0522530e79ffb"
+    },
+    {
+      "path": "source/source-metadata.json",
+      "sha256": "aaf5e9549f9567f806eedb6bdcc32856525695f679cede4a631befb895cf6e31"
+    },
+    {
+      "path": "state/action-authorizations.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "state/approvals.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "state/block-resolutions.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "state/increment-grants.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "state/rollovers.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "state/status.json",
+      "sha256": "ef8ccbcdd0d3e7ca2b97dabf58dd4d1075a5cefa9be7cc1bad7f121a9ba0dccb"
+    },
+    {
+      "path": "state/workspace.json",
+      "sha256": "eb530b3d39e8f7bb57803da422d48cf19683b7781bcb5d93f5f66840b0d4fc51"
+    }
+  ],
+  "owner_token": "2729214f78e691d7",
+  "program_id": "ARCHIVE-PROGRAM",
+  "program_revision": 1,
+  "request_sha256": "2729214f78e691d74bde465f42d13ee44f90e8ea0d1f14aa3074af69873cd254",
+  "schema_version": "implementation-proposal-publication-owner/v1",
+  "target": "implementation-programs/ARCHIVE-PROGRAM"
+}

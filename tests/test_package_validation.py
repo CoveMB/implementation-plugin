@@ -1,10 +1,12 @@
 import importlib.util
 import io
 import json
+import os
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -65,11 +67,23 @@ DISCOVERY_REFERENCE = (
 DISCOVERY_SCRIPT = (
     "skills/implementing-staged-plans/scripts/program_discovery.py"
 )
+PLAN_A_SCRIPTS = tuple(
+    f"skills/implementing-staged-plans/scripts/{name}.py"
+    for name in (
+        "program_bootstrap",
+        "program_launch",
+        "program_activation",
+        "task_prompt",
+        "program_review",
+        "diff_disposition",
+        "program_closure",
+    )
+)
 
 
 VALID_MANIFEST = {
     "name": "implementation-plugin",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Run approved implementation programs one reviewable increment at a time.",
     "skills": "./skills/",
 }
@@ -116,6 +130,25 @@ class PackageFixture:
 
     def write_valid_package(self) -> None:
         self.write_json(".codex-plugin/plugin.json", VALID_MANIFEST)
+        self.write_json(
+            ".claude-plugin/plugin.json",
+            {**VALID_MANIFEST, "displayName": "Implementation Plugin", "repository": "https://github.com/CoveMB/implementation-plugin"},
+        )
+        self.write_json(
+            ".claude-plugin/marketplace.json",
+            {
+                "name": "implementation-workflows",
+                "owner": {"name": "CoveMB"},
+                "plugins": [
+                    {
+                        "name": VALID_MANIFEST["name"],
+                        "source": "./",
+                        "description": VALID_MANIFEST["description"],
+                        "version": VALID_MANIFEST["version"],
+                    }
+                ],
+            },
+        )
         self.write("skills/implementing-staged-plans/SKILL.md", VALID_SKILL)
         self.write(
             "skills/implementing-staged-plans/agents/openai.yaml",
@@ -137,6 +170,8 @@ class PackageFixture:
         self.write(CHECKPOINT_SCRIPT, "# compound approval checkpoint helper\n")
         self.write(DISCOVERY_REFERENCE, "# Program Discovery\n")
         self.write(DISCOVERY_SCRIPT, "# deterministic read-only program discovery\n")
+        for script in PLAN_A_SCRIPTS:
+            self.write(script, f"# {Path(script).stem}\n")
 
 
 class PackageValidationTestCase(unittest.TestCase):
@@ -449,6 +484,125 @@ class CompletePackageTests(PackageValidationTestCase):
 
         self.assertEqual(VALIDATOR.validate_package(self.fixture.root), [])
 
+    def test_plan_a_scripts_and_three_manifest_identities_are_required(self) -> None:
+        self.fixture.write_valid_package()
+        for script in PLAN_A_SCRIPTS:
+            with self.subTest(script=script):
+                path = self.fixture.root / script
+                original = path.read_bytes()
+                path.unlink()
+                self.assert_issue_contains(
+                    VALIDATOR.validate_package(self.fixture.root), script
+                )
+                path.write_bytes(original)
+        claude = self.fixture.root / ".claude-plugin/plugin.json"
+        value = json.loads(claude.read_text(encoding="utf-8"))
+        value["version"] = "0.1.0"
+        self.fixture.write_json(".claude-plugin/plugin.json", value)
+        self.assert_issue_contains(
+            VALIDATOR.validate_package(self.fixture.root), "version must equal '0.1.1'"
+        )
+
+    def test_package_digest_inventory_is_sorted_and_excludes_repository_surfaces(self) -> None:
+        self.fixture.write_valid_package()
+        self.fixture.write("docs/private.md", "excluded\n")
+        self.fixture.write("tests/test_private.py", "excluded\n")
+        self.fixture.write(".claude-plugin/private.json", "excluded\n")
+        self.fixture.write("skills/implementing-staged-plans/cache.tmp", "included\n")
+
+        digests = VALIDATOR.package_file_digests(self.fixture.root)
+
+        self.assertEqual(list(digests), sorted(digests))
+        self.assertIn(".codex-plugin/plugin.json", digests)
+        self.assertIn("skills/implementing-staged-plans/cache.tmp", digests)
+        self.assertNotIn("docs/private.md", digests)
+        self.assertNotIn("tests/test_private.py", digests)
+        self.assertNotIn(".claude-plugin/private.json", digests)
+
+    def test_package_digest_inventory_records_an_unreadable_file(self) -> None:
+        self.fixture.write_valid_package()
+        unreadable = self.fixture.root / "skills/implementing-staged-plans/SKILL.md"
+        real_read_bytes = Path.read_bytes
+
+        def read_bytes(path: Path) -> bytes:
+            if path == unreadable:
+                raise OSError("injected read failure")
+            return real_read_bytes(path)
+
+        with mock.patch.object(Path, "read_bytes", autospec=True, side_effect=read_bytes):
+            try:
+                digests, issues = VALIDATOR._package_file_inventory(self.fixture.root)
+            except OSError as error:
+                self.fail(f"package inventory leaked a file read failure: {error}")
+
+        relative = "skills/implementing-staged-plans/SKILL.md"
+        self.assertNotIn(relative, digests)
+        self.assert_issue_contains(issues, f"{relative}: could not be read")
+
+    def test_package_digest_inventory_reports_unscannable_directory_relatively(
+        self,
+    ) -> None:
+        self.fixture.write_valid_package()
+        target = (
+            self.fixture.root
+            / "skills/implementing-staged-plans/scripts"
+        )
+        real_scandir = os.scandir
+
+        def scandir(path):
+            if Path(path) == target:
+                raise OSError("injected scan failure")
+            return real_scandir(path)
+
+        with mock.patch.object(os, "scandir", side_effect=scandir):
+            _digests, issues = VALIDATOR._package_file_inventory(
+                self.fixture.root
+            )
+
+        self.assertIn(
+            "skills/implementing-staged-plans/scripts: could not be scanned: "
+            "injected scan failure",
+            issues,
+        )
+        self.assertFalse(any(str(self.fixture.root) in issue for issue in issues))
+
+    def test_installed_comparison_reports_changed_missing_unexpected_and_symlink(self) -> None:
+        self.fixture.write_valid_package()
+        with tempfile.TemporaryDirectory() as directory:
+            installed = Path(directory)
+            for relative, _digest in VALIDATOR.package_file_digests(
+                self.fixture.root
+            ).items():
+                source = self.fixture.root / relative
+                target = installed / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(source.read_bytes())
+            self.assertEqual(
+                VALIDATOR.validate_installed_copy(self.fixture.root, installed), []
+            )
+            (installed / ".codex-plugin/plugin.json").write_text("changed\n")
+            missing = installed / PLAN_A_SCRIPTS[0]
+            missing.unlink()
+            unexpected = installed / "skills/implementing-staged-plans/unexpected.txt"
+            unexpected.write_text("unexpected\n")
+            linked = installed / PLAN_A_SCRIPTS[1]
+            linked.unlink()
+            linked.symlink_to(unexpected)
+
+            issues = VALIDATOR.validate_installed_copy(self.fixture.root, installed)
+
+            for expected in ("changed", "missing", "unexpected", "symlink"):
+                self.assert_issue_contains(issues, expected)
+
+    def test_ordinary_validation_does_not_look_up_an_installed_copy(self) -> None:
+        self.fixture.write_valid_package()
+        with mock.patch.object(
+            VALIDATOR,
+            "validate_installed_copy",
+            side_effect=AssertionError("installed lookup reached"),
+        ):
+            self.assertEqual(VALIDATOR.validate_package(self.fixture.root), [])
+
     def test_cli_success_and_failure_are_deterministic(self) -> None:
         self.fixture.write_valid_package()
         output = io.StringIO()
@@ -465,6 +619,20 @@ class CompletePackageTests(PackageValidationTestCase):
         issue_lines = output.getvalue().splitlines()
         self.assertGreater(len(issue_lines), 1)
         self.assertEqual(issue_lines, sorted(issue_lines))
+
+    def test_cli_help_preserves_argparse_success_status(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            return_code = VALIDATOR.main(["--help"])
+
+        self.assertEqual(return_code, 0)
+        self.assertIn("usage: validate_package.py", output.getvalue())
+
+        errors = io.StringIO()
+        with redirect_stderr(errors):
+            invalid_return_code = VALIDATOR.main(["--unknown-option"])
+        self.assertEqual(invalid_return_code, 1)
+        self.assertIn("unrecognized arguments", errors.getvalue())
 
 
 if __name__ == "__main__":

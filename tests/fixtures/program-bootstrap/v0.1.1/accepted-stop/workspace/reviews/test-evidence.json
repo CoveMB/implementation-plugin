@@ -1,0 +1,100 @@
+{
+  "alternative_verification": [],
+  "final_verification": {
+    "baseline_failures": [
+      "none"
+    ],
+    "commands": [
+      {
+        "command": "python3 -m unittest tests.test_archive_output",
+        "completed_at": "2026-08-18T11:00:00Z",
+        "exit_code": 0,
+        "expected_result": "exit zero",
+        "relevant_inputs": [
+          "archive-output.txt"
+        ],
+        "result": "archive output test passed"
+      }
+    ],
+    "required_commands": [
+      "python3 -m unittest tests.test_archive_output"
+    ],
+    "verified_at": "2026-08-18T11:05:00Z"
+  },
+  "findings": [],
+  "increment_id": "ARCHIVE-INDEX",
+  "independent": false,
+  "persisted_at": "2026-08-18T10:00:00Z",
+  "prior_conclusions_withheld": false,
+  "program_id": "ARCHIVE-PROGRAM",
+  "program_revision": 1,
+  "reconciled_at": "2026-08-18T10:10:00Z",
+  "recovery_domains": [
+    {
+      "authority_granted": true,
+      "disposition": "recoverable",
+      "domain": "source-code",
+      "limitation": "does not recover external state",
+      "mechanism": "remove exact-plan Create paths; restore exact pre-write bytes for Modify paths",
+      "required_authority": "modify-workspace",
+      "touched": true,
+      "verification": "rerun the bound deterministic test"
+    },
+    {
+      "authority_granted": false,
+      "disposition": "not-touched",
+      "domain": "persistent-data",
+      "limitation": "not exercised",
+      "mechanism": "none",
+      "required_authority": "none",
+      "touched": false,
+      "verification": "confirmed outside the exact plan"
+    },
+    {
+      "authority_granted": false,
+      "disposition": "not-touched",
+      "domain": "deployment",
+      "limitation": "not exercised",
+      "mechanism": "none",
+      "required_authority": "none",
+      "touched": false,
+      "verification": "confirmed outside the exact plan"
+    },
+    {
+      "authority_granted": false,
+      "disposition": "not-touched",
+      "domain": "provider-or-external-state",
+      "limitation": "not exercised",
+      "mechanism": "none",
+      "required_authority": "none",
+      "touched": false,
+      "verification": "confirmed outside the exact plan"
+    }
+  ],
+  "reduced_assurance": true,
+  "remediation_cycles": [],
+  "review_basis": "bounded test-evidence review of the exact current delta",
+  "reviewer_role": "controller-self-review",
+  "schema_version": "implementation-raw-review-report/v1",
+  "scope": "test-evidence",
+  "test_first_evidence": [
+    {
+      "evidence_order": [
+        "red",
+        "green"
+      ],
+      "expected_failure": "archive output was missing",
+      "green_command": "python3 -m unittest tests.test_archive_output",
+      "green_exit_code": 0,
+      "intended_reason_match": true,
+      "observed_before_production_change": true,
+      "observed_failure": "archive output was missing",
+      "observed_green": "archive output test passed",
+      "purpose": "create the archive output",
+      "red_command": "python3 -m unittest tests.test_archive_output",
+      "red_exit_code": 1,
+      "schema_version": "implementation-execution-evidence/v1",
+      "slice_id": "archive-output"
+    }
+  ]
+}

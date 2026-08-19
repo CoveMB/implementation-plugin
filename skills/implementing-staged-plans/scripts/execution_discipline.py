@@ -346,6 +346,8 @@ def validate_execution_surfaces(
             issues.append("execution surface must be non-empty")
         if item.change_kind not in EXECUTION_SURFACE_CHANGES:
             issues.append(f"execution surface {item.surface!r} has unknown change kind")
+        if item.surface_kind == "path" and item.change_kind == "renamed":
+            issues.append(f"physical path rename is unsupported: {item.surface}")
     for name, count in surface_counts.items():
         if count > 1:
             issues.append(f"execution surface {name!r} is duplicated")

@@ -10,6 +10,11 @@ from pathlib import Path
 from unittest import mock
 
 from tests.test_program_authority import ProgramAuthorityFixture
+from tests.program_bootstrap_support import (
+    BootstrapFixture,
+    canonical_json,
+    repository_snapshot,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -170,8 +175,216 @@ class DiscoveryFixture:
         )
         return manifest_path
 
+    def add_new_program(
+        self,
+        name: str,
+        *,
+        program_state: str = "awaiting-program-approval",
+        increment_state: str = "not-started",
+    ) -> Path:
+        bootstrap = BootstrapFixture()
+        program_root = self.repository / "implementation-programs" / name
+        try:
+            shutil.copytree(bootstrap.candidate, program_root)
+        finally:
+            bootstrap.close()
+        manifest_path = program_root / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        workspace_path = program_root / manifest["logical_roles"]["workspace"]
+        workspace = json.loads(workspace_path.read_text(encoding="utf-8"))
+        workspace["repository"] = {"identity": str(self.repository)}
+        workspace["implementation_workspace"] = {
+            "path": str(self.repository),
+            "branch": "archive-maintenance",
+            "base_commit": BASE_COMMIT,
+            "head_commit_at_selection": HEAD_COMMIT,
+        }
+        workspace_path.write_bytes(canonical_json(workspace))
+        status_path = program_root / manifest["logical_roles"]["status"]
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+        status.update(
+            state_sequence=0 if program_state == "awaiting-program-approval" else 1,
+            program_state=program_state,
+            current_increment_state=increment_state,
+        )
+        status_path.write_bytes(canonical_json(status))
+        if program_state != "awaiting-program-approval":
+            traceability = json.loads(
+                (program_root / manifest["logical_roles"]["traceability"]).read_text(
+                    encoding="utf-8"
+                )
+            )
+            approval = {
+                "event_id": "ARCHIVE-APPROVAL",
+                "type": "program-approval",
+                "decision": "approved",
+                "program_id": manifest["program_id"],
+                "program_revision": manifest["program_revision"],
+                "source_id": manifest["source_binding"]["source_id"],
+                "source_sha256": manifest["source_binding"]["sha256"],
+                "program_sha256": manifest["program_binding"]["sha256"],
+                "semantic_requirements_sha256": traceability["coverage_assertion"][
+                    "semantic_requirements_sha256"
+                ],
+                "approval_mode": manifest["approval_mode"],
+            }
+            (program_root / manifest["logical_roles"]["approvals"]).write_text(
+                json.dumps(approval, sort_keys=True) + "\n", encoding="utf-8"
+            )
+        return manifest_path
+
+    def program_approval_record(self, manifest_path: Path) -> dict[str, object]:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        traceability = json.loads(
+            (manifest_path.parent / manifest["logical_roles"]["traceability"]).read_text(
+                encoding="utf-8"
+            )
+        )
+        return {
+            "event_id": "ARCHIVE-APPROVAL",
+            "type": "program-approval",
+            "decision": "approved",
+            "program_id": manifest["program_id"],
+            "program_revision": manifest["program_revision"],
+            "source_id": manifest["source_binding"]["source_id"],
+            "source_sha256": manifest["source_binding"]["sha256"],
+            "program_sha256": manifest["program_binding"]["sha256"],
+            "semantic_requirements_sha256": traceability["coverage_assertion"][
+                "semantic_requirements_sha256"
+            ],
+            "approval_mode": manifest["approval_mode"],
+        }
+
+    def append_record(
+        self, manifest_path: Path, logical_role: str, record: dict[str, object]
+    ) -> None:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        path = manifest_path.parent / manifest["logical_roles"][logical_role]
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(
+                json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n"
+            )
+
+    def activation_transaction(
+        self, manifest_path: Path
+    ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+        prompt = DISCOVERY.render_program_launch_prompt(manifest_path.parent)
+        command = DISCOVERY.validate_submitted_program_launch_prompt(
+            manifest_path.parent, prompt
+        )
+        workspace = command["workspace"]
+        repository = workspace["repository"]
+        selected = workspace["implementation_workspace"]
+        existing = workspace["pre_existing_work_at_selection"]
+        observation = DISCOVERY.RepositoryObservation(
+            repository=repository["identity"],
+            path=selected["path"],
+            branch=selected["branch"],
+            base_commit=selected["base_commit"],
+            head_commit=selected["head_commit_at_selection"],
+            staged_paths=tuple(existing["staged_paths"]),
+            modified_paths=tuple(existing["modified_paths"]),
+            untracked_paths=tuple(existing["untracked_paths"]),
+            conflicted_paths=tuple(existing["conflicted_paths"]),
+            active_git_operation=existing["active_git_operation"],
+        )
+        program, workspace_record, grant, _status = (
+            DISCOVERY.build_activation_transaction(command, prompt, observation)
+        )
+        return program, workspace_record, grant
+
 
 class ProgramDiscoveryTests(unittest.TestCase):
+    def test_publication_recovery_uses_manifest_roles_after_activation_started(self) -> None:
+        fixture = BootstrapFixture()
+        try:
+            manifest_path = fixture.candidate / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            custom_status = "records/custom-status.json"
+            custom_approvals = "records/custom-approvals.jsonl"
+            for role, custom_path in (
+                ("status", custom_status),
+                ("approvals", custom_approvals),
+            ):
+                original = fixture.candidate / manifest["logical_roles"][role]
+                replacement = fixture.candidate / custom_path
+                replacement.parent.mkdir(parents=True, exist_ok=True)
+                original.rename(replacement)
+                manifest["logical_roles"][role] = custom_path
+            manifest_path.write_bytes(canonical_json(manifest))
+
+            inventory = [
+                {
+                    "path": path.relative_to(fixture.candidate).as_posix(),
+                    "sha256": sha256_file(path),
+                }
+                for path in sorted(fixture.candidate.rglob("*"))
+                if path.is_file()
+            ]
+            owner_token = "0" * 16
+            owner_bytes = canonical_json(
+                {
+                    "schema_version": "implementation-proposal-publication-owner/v1",
+                    "owner_token": owner_token,
+                    "program_id": "ARCHIVE-PROGRAM",
+                    "target": "implementation-programs/ARCHIVE-PROGRAM",
+                    "inventory": inventory,
+                }
+            )
+            staging = fixture.repository / (
+                f".implementation-program-ARCHIVE-PROGRAM-{owner_token}"
+            )
+            target = fixture.repository / "implementation-programs/ARCHIVE-PROGRAM"
+            target.parent.mkdir()
+            shutil.copytree(fixture.candidate, staging)
+            shutil.copytree(fixture.candidate, target)
+            (staging / ".publication-owner.json").write_bytes(owner_bytes)
+            (target / ".publication-owner.json").write_bytes(owner_bytes)
+
+            status_path = target / custom_status
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            status["current_increment_state"] = "preparing"
+            status_path.write_bytes(canonical_json(status))
+
+            disposition, issues = DISCOVERY._bootstrap_prefix_disposition(
+                fixture.repository
+            )
+
+            self.assertIsNone(disposition, issues)
+            self.assertEqual(issues, ())
+        finally:
+            fixture.close()
+
+    def test_publication_recovery_rejects_unsafe_program_id_before_target_access(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            owner_token = "0" * 16
+            staging = repository / f".implementation-program-..-{owner_token}"
+            staging.mkdir()
+            (staging / ".publication-owner.json").write_bytes(
+                canonical_json(
+                    {
+                        "schema_version": "implementation-proposal-publication-owner/v1",
+                        "owner_token": owner_token,
+                        "program_id": "..",
+                        "target": "implementation-programs/..",
+                        "inventory": [
+                            {"path": "manifest.json", "sha256": "0" * 64}
+                        ],
+                    }
+                )
+            )
+
+            result = DISCOVERY.discover_programs(repository)
+
+            self.assertEqual(
+                result.disposition, "proposal-publication-recovery-required"
+            )
+            self.assertEqual(
+                result.issues,
+                ("proposal-publication owner receipt is invalid",),
+            )
+
     def test_no_manifest_is_a_possible_bootstrap_requiring_source_plan(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
@@ -530,6 +743,341 @@ class ProgramDiscoveryTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(usage.returncode, 2)
+
+
+class PlanADiscoveryTests(unittest.TestCase):
+    def test_live_revision_supersession_and_cancel_intent_are_quarantined(self) -> None:
+        fixture = DiscoveryFixture()
+        try:
+            fixture.add_new_program(
+                "archive", program_state="active", increment_state="implementing"
+            )
+            discovery = DISCOVERY.discover_programs(fixture.repository)
+            before = repository_snapshot(fixture.repository)
+            expected = {
+                "revise": "program-revision-workflow-required",
+                "supersede": "program-revision-workflow-required",
+                "cancel": "unsupported-program-mutation",
+            }
+            for operation, disposition in expected.items():
+                with self.subTest(operation=operation):
+                    result = DISCOVERY.classify_requested_program_operation(
+                        discovery, operation
+                    )
+                    self.assertEqual(result.disposition, disposition)
+                    self.assertTrue(result.stop_required)
+                    self.assertEqual(repository_snapshot(fixture.repository), before)
+        finally:
+            fixture.close()
+
+    def test_supported_operation_classification_and_terminal_readers_are_unchanged(self) -> None:
+        fixture = DiscoveryFixture()
+        try:
+            fixture.add_new_program(
+                "archive", program_state="superseded", increment_state="superseded"
+            )
+            discovery = DISCOVERY.discover_programs(fixture.repository)
+            for operation in DISCOVERY.SUPPORTED_PROGRAM_OPERATIONS:
+                self.assertIs(
+                    DISCOVERY.classify_requested_program_operation(
+                        discovery, operation
+                    ),
+                    discovery,
+                )
+            self.assertEqual(discovery.disposition, "invalid")
+        finally:
+            fixture.close()
+
+    def test_pristine_proposal_is_activation_ready(self) -> None:
+        fixture = DiscoveryFixture()
+        try:
+            fixture.add_new_program("archive")
+            result = DISCOVERY.discover_programs(fixture.repository)
+            self.assertEqual(result.disposition, "program-activation-ready")
+            self.assertFalse(result.stop_required)
+            self.assertEqual(len(result.candidates), 1)
+        finally:
+            fixture.close()
+
+    def test_exact_activation_prefix_is_retry_ready(self) -> None:
+        fixture = DiscoveryFixture()
+        try:
+            manifest_path = fixture.add_new_program("archive")
+            program, _workspace, _grant = fixture.activation_transaction(manifest_path)
+            fixture.append_record(manifest_path, "approvals", program)
+            result = DISCOVERY.discover_programs(fixture.repository)
+            self.assertEqual(result.disposition, "program-activation-retry-ready")
+            self.assertFalse(result.stop_required)
+        finally:
+            fixture.close()
+
+    def test_each_ordered_activation_receipt_prefix_is_retry_ready(self) -> None:
+        fixture = DiscoveryFixture()
+        try:
+            manifest_path = fixture.add_new_program("archive")
+            program, workspace, grant = fixture.activation_transaction(manifest_path)
+            fixture.append_record(manifest_path, "approvals", program)
+            self.assertEqual(
+                DISCOVERY.discover_programs(fixture.repository).disposition,
+                "program-activation-retry-ready",
+            )
+
+            fixture.append_record(
+                manifest_path,
+                "approvals",
+                workspace,
+            )
+            self.assertEqual(
+                DISCOVERY.discover_programs(fixture.repository).disposition,
+                "program-activation-retry-ready",
+            )
+
+            fixture.append_record(
+                manifest_path,
+                "increment_grants",
+                grant,
+            )
+            self.assertEqual(
+                DISCOVERY.discover_programs(fixture.repository).disposition,
+                "program-activation-retry-ready",
+            )
+        finally:
+            fixture.close()
+
+    def test_out_of_order_or_unrelated_activation_prefix_fails_closed(self) -> None:
+        cases = (
+            (
+                "workspace-before-program",
+                "approvals",
+                {
+                    "event_id": "ARCHIVE-WORKSPACE-APPROVAL",
+                    "type": "workspace-selection-approval",
+                    "decision": "approved",
+                },
+            ),
+            (
+                "grant-before-approvals",
+                "increment_grants",
+                {
+                    "schema_version": "implementation-increment-grant/v1",
+                    "grant_id": "ARCHIVE-FIRST-INCREMENT-GRANT",
+                    "increment_id": "ARCHIVE-INDEX",
+                },
+            ),
+            (
+                "action-before-activation",
+                "action_authorizations",
+                {"authorization_id": "UNRELATED"},
+            ),
+        )
+        for label, role, record in cases:
+            with self.subTest(label=label):
+                fixture = DiscoveryFixture()
+                try:
+                    manifest_path = fixture.add_new_program("archive")
+                    fixture.append_record(manifest_path, role, record)
+                    result = DISCOVERY.discover_programs(fixture.repository)
+                    self.assertEqual(
+                        result.disposition, "program-activation-recovery-required"
+                    )
+                    self.assertTrue(result.stop_required)
+                finally:
+                    fixture.close()
+
+    def test_status_routes_cover_resume_acceptance_closure_and_terminal_history(self) -> None:
+        cases = (
+            ("active", "authorized", None, "plan-preparation-recovery-required"),
+            ("active", "implementing", None, "invalid"),
+            ("active", "reviewing", None, "invalid"),
+            ("active", "verified", None, "review-preparation-recovery-required"),
+            ("active", "awaiting-diff-approval", None, "review-preparation-recovery-required"),
+            (
+                "active",
+                "accepted",
+                {"schema_version": "implementation-diff-disposition-binding/v1", "decision": "accept-stop"},
+                "increment-acceptance-recovery-required",
+            ),
+            ("awaiting-closure-approval", "accepted", None, "invalid"),
+            ("closed", "accepted", None, "invalid"),
+            ("superseded", "superseded", None, "invalid"),
+        )
+        for program_state, increment_state, disposition_binding, expected in cases:
+            with self.subTest(program_state=program_state, increment_state=increment_state):
+                fixture = DiscoveryFixture()
+                try:
+                    manifest_path = fixture.add_new_program(
+                        "archive",
+                        program_state=program_state,
+                        increment_state=increment_state,
+                    )
+                    if disposition_binding is not None:
+                        status_path = manifest_path.parent / "state/status.json"
+                        status = json.loads(status_path.read_text(encoding="utf-8"))
+                        status["diff_disposition_binding"] = disposition_binding
+                        status_path.write_bytes(canonical_json(status))
+                    result = DISCOVERY.discover_programs(fixture.repository)
+                    self.assertEqual(result.disposition, expected, result.issues)
+                finally:
+                    fixture.close()
+
+    def test_transaction_file_and_receipt_prefixes_route_to_exact_retries(self) -> None:
+        cases = (
+            ("preparing", "increment", "exact_file_plan_filename", None, "plan-preparation-recovery-required"),
+            (
+                "awaiting-plan-approval",
+                None,
+                None,
+                ("approvals", {"event_id": "PLAN-APPROVAL", "type": "plan-approval"}),
+                "plan-preparation-recovery-required",
+            ),
+            ("reviewing", "increment", "review_evidence_filename", None, "review-preparation-recovery-required"),
+            (
+                "awaiting-diff-approval",
+                None,
+                None,
+                ("approvals", {"event_id": "DIFF-APPROVAL", "type": "increment-diff-approval"}),
+                "increment-acceptance-recovery-required",
+            ),
+            ("accepted", "closure", "reconciliation_filename", None, "increment-acceptance-recovery-required"),
+        )
+        for increment_state, storage, filename_field, record, expected in cases:
+            with self.subTest(increment_state=increment_state, expected=expected):
+                fixture = DiscoveryFixture()
+                try:
+                    manifest_path = fixture.add_new_program(
+                        "archive", program_state="active", increment_state=increment_state
+                    )
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    if storage == "increment":
+                        descriptor = manifest["increment_storage"]
+                        path = (
+                            manifest_path.parent
+                            / descriptor["root"]
+                            / "ARCHIVE-INDEX"
+                            / descriptor[filename_field]
+                        )
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        if path.suffix == ".json":
+                            path.write_bytes(canonical_json({"schema_version": "prefix/v1"}))
+                        else:
+                            path.write_text("# Exact plan candidate\n", encoding="utf-8")
+                            status_path = manifest_path.parent / manifest["logical_roles"]["status"]
+                            status = json.loads(status_path.read_text(encoding="utf-8"))
+                            status["pending_exact_file_plan_sha256"] = sha256_file(path)
+                            status_path.write_bytes(canonical_json(status))
+                    elif storage == "closure":
+                        descriptor = manifest["closure_storage"]
+                        path = manifest_path.parent / descriptor["root"] / descriptor[filename_field]
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(canonical_json({"schema_version": "prefix/v1"}))
+                    if record is not None:
+                        fixture.append_record(manifest_path, record[0], record[1])
+
+                    result = DISCOVERY.discover_programs(fixture.repository)
+
+                    self.assertEqual(result.disposition, expected, result.issues)
+                    self.assertEqual(
+                        result.stop_required,
+                        expected.endswith("recovery-required"),
+                    )
+                finally:
+                    fixture.close()
+
+    def test_unbound_closure_approval_prefix_is_invalid(self) -> None:
+        fixture = DiscoveryFixture()
+        try:
+            manifest_path = fixture.add_new_program(
+                "archive",
+                program_state="awaiting-closure-approval",
+                increment_state="accepted",
+            )
+            fixture.append_record(
+                manifest_path,
+                "approvals",
+                {"event_id": "CLOSURE-APPROVAL", "type": "program-closure-approval"},
+            )
+
+            result = DISCOVERY.discover_programs(fixture.repository)
+
+            self.assertEqual(result.disposition, "invalid")
+            self.assertTrue(result.stop_required)
+        finally:
+            fixture.close()
+
+    def test_deferred_successor_and_blocked_prefixes_stop_without_writes(self) -> None:
+        cases = (
+            ("state/rollovers.jsonl", '{"rollover_id":"R-1"}\n', "continuation-recovery-required"),
+            ("state/block-resolutions.jsonl", '{"resolution_id":"B-1"}\n', "blocked-recovery-required"),
+        )
+        for relative, payload, expected in cases:
+            with self.subTest(relative=relative):
+                fixture = DiscoveryFixture()
+                try:
+                    manifest_path = fixture.add_new_program(
+                        "archive", program_state="active", increment_state="accepted"
+                    )
+                    path = manifest_path.parent / relative
+                    path.write_text(payload, encoding="utf-8")
+                    before = path.read_bytes()
+                    result = DISCOVERY.discover_programs(fixture.repository)
+                    self.assertEqual(result.disposition, expected)
+                    self.assertTrue(result.stop_required)
+                    self.assertEqual(path.read_bytes(), before)
+                finally:
+                    fixture.close()
+
+    def test_accepted_automatic_legacy_program_stops_at_upgrade_boundary(self) -> None:
+        fixture = DiscoveryFixture()
+        try:
+            manifest_path = fixture.add_program("archive", "active")
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["approval_mode"] = "approval:full"
+            manifest["current_increment"]["state"] = "accepted"
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            status_path = manifest_path.parent / "state/status.json"
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            status["approval_mode"] = "approval:full"
+            status["current_increment_state"] = "accepted"
+            status_path.write_text(
+                json.dumps(status, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            approvals_path = manifest_path.parent / "state/approvals.jsonl"
+            approvals = [
+                json.loads(line)
+                for line in approvals_path.read_text(encoding="utf-8").splitlines()
+            ]
+            for approval in approvals:
+                if approval.get("type") == "program-approval":
+                    approval["approval_mode"] = "approval:full"
+            approvals_path.write_text(
+                "".join(json.dumps(record, sort_keys=True) + "\n" for record in approvals),
+                encoding="utf-8",
+            )
+
+            result = DISCOVERY.discover_programs(
+                fixture.repository,
+                observation_provider=lambda _path, _base: fixture.observation,
+            )
+
+            self.assertEqual(result.disposition, "legacy-rollover-upgrade-required")
+            self.assertTrue(result.stop_required)
+        finally:
+            fixture.close()
+
+    def test_multiple_new_controlling_candidates_require_selection(self) -> None:
+        fixture = DiscoveryFixture()
+        try:
+            fixture.add_new_program("zeta")
+            fixture.add_new_program("alpha")
+            result = DISCOVERY.discover_programs(fixture.repository)
+            self.assertEqual(result.disposition, "selection-required")
+            self.assertTrue(result.stop_required)
+        finally:
+            fixture.close()
 
 
 if __name__ == "__main__":

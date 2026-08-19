@@ -2,12 +2,14 @@ import copy
 import hashlib
 import importlib.util
 import json
+import shutil
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.program_bootstrap_support import BootstrapFixture, repository_snapshot
 from tests.test_state_authority import StateAuthorityFixture, write_json_lines
 
 
@@ -715,6 +717,87 @@ class OrderedPersistenceTests(unittest.TestCase):
         self.assertFalse(recovered.requires_retry)
         self.assertEqual(len(self.fixture.approvals()), 2)
         self.assertEqual(len(self.fixture.authorizations()), 1)
+
+
+class ManagedPlanPreflightTests(unittest.TestCase):
+    def test_every_required_lifecycle_path_must_have_its_exact_disposition(self) -> None:
+        fixture = BootstrapFixture()
+        try:
+            program_root = fixture.repository / "implementation-programs/ARCHIVE-PROGRAM"
+            program_root.parent.mkdir()
+            shutil.copytree(fixture.candidate, program_root)
+            required = CHECKPOINT.required_future_lifecycle_writes(
+                program_root, fixture.repository, "ARCHIVE-INDEX"
+            )
+            paths = {
+                "Create": [
+                    item.path for item in required if item.disposition == "Create"
+                ],
+                "Modify": [
+                    item.path for item in required if item.disposition == "Modify"
+                ],
+                "Preserve": ["catalog.txt"],
+            }
+            plan_path = fixture.root / "exact-plan.md"
+
+            def write_map(candidate: dict[str, list[str]]) -> None:
+                lines = ["# Exact plan", "", "## File map", ""]
+                for disposition in ("Create", "Modify", "Preserve"):
+                    lines.extend(
+                        [
+                            f"### {disposition}",
+                            "",
+                            *[f"- `{path}`" for path in candidate[disposition]],
+                            "",
+                        ]
+                    )
+                plan_path.write_text("\n".join(lines), encoding="utf-8")
+
+            write_map(paths)
+            self.assertEqual(
+                CHECKPOINT.validate_plan_managed_writes(
+                    program_root,
+                    plan_path,
+                    fixture.repository,
+                    "ARCHIVE-INDEX",
+                ),
+                [],
+            )
+            before = repository_snapshot(program_root)
+            for requirement in required:
+                with self.subTest(path=requirement.path, case="missing"):
+                    candidate = copy.deepcopy(paths)
+                    candidate[requirement.disposition].remove(requirement.path)
+                    write_map(candidate)
+                    self.assertTrue(
+                        CHECKPOINT.validate_plan_managed_writes(
+                            program_root,
+                            plan_path,
+                            fixture.repository,
+                            "ARCHIVE-INDEX",
+                        )
+                    )
+                with self.subTest(path=requirement.path, case="misclassified"):
+                    candidate = copy.deepcopy(paths)
+                    candidate[requirement.disposition].remove(requirement.path)
+                    wrong = (
+                        "Modify"
+                        if requirement.disposition == "Create"
+                        else "Create"
+                    )
+                    candidate[wrong].append(requirement.path)
+                    write_map(candidate)
+                    self.assertTrue(
+                        CHECKPOINT.validate_plan_managed_writes(
+                            program_root,
+                            plan_path,
+                            fixture.repository,
+                            "ARCHIVE-INDEX",
+                        )
+                    )
+            self.assertEqual(repository_snapshot(program_root), before)
+        finally:
+            fixture.close()
 
 
 if __name__ == "__main__":

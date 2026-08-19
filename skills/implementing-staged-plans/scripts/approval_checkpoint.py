@@ -7,11 +7,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from program_authority import (
+    NEW_PROGRAM_MANIFEST_SCHEMA,
     load_json_lines,
     load_json_object,
     resolve_managed_path,
     sha256_file,
 )
+from repository_preparation import parse_exact_file_map
 from state_authority import (
     ACTION_NAMES,
     RepositoryObservation,
@@ -20,6 +22,8 @@ from state_authority import (
     TransitionRequest,
     apply_state_transition,
     atomic_append_json_line,
+    required_future_lifecycle_writes,
+    validate_required_managed_file_map,
     validate_state_authority,
 )
 
@@ -441,6 +445,26 @@ def _managed_authority_paths(program_root: Path) -> tuple[Path, Path, Path]:
     return resolved[0], resolved[1], resolved[2]
 
 
+def validate_plan_managed_writes(
+    program_root: Path,
+    plan_path: Path,
+    workspace_root: Path,
+    increment_id: str,
+) -> list[str]:
+    """Validate a plan's file map against manifest-derived lifecycle ownership."""
+    path = Path(plan_path)
+    if path.is_symlink() or not path.is_file():
+        return ["exact-file plan must be a regular non-symlink file"]
+    try:
+        file_map = parse_exact_file_map(path.read_text(encoding="utf-8"))
+        required = required_future_lifecycle_writes(
+            Path(program_root), Path(workspace_root), increment_id
+        )
+    except (OSError, UnicodeError, ValueError) as error:
+        return [str(error)]
+    return validate_required_managed_file_map(file_map, required)
+
+
 def _preflight_live_plan_approval(
     program_root: Path,
     status_path: Path,
@@ -454,6 +478,11 @@ def _preflight_live_plan_approval(
     manifest, manifest_issues = load_json_object(Path(program_root) / "manifest.json")
     if manifest is None:
         raise ValueError("; ".join(manifest_issues))
+    if manifest.get("schema_version") == NEW_PROGRAM_MANIFEST_SCHEMA:
+        raise ValueError(
+            "new-program-plan-materialization-required: use the typed "
+            "approval -> execution baseline -> action authorization -> status-last sink"
+        )
     if _adopted_transition(status_path, request) is not None:
         return
     transition = request.transition

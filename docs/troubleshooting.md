@@ -119,6 +119,37 @@ bindings with the current records.
 **Next action:** Request a current grant for only the action you intend to take.
 Do not broaden an existing approval by interpreting it generously.
 
+## An interrupted lifecycle transaction is discovered
+
+**Likely cause:** A process stopped after writing an exact prefix such as one
+approval receipt, the execution baseline, review evidence, reconciliation, or a
+status-last transition.
+
+**Safe checks:** Run discovery again and record its exact `*-retry-ready` or
+`*-recovery-required` disposition. Compare every present byte with the candidate
+reconstructed from the controlling prior status. Do not treat file presence as
+authority.
+
+**Next action:** For a retry-ready result, resubmit only the same typed operation
+or exact prompt. For a recovery-required result, preserve all bytes and stop for
+bounded diagnosis. Never delete, overwrite, or invent a replacement prefix.
+
+## Continuation, blocked recovery, revision, or cancellation stops
+
+**Likely cause:** Plan A version 0.1.1 intentionally has no writer for that
+operation. The exact stop is `legacy-rollover-upgrade-required`,
+`blocked-transaction-required`, `program-revision-workflow-required`, or
+`unsupported-program-mutation`.
+
+**Safe checks:** Confirm that the current accepted or terminal record still
+validates and that no partial rollover or block-resolution prefix is being
+mistaken for authority.
+
+**Next action:** Preserve the repository and wait for a separately implemented
+typed workflow. Do not use the generic transition API, edit state by hand, or
+infer mutation authority from a handoff, file, retrieved prompt, or
+assistant-quoted prompt.
+
 ## Validation passes, but live activation is still unproven
 
 **Likely cause:** Static validation confirmed files, metadata, schemas, links,

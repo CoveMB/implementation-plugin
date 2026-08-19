@@ -1,0 +1,14 @@
+{
+  "package_version": "0.1.1",
+  "materializer": "tests.program_bootstrap_support.materialize_v0_1_1_compatibility_state",
+  "protected_live_paths": [
+    "program/manifest.json",
+    "program/increments/ARCHIVE-INDEX/exact-file-plan.md"
+  ],
+  "schema_version": "implementation-program-bootstrap-compatibility-fixture/v1",
+  "workspace_seed": "seed-workspace/catalog.txt",
+  "states": {
+    "accepted-stop": "accepted",
+    "awaiting-diff": "awaiting-diff-approval"
+  }
+}

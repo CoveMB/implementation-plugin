@@ -30,10 +30,14 @@ Approval modes control routine interruption, diff acceptance, and continuation o
 - `approval:standard` pauses for the exact-file plan and user diff acceptance.
 - `approval:pre-approve` omits the routine plan pause but stops for user-owned decisions, program amendments, contradictions, and hard stops; diff acceptance remains with the user.
 - `approval:full-increment` runs one increment through verification, then stops for user diff acceptance unless a hard stop occurs.
-- `approval:full-diff` may accept one verified, packet-bound diff automatically; it does not continue to another increment.
-- `approval:full` may automatically accept a verified, packet-bound diff and continue only while the same conversation remains suitable.
+- Legacy `approval:full-diff` may accept one verified, packet-bound current-increment diff automatically; it does not continue to another increment.
+- Legacy `approval:full` may automatically accept one verified, packet-bound current-increment diff; it does not continue to another increment.
 
-An omitted mode defaults to `approval:standard` only when creating new state. Never default an omitted or unknown mode in persisted state. An explicit user gate remains controlling even when the mode would normally omit that pause.
+`approval:full-diff` and `approval:full` are dual-read compatibility modes for already persisted legacy programs only. New-model proposal construction, bootstrap, and launch reject either mode before every write. New programs accept only `approval:standard`, `approval:pre-approve`, or `approval:full-increment` and always stop at the typed `accept-stop` boundary in version 0.1.1.
+
+For both legacy modes, automatic behavior ends with acceptance of the current increment. A successor requires the typed continuation route; neither legacy mode supplies successor authority.
+
+An omitted mode defaults to `approval:full-increment` only while constructing new state and before any proposal bytes exist. Persist the selected mode explicitly. Never default an omitted or unknown mode in persisted state. An explicit user gate remains controlling even when the mode would normally omit that pause.
 
 ## Bind approvals exactly
 
@@ -55,13 +59,25 @@ Use `decide_action_authorization` for the requested action and scope. A valid `i
 
 Approval policies contain no action grants. Approval of any mode never authorizes a commit, pull request, merge, publication, release, deployment, migration, destructive operation, provider mutation, or external-state change. Expired, rejected, revoked, stale, schema-less, or conflicting grants fail closed.
 
+## Allocate lifecycle writes before authority
+
+For a new-model exact plan, derive the required control-plane paths with `required_future_lifecycle_writes`. The resolver accepts the program root, selected workspace root, and status-current increment identifier. It derives paths only from manifest logical roles, immutable increment and closure storage descriptors, status-current identity, and traceability.
+
+The file map must classify approvals, status, action authorizations, increment grants, rollovers, and block resolutions as `Modify`. It must classify the current execution baseline, review evidence, and review packet as `Create`. A traceability-allocated successor adds the current handoff and successor brief as `Create`; a final increment instead adds the manifest-derived reconciliation and closure packet. These alternatives are mutually exclusive.
+
+`validate_required_managed_file_map` rejects a missing or misclassified required path. Extra product paths remain subject to repository ownership and action-authorization checks. Declaring a managed path allocates ownership only. In particular, declaring rollover, block-resolution, closure, approval, or status paths grants no permission to write them.
+
 ## Persist one transition
 
 Before `apply_state_transition`, revalidate authority and provide a `TransitionRequest` with the expected status digest and sequence, target program and increment states, exact transition event, schema-appropriate authority, and the controlling action scope in its evidence.
 
-Legacy `implementation-program-status/v1` transitions keep their existing action-authorization contract. New v2 status is dual-read and records an explicit authority union. The exact approval-driven edges are program approval to active, plan approval to authorized, diff approval to accepted, and closure approval to closed. Those governance transitions rely on the matching approved event and do not falsely claim `modify-workspace` authority. Every other declared state change still requires an exact live `modify-workspace` authorization. Plan approval also binds the separately expected execution-authorization identifier and scope; it does not make that future grant exist.
+Legacy `implementation-program-status/v1` transitions keep their existing action-authorization contract. New v2 status is dual-read and records an explicit authority union. The exact approval-driven edges are program approval to active, standard-mode plan approval to authorized, diff approval to accepted, and closure approval to closed. Those governance transitions rely on the matching approved event and do not falsely claim `modify-workspace` authority. Every other declared state change still requires an exact live `modify-workspace` authorization.
 
-The transition must be a declared matrix edge and satisfy its conditional evidence gates. Blocked state may resume only to its recorded legal target. Terminal state has no same-entity outgoing edge. Starting another increment is a separate operation and requires renewed one-increment authority or suitable conversation-bound full authority.
+New-model diff acceptance uses [`diff_disposition.py`](../scripts/diff_disposition.py), not the generic transition sink. Its acyclic base seed binds the prior status, review evidence and packet, final verification, exact plan, execution baseline, and accepted product delta. It derives the checkpoint, then approval event, then accepted status. The accepted `implementation-diff-disposition-binding/v1` excludes its own status digest and submitted-prompt digest. The exact prompt contains only **Accept and stop** in Plan A. Direct submission appends or adopts the prompt-bound diff approval, then replaces status last. It cannot inspect or start a successor.
+
+For a new-model manifest, `apply_state_transition` rejects generic diff acceptance with `typed-diff-disposition-required`. It rejects every direct transition into or out of `blocked` with `blocked-transaction-required`, and every direct supersession with `program-revision-workflow-required`, before general transition validation or persistence. Plan A has no typed blocked or revision writer. New-model closure likewise uses only the typed closure preparation and exact approval sinks. These guards do not change accepted legacy read validation or legacy state-transition compatibility.
+
+The transition must be a declared matrix edge and satisfy its conditional evidence gates. Blocked state may resume only to its recorded legal target. Terminal state has no same-entity outgoing edge. Starting another increment is a separate operation and requires renewed authority; conversation suitability and legacy approval modes do not supply it.
 
 State replacement uses a same-directory temporary file, flush and file sync, digest compare-and-swap, and atomic replacement. JSON Lines append preserves the exact prior byte prefix and rejects duplicate identifiers. Each receipt reports prior and current digests. This is per-file atomicity, not a multi-file transaction, lock, or hostile-concurrency guarantee. For an approval plus governance transition plus execution grants, use the ordered and retry-safe checkpoint procedure rather than treating those files as one transaction.
 
@@ -69,4 +85,4 @@ State replacement uses a same-directory temporary file, flush and file sync, dig
 
 The CLI provides `validate-state`, `check-action`, `select-workspace`, and `transition-state`. Mutating commands require explicit JSON requests. Exit status `0` means valid or authorized, `1` means invariant failure or no authorization, and `2` means usage error.
 
-After verification, modes with user diff acceptance stop at `awaiting-diff-approval`. Do not accept the diff, begin another increment, close the program, or perform any consequential action without the separate exact authority for that operation.
+After verification, modes with user diff acceptance stop at `awaiting-diff-approval`. Present the exact disposition prompt. Accept-stop authority accepts only the current increment and does not authorize continuation, closure, staging, a commit, or another consequential action.

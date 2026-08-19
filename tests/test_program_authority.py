@@ -198,6 +198,89 @@ class ProgramAuthorityFixture:
         }
         self.write_text("state/approvals.jsonl", json.dumps(event, sort_keys=True) + "\n")
 
+    def configure_new_program_proposal(self) -> None:
+        """Convert the approved legacy fixture into a complete unapproved v2 proposal."""
+        manifest = self.load_json("manifest.json")
+        traceability = self.load_json("program/traceability.json")
+        manifest.update(
+            schema_version="implementation-program-manifest/v2",
+            increment_storage={
+                "schema_version": "implementation-increment-storage/v1",
+                "root": "increments",
+                "brief_filename": "brief.md",
+                "exact_file_plan_filename": "exact-file-plan.md",
+                "execution_baseline_filename": "execution-baseline.json",
+                "review_evidence_filename": "review-evidence.json",
+                "review_packet_filename": "review-packet.md",
+                "handoff_filename": "handoff.md",
+            },
+            closure_storage={
+                "schema_version": "implementation-closure-storage/v1",
+                "root": "closure",
+                "reconciliation_filename": "reconciliation.json",
+                "packet_filename": "closure-packet.md",
+            },
+        )
+        manifest["logical_roles"].update(
+            action_authorizations="state/action-authorizations.jsonl",
+            increment_grants="state/increment-grants.jsonl",
+            rollovers="state/rollovers.jsonl",
+            block_resolutions="state/block-resolutions.jsonl",
+            workspace="state/workspace.json",
+            status="state/status.json",
+        )
+        self.write_json("manifest.json", manifest)
+        for relative_path in (
+            "state/approvals.jsonl",
+            "state/action-authorizations.jsonl",
+            "state/increment-grants.jsonl",
+            "state/rollovers.jsonl",
+            "state/block-resolutions.jsonl",
+        ):
+            self.write_text(relative_path, "")
+        self.write_json(
+            "state/workspace.json",
+            {
+                "schema_version": "implementation-workspace-proposal/v1",
+                "program_id": manifest["program_id"],
+                "program_revision": manifest["program_revision"],
+                "repository": {"identity": "portable-archive"},
+                "implementation_workspace": {
+                    "path": "/portable/archive",
+                    "branch": "archive-maintenance",
+                    "base_commit": "b" * 40,
+                    "head_commit_at_selection": "a" * 40,
+                },
+                "pre_existing_work_at_selection": {
+                    "staged_paths": [],
+                    "modified_paths": [],
+                    "untracked_paths": [],
+                    "conflicted_paths": [],
+                    "active_git_operation": None,
+                },
+            },
+        )
+        self.write_json(
+            "state/status.json",
+            {
+                "schema_version": "implementation-program-status/v2",
+                "program_id": manifest["program_id"],
+                "program_revision": manifest["program_revision"],
+                "state_sequence": 0,
+                "program_state": "awaiting-program-approval",
+                "current_increment_id": "ARCHIVE-INDEX",
+                "current_increment_state": "not-started",
+                "approval_mode": manifest["approval_mode"],
+                "source_binding": dict(manifest["source_binding"]),
+                "program_binding": {
+                    "sha256": manifest["program_binding"]["sha256"],
+                    "semantic_requirements_sha256": traceability["coverage_assertion"][
+                        "semantic_requirements_sha256"
+                    ],
+                },
+            },
+        )
+
 
 class ProgramAuthorityTestCase(unittest.TestCase):
     def setUp(self) -> None:
@@ -445,6 +528,159 @@ class BindingAndRevisionTests(ProgramAuthorityTestCase):
         self.fixture.write_approval()
 
         self.assert_issue(self.validate(), "revision_history")
+
+
+class ProposalAuthorityAndStorageTests(ProgramAuthorityTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.fixture.configure_new_program_proposal()
+
+    def test_proposal_mode_accepts_complete_unapproved_bundle_only(self) -> None:
+        self.assertEqual(
+            AUTHORITY.validate_program_authority(
+                self.fixture.root,
+                validation_mode=AUTHORITY.PROPOSAL_VALIDATION_MODE,
+            ),
+            [],
+        )
+        approved_issues = AUTHORITY.validate_program_authority(
+            self.fixture.root,
+            validation_mode=AUTHORITY.APPROVED_VALIDATION_MODE,
+        )
+        self.assert_issue(approved_issues, "approval")
+        unknown_issues = AUTHORITY.validate_program_authority(
+            self.fixture.root,
+            validation_mode="unknown",
+        )
+        self.assert_issue(unknown_issues, "validation mode")
+
+    def test_proposal_mode_requires_empty_future_ledgers_and_initial_status(self) -> None:
+        ledger_paths = (
+            "state/approvals.jsonl",
+            "state/action-authorizations.jsonl",
+            "state/increment-grants.jsonl",
+            "state/rollovers.jsonl",
+            "state/block-resolutions.jsonl",
+        )
+        for relative_path in ledger_paths:
+            with self.subTest(relative_path=relative_path):
+                fixture = ProgramAuthorityFixture()
+                try:
+                    fixture.configure_new_program_proposal()
+                    fixture.write_text(relative_path, "{}\n")
+                    issues = AUTHORITY.validate_program_authority(
+                        fixture.root,
+                        validation_mode=AUTHORITY.PROPOSAL_VALIDATION_MODE,
+                    )
+                    self.assertTrue(any("must be empty" in issue for issue in issues), issues)
+                finally:
+                    fixture.close()
+
+        status = self.fixture.load_json("state/status.json")
+        status["state_sequence"] = 1
+        status["program_state"] = "active"
+        status["current_increment_state"] = "preparing"
+        self.fixture.write_json("state/status.json", status)
+        issues = AUTHORITY.validate_program_authority(
+            self.fixture.root,
+            validation_mode=AUTHORITY.PROPOSAL_VALIDATION_MODE,
+        )
+        self.assert_issue(issues, "state_sequence")
+        self.assert_issue(issues, "awaiting-program-approval")
+        self.assert_issue(issues, "not-started")
+
+    def test_new_manifest_rejects_mutable_and_duplicate_closure_ownership(self) -> None:
+        manifest = self.fixture.load_json("manifest.json")
+        manifest["program_status"] = {"program_state": "active"}
+        manifest["current_increment"] = {"increment_id": "ARCHIVE-INDEX"}
+        manifest["logical_roles"]["closure_reconciliation"] = (
+            "closure/reconciliation.json"
+        )
+        manifest["logical_roles"]["closure_packet"] = "closure/closure-packet.md"
+        self.fixture.write_json("manifest.json", manifest)
+        issues = AUTHORITY.validate_program_authority(
+            self.fixture.root,
+            validation_mode=AUTHORITY.PROPOSAL_VALIDATION_MODE,
+        )
+        self.assert_issue(issues, "program_status")
+        self.assert_issue(issues, "current_increment")
+        self.assert_issue(issues, "closure logical roles")
+
+    def test_storage_descriptors_reject_unsafe_or_ambiguous_paths(self) -> None:
+        mutations = {
+            "missing key": lambda descriptor: descriptor.pop("packet_filename"),
+            "absolute root": lambda descriptor: descriptor.update(root="/tmp/closure"),
+            "escaping root": lambda descriptor: descriptor.update(root="../closure"),
+            "separator filename": lambda descriptor: descriptor.update(
+                packet_filename="nested/packet.md"
+            ),
+            "duplicate path": lambda descriptor: descriptor.update(
+                packet_filename=descriptor["reconciliation_filename"]
+            ),
+        }
+        for label, mutation in mutations.items():
+            with self.subTest(label=label):
+                fixture = ProgramAuthorityFixture()
+                try:
+                    fixture.configure_new_program_proposal()
+                    manifest = fixture.load_json("manifest.json")
+                    mutation(manifest["closure_storage"])
+                    fixture.write_json("manifest.json", manifest)
+                    issues = AUTHORITY.validate_program_authority(
+                        fixture.root,
+                        validation_mode=AUTHORITY.PROPOSAL_VALIDATION_MODE,
+                    )
+                    self.assertNotEqual(issues, [])
+                finally:
+                    fixture.close()
+
+        for descriptor_name, field, value in (
+            ("increment_storage", "brief_filename", "nested/brief.md"),
+            ("increment_storage", "root", "/tmp/increments"),
+            ("closure_storage", "root", "nested//closure"),
+        ):
+            with self.subTest(descriptor=descriptor_name, field=field, value=value):
+                fixture = ProgramAuthorityFixture()
+                try:
+                    fixture.configure_new_program_proposal()
+                    manifest = fixture.load_json("manifest.json")
+                    manifest[descriptor_name][field] = value
+                    fixture.write_json("manifest.json", manifest)
+                    issues = AUTHORITY.validate_program_authority(
+                        fixture.root,
+                        validation_mode=AUTHORITY.PROPOSAL_VALIDATION_MODE,
+                    )
+                    self.assertNotEqual(issues, [])
+                finally:
+                    fixture.close()
+
+    def test_malformed_logical_role_is_reported_without_an_exception(self) -> None:
+        manifest = self.fixture.load_json("manifest.json")
+        manifest["logical_roles"]["status"] = {}
+        self.fixture.write_json("manifest.json", manifest)
+        issues = AUTHORITY.validate_program_authority(
+            self.fixture.root,
+            validation_mode=AUTHORITY.PROPOSAL_VALIDATION_MODE,
+        )
+        self.assert_issue(issues, "status")
+
+    def test_storage_rejects_symlinked_ancestors_and_non_regular_entries(self) -> None:
+        outside = self.fixture.path("outside")
+        outside.mkdir()
+        self.fixture.path("closure").symlink_to(outside, target_is_directory=True)
+        issues = AUTHORITY.validate_program_authority(
+            self.fixture.root,
+            validation_mode=AUTHORITY.PROPOSAL_VALIDATION_MODE,
+        )
+        self.assert_issue(issues, "symlink")
+
+        self.fixture.path("closure").unlink()
+        self.fixture.path("closure/reconciliation.json").mkdir(parents=True)
+        issues = AUTHORITY.validate_program_authority(
+            self.fixture.root,
+            validation_mode=AUTHORITY.PROPOSAL_VALIDATION_MODE,
+        )
+        self.assert_issue(issues, "regular file")
 
 
 class SourceCaptureAndCliTests(ProgramAuthorityTestCase):
