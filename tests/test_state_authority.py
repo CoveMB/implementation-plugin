@@ -194,7 +194,7 @@ class ManagedLifecycleWriteTests(unittest.TestCase):
                     AUTHORITY.validate_required_managed_file_map(candidate, required)
                 )
 
-    def test_multiple_traceability_successors_fail_closed(self) -> None:
+    def test_three_increment_allocation_selects_only_immediate_successor(self) -> None:
         fixture = BootstrapFixture()
         try:
             program_root = fixture.repository / "implementation-programs/ARCHIVE-PROGRAM"
@@ -210,10 +210,18 @@ class ManagedLifecycleWriteTests(unittest.TestCase):
                 traceability["atomic_requirements"].append(successor)
             traceability_path.write_bytes(canonical_json(traceability))
 
-            with self.assertRaisesRegex(ValueError, "more than one successor"):
-                AUTHORITY.required_future_lifecycle_writes(
-                    program_root, fixture.repository, "ARCHIVE-INDEX"
-                )
+            required = AUTHORITY.required_future_lifecycle_writes(
+                program_root, fixture.repository, "ARCHIVE-INDEX"
+            )
+            create = {
+                requirement.path
+                for requirement in required
+                if requirement.disposition == "Create"
+            }
+            prefix = "implementation-programs/ARCHIVE-PROGRAM/increments"
+            self.assertIn(f"{prefix}/ARCHIVE-NEXT-A/brief.md", create)
+            self.assertNotIn(f"{prefix}/ARCHIVE-NEXT-B/brief.md", create)
+            self.assertFalse(any("/closure/" in path for path in create))
         finally:
             fixture.close()
 
@@ -934,6 +942,31 @@ class AtomicPersistenceTests(unittest.TestCase):
         self.assertEqual(receipt.prior_sha256, old_sha256)
         self.assertEqual(receipt.current_sha256, sha256_file(path))
         self.assertEqual(json.loads(path.read_text())["previous_state"], current["previous_state"])
+
+    def test_atomic_replace_receipt_identifies_own_bytes_after_unlock(self) -> None:
+        path = self.root / "status.json"
+        write_json(path, {"schema_version": "record/v1", "value": 1})
+        replacement = {"schema_version": "record/v1", "value": 2}
+        replacement_sha256 = hashlib.sha256(canonical_json(replacement)).hexdigest()
+        release_lock = AUTHORITY._release_advisory_lock
+
+        def release_then_replace(lock: object) -> None:
+            release_lock(lock)
+            path.write_text("foreign replacement\n", encoding="utf-8")
+
+        with mock.patch.object(
+            AUTHORITY,
+            "_release_advisory_lock",
+            side_effect=release_then_replace,
+        ):
+            receipt = AUTHORITY.atomic_replace_json(
+                path,
+                replacement,
+                sha256_file(path),
+            )
+
+        self.assertEqual(receipt.current_sha256, replacement_sha256)
+        self.assertNotEqual(receipt.current_sha256, sha256_file(path))
 
     def test_compare_and_swap_and_replace_failure_preserve_old_bytes(self) -> None:
         path = self.root / "status.json"

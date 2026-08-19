@@ -232,10 +232,8 @@ def _traceability_successor(
     if increment_id not in increments:
         raise ValueError("current increment is absent from traceability allocation")
     index = increments.index(increment_id)
-    successors = increments[index + 1 :]
-    if len(successors) > 1:
-        raise ValueError("traceability allocates more than one successor")
-    return successors[0] if successors else None
+    successor_index = index + 1
+    return increments[successor_index] if successor_index < len(increments) else None
 
 
 def required_future_lifecycle_writes(
@@ -2018,6 +2016,7 @@ def _atomic_replace_bytes(
             os.replace(temporary_path, path)
             temporary_path = None
             _fsync_directory(path.parent)
+            written_sha256 = hashlib.sha256(payload).hexdigest()
         finally:
             if temporary_path is not None:
                 try:
@@ -2026,7 +2025,7 @@ def _atomic_replace_bytes(
                     pass
     finally:
         _release_advisory_lock(advisory_lock)
-    return AtomicWriteReceipt(prior_sha256, sha256_file(path))
+    return AtomicWriteReceipt(prior_sha256, written_sha256)
 
 
 def atomic_replace_json(
