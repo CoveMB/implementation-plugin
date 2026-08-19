@@ -10,7 +10,9 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-15-staged-plan-repair-split-design.md`
 
-**Required predecessor:** `docs/superpowers/plans/2026-08-15-program-bootstrap-launch-repair.md` implemented, verified, independently reviewed, and unchanged at version `0.1.1`.
+**Required predecessor:** `docs/superpowers/plans/2026-08-15-program-bootstrap-launch-repair.md` and `docs/superpowers/plans/2026-08-19-review-remediation-and-execution-contract-repair.md` implemented, verified, independently reviewed, and unchanged at version `0.1.1`.
+
+**Reconciliation baseline:** final merged Plan A commit `b0e1270aaf15e745aaa7f5805b5d6c9a1bed2dc7`. The Create/Modify/Preserve inventory below was rechecked against that tree; implementation must repeat the check against its fresh starting tree.
 
 ## Global Constraints
 
@@ -25,6 +27,8 @@
 - Commits are outside routine task execution. If the user separately grants local-commit authority, use the logical boundaries reported at the end; otherwise do not stage or commit.
 - Preserve accepted legacy current-increment behavior for `approval:full-diff` and `approval:full`, but stop every legacy successor boundary before writes with `legacy-rollover-upgrade-required`. Do not migrate a legacy manifest, first exact plan, or automatic mode into the new transaction.
 - Every successor exact plan must call Plan A's `required_future_lifecycle_writes(...)`; no successor may rely only on the first-increment file map.
+- Preserve the public `prepare_exact_plan(...)` and `materialize_exact_plan(...)` signatures and their first-increment behavior. The frozen `0.1.1` execution-baseline bytes remain unchanged with `inherited_paths: []`; do not add a baseline schema migration.
+- Reject blocked entry from `remediating` before every write. Preserve Plan A's typed `reviewing -> remediating -> reviewing` lifecycle and do not add remediation-time blocked recovery in version `0.1.2`.
 - All prompt and record identifiers are acyclic and topologically derived. No seed contains its own derived identifier, later record bytes/digests, later status digest, or submitted-prompt digest.
 - All persistence uses no-overwrite creation, exact JSON Lines append/adopt, and expected digest/sequence compare-and-swap. Status is last within acceptance, rollover, and blocked-resolution transactions.
 - Handoffs and bounded results are navigation only. Only exact direct-user submission of the current canonical prompt supplies prompt-derived action authority.
@@ -75,13 +79,17 @@ def persist_accept_stop(
     observation: RepositoryObservation,
 ) -> DiffDispositionReceipt: ...
 
-# state_authority.py / repository_preparation.py
+# state_authority.py
 def required_future_lifecycle_writes(
     program_root: Path,
     workspace_root: Path,
     increment_id: str,
 ) -> tuple[ManagedWriteRequirement, ...]: ...
+
+# program_authority.py -- preserve this Plan A owner
 def resolve_program_closure_paths(program_root: Path) -> dict[str, Path]: ...
+
+# repository_preparation.py
 def validate_execution_workspace(
     program_root: Path,
     baseline: ExecutionBaseline,
@@ -125,7 +133,8 @@ Every Plan B modification to a Plan A-owned file has one precise extension:
 - `scripts/diff_disposition.py` — consume the unchanged Plan A acceptance candidate and `accept-stop` bytes; add optional `accept-continue` projection, accepted-state continuation builder, and coordinator. Never change the canonical stop seed, prompt section, approval bytes, or status binding.
 - `scripts/program_discovery.py` — add exact immediate-continuation, accepted-state continuation, rollover, and blocked-resolution prefix classifications before generic rejection. Preserve all Plan A routes.
 - `scripts/state_authority.py` — add typed successor and blocked contexts plus the two lifecycle action names. Preserve Plan A status, grant, managed-path, acceptance, and closure validation.
-- `scripts/repository_preparation.py` — extend Plan A execution-baseline construction only to validate and record inherited accepted product paths from a canonical rollover record. Do not change the schema or first-increment behavior.
+- `scripts/program_activation.py` — extend only the internal `_build_plan_candidate(...)` baseline construction so a status-current successor can populate the existing `inherited_paths` field from a validated canonical rollover chain and matching accepted product bytes. Preserve the public `prepare_exact_plan(...)` and `materialize_exact_plan(...)` signatures, all first-increment behavior, and frozen `inherited_paths: []` bytes.
+- `scripts/repository_preparation.py` — extend Plan A execution-baseline parsing and workspace validation to accept nonempty `inherited_paths` only for a status-current successor whose canonical rollover chain and accepted product bytes validate. Do not change the schema or first-increment behavior.
 - `scripts/approval_checkpoint.py` — add `rollover-increment` and `resume-blocked-program` as `explicit-local` risk classes. Do not route their persistence through the standard plan-approval checkpoint.
 - `scripts/continuity_closure.py` — add the structured bounded result and semantic successor selection used by Plan B. Preserve accepted legacy brief/handoff bytes and Plan A closure behavior.
 - `SKILL.md` — consume Plan A's create/launch/materialize/review/accept-stop/closure routes unchanged; add diff choice, accepted-state continuation, successor rollover, and blocked-resolution routing.
@@ -143,11 +152,19 @@ Every Plan B modification to a Plan A-owned file has one precise extension:
 - `docs/maintainers.md` — preserve Plan A deterministic release gates; add the optional live continuation replay and its separate authority boundary.
 - `implementing-staged-plans-consolidated-design-plan-final.md` — preserve Plan A lifecycle ownership; append the post-acceptance continuation and blocked-recovery design allocation.
 - `implementing-staged-plans-bootstrap-execution-review-runbook.md` — preserve Plan A bootstrap/launch execution; add exact accepted-diff and blocked-resume runbook routes.
-- `scripts/validate_package.py` and package manifests — require Plan B scripts and version `0.1.2`; reuse Plan A's package digest and installed-copy interfaces unchanged.
+- `scripts/validate_package.py` — require the three Plan B production scripts and version `0.1.2`; reuse Plan A's package traversal, digest, installed-copy, diagnostics, and CLI interfaces unchanged.
+- `tests/integrated_pressure_support.py` — extend the existing isolated evaluator and catalog utilities with the separate continuation-replay schema and command; preserve the current integrated-pressure scenarios, evidence schemas, and no-overwrite behavior.
+- `tests/test_integrated_pressure.py` — add offline coverage for the immediate and later continuation replay catalog and evidence while preserving the existing fixture, evaluator-isolation, interruption, schema, and evidence tests.
+- `tests/test_package_validation.py` — extend required-script and synchronized-version coverage for the three Plan B scripts and version `0.1.2`; preserve deterministic traversal, installed-copy, diagnostic, and CLI contracts.
+- `tests/test_distribution_documentation.py` — update only current-version and Plan B route expectations while preserving link, invocation, fail-closed copy, historical-evidence, and documentation-safety contracts.
+- `.codex-plugin/plugin.json` — update only the synchronized version to `0.1.2`; preserve the exact four-field contract and existing name, description, and skills path.
+- `.claude-plugin/plugin.json` — update only the synchronized version to `0.1.2`; preserve the existing identity, description, repository, and skills path.
+- `.claude-plugin/marketplace.json` — update only the plugin's synchronized version to `0.1.2`; preserve marketplace identity, owner, source, and description.
 - `tests/program_bootstrap_support.py` — add production-driven successor and blocked scenario helpers; never manufacture an action authorization, grant, rollover, blocked context, or resolution record.
 - `tests/test_diff_disposition.py` — freeze Plan A stop bytes and add conditional continue/acceptance-prefix coverage.
 - `tests/test_program_discovery.py` — preserve Plan A route assertions and add exact Plan B prefix dispositions.
 - `tests/test_state_authority.py` — preserve Plan A state contracts and add successor/blocked typed-context enforcement.
+- `tests/test_program_activation.py` — preserve Plan A public-signature and first-increment baseline assertions; add successor candidate coverage proving only validated rollover history populates `inherited_paths`.
 - `tests/test_repository_preparation.py` — preserve Plan A baseline tests and add inherited accepted-product validation.
 - `tests/test_approval_checkpoint.py` — preserve Plan A persistence ordering and add only lifecycle action classification assertions.
 - `tests/test_continuity_closure.py` — preserve Plan A closure/legacy bytes and add bounded-result and successor-selection coverage.
@@ -172,7 +189,7 @@ Every Plan B modification to a Plan A-owned file has one precise extension:
 ### Modify
 
 - the exact shared files and extensions listed above;
-- `tests/test_diff_disposition.py`, `tests/test_program_discovery.py`, `tests/test_state_authority.py`, `tests/test_repository_preparation.py`, `tests/test_approval_checkpoint.py`, `tests/test_continuity_closure.py`, and `tests/test_front_door_contract.py`;
+- `tests/test_diff_disposition.py`, `tests/test_program_discovery.py`, `tests/test_state_authority.py`, `tests/test_program_activation.py`, `tests/test_repository_preparation.py`, `tests/test_approval_checkpoint.py`, `tests/test_continuity_closure.py`, and `tests/test_front_door_contract.py`;
 - `tests/integrated_pressure_support.py` and `tests/test_integrated_pressure.py`;
 - `docs/workflows.md`, `docs/reference.md`, `docs/troubleshooting.md`, `docs/installation.md`, and `docs/maintainers.md`;
 - `implementing-staged-plans-consolidated-design-plan-final.md` and `implementing-staged-plans-bootstrap-execution-review-runbook.md`;
@@ -181,9 +198,9 @@ Every Plan B modification to a Plan A-owned file has one precise extension:
 
 ### Preserve
 
-- Plan A's `task_prompt.py`, `program_bootstrap.py`, `program_launch.py`, `program_review.py`, and `program_closure.py` implementation contracts unless a verified material defect forces plan reconciliation;
+- Plan A's `task_prompt.py`, `program_authority.py`, `program_bootstrap.py`, `program_launch.py`, `program_review.py`, and `program_closure.py` implementation contracts unless a verified material defect forces plan reconciliation; `program_authority.py` remains the owner of `resolve_program_closure_paths(...)`;
 - `tests/fixtures/program-bootstrap/v0.1.1/**` byte-for-byte;
-- Plan A's implementation plan and the approved split design;
+- Plan A's implementation plan, the review-remediation repair plan, and the approved split design;
 - `implementation-programs/ISP-001/**`, installed caches, and historical evaluator evidence.
 
 ---
@@ -344,11 +361,13 @@ Confirm stop bytes and behavior are unchanged, acceptance is independent of succ
 - Modify: `skills/implementing-staged-plans/scripts/program_continuation.py`
 - Modify: `skills/implementing-staged-plans/scripts/program_discovery.py`
 - Modify: `skills/implementing-staged-plans/scripts/state_authority.py`
+- Modify: `skills/implementing-staged-plans/scripts/program_activation.py`
 - Modify: `skills/implementing-staged-plans/scripts/repository_preparation.py`
 - Modify: `skills/implementing-staged-plans/scripts/approval_checkpoint.py`
 - Modify: `skills/implementing-staged-plans/references/continuity-closure.md`
 - Modify: `skills/implementing-staged-plans/references/program-discovery.md`
 - Modify: `skills/implementing-staged-plans/references/state-authorization.md`
+- Modify: `tests/test_program_activation.py`
 - Modify: `tests/test_state_authority.py`
 - Modify: `tests/test_repository_preparation.py`
 - Modify: `tests/test_approval_checkpoint.py`
@@ -397,7 +416,7 @@ def persist_diff_disposition(
 
 - [ ] **Step 1: Write authority and file-map RED tests**
 
-Register `rollover-increment` as `explicit-local`. Require action authorizations, increment grants, rollovers, and status under `Modify`; current handoff and successor brief under `Create`. Compose with, rather than replace, Plan A's `required_future_lifecycle_writes`. Remove/misclassify each path independently and prove the sink writes nothing. Reject caller-supplied record IDs, status/manifest payloads, synthetic observations, genesis-grant reuse, successor not allocated, unsatisfied dependencies, stale prompt/status, changed accepted product delta, and legacy manifests.
+Register `rollover-increment` as `explicit-local`. Require action authorizations, increment grants, rollovers, and status under `Modify`; current handoff and successor brief under `Create`. Compose with, rather than replace, Plan A's `required_future_lifecycle_writes`. Remove/misclassify each path independently and prove the sink writes nothing. Reject caller-supplied record IDs, status/manifest payloads, synthetic observations, genesis-grant reuse, successor not allocated, unsatisfied dependencies, stale prompt/status, changed accepted product delta, and legacy manifests. Add a successor plan-candidate test that expects the canonical inherited inventory in `inherited_paths`, plus a first-increment regression that requires the existing public signatures and exact `inherited_paths: []` baseline bytes.
 
 - [ ] **Step 2: Write the complete rollover prefix matrix**
 
@@ -406,7 +425,7 @@ For immediate continuation, start after exact accepted-continue status. For late
 - [ ] **Step 3: Run RED**
 
 ```bash
-rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_program_continuation tests.test_program_rollover tests.test_program_discovery tests.test_state_authority tests.test_repository_preparation tests.test_approval_checkpoint -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_program_continuation tests.test_program_rollover tests.test_program_discovery tests.test_state_authority tests.test_program_activation tests.test_repository_preparation tests.test_approval_checkpoint -v
 ```
 
 - [ ] **Step 4: Implement authority-first status-last persistence**
@@ -417,7 +436,7 @@ Expose `persist_diff_disposition` as the one front-door coordinator. For Plan A'
 
 - [ ] **Step 5: Extend execution baseline only for inherited product history**
 
-Validate the unique rollover chain from genesis to status-current successor. Load the predecessor's accepted product inventory and require current bytes to match. Record those paths under the existing `inherited_program_paths` field. A successor plan may classify an inherited regular file under `Modify` or `Preserve`, never `Create`; unrelated selected user work retains its original ownership. Call Plan A's exact-plan preparation/materialization without a successor-specific bypass.
+Validate the unique canonical rollover chain from genesis to the status-current successor. Load the predecessor's accepted product inventory and require every current product byte to match before baseline construction. Populate only the existing `inherited_paths` execution-baseline field with that normalized inventory. A successor plan may classify an inherited regular file under `Modify` or `Preserve`, never `Create`; unrelated selected user work retains its original ownership. Extend the internal Plan A candidate builder only as required for that derived field, call the public exact-plan preparation/materialization interfaces without a successor-specific bypass, and preserve their signatures. For a first increment, continue emitting the exact frozen baseline bytes with `inherited_paths: []`; introduce no schema migration or alternate field.
 
 - [ ] **Step 6: Expose bounded CLIs and run GREEN**
 
@@ -431,7 +450,7 @@ rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_program_continu
 
 ```bash
 rtk git diff --check
-rtk git diff -- skills/implementing-staged-plans/scripts/program_continuation.py skills/implementing-staged-plans/scripts/program_rollover.py skills/implementing-staged-plans/scripts/program_discovery.py skills/implementing-staged-plans/scripts/state_authority.py skills/implementing-staged-plans/scripts/repository_preparation.py skills/implementing-staged-plans/scripts/approval_checkpoint.py skills/implementing-staged-plans/references/continuity-closure.md skills/implementing-staged-plans/references/program-discovery.md skills/implementing-staged-plans/references/state-authorization.md tests/test_program_continuation.py tests/test_program_rollover.py tests/test_program_discovery.py tests/test_state_authority.py tests/test_repository_preparation.py tests/test_approval_checkpoint.py tests/program_bootstrap_support.py
+rtk git diff -- skills/implementing-staged-plans/scripts/program_continuation.py skills/implementing-staged-plans/scripts/program_rollover.py skills/implementing-staged-plans/scripts/program_discovery.py skills/implementing-staged-plans/scripts/state_authority.py skills/implementing-staged-plans/scripts/program_activation.py skills/implementing-staged-plans/scripts/repository_preparation.py skills/implementing-staged-plans/scripts/approval_checkpoint.py skills/implementing-staged-plans/references/continuity-closure.md skills/implementing-staged-plans/references/program-discovery.md skills/implementing-staged-plans/references/state-authorization.md tests/test_program_continuation.py tests/test_program_rollover.py tests/test_program_discovery.py tests/test_state_authority.py tests/test_program_activation.py tests/test_repository_preparation.py tests/test_approval_checkpoint.py tests/program_bootstrap_support.py
 ```
 
 Confirm immediate and later paths share only the suffix contract, each uses its own prompt-bound IDs, the manifest is byte-identical, successor authority is status-current, and partial writes are never deleted or overwritten.
@@ -489,11 +508,11 @@ Each `implementation-block-resolution/v1` record contains exactly: resolution ID
 
 - [ ] **Step 1: Write the causal writer-reader-resume RED test**
 
-Use the production writer to block an active program with a nonterminal successor in `implementing` or `reviewing`. It derives prior states, prior digest/sequence, current plan/baseline/grant, stable block ID, bounded criteria, and safe existing-evidence digests. Exit the process. Fresh discovery returns `blocked-recovery-ready` with exact recorded resume states. Build a fully satisfied candidate, render the exact prompt, submit in another process, and assert one `resume-blocked-program` authorization, one ledger record, and restored prior states.
+Use the production writer to block an active program with a nonterminal successor in `implementing` or `reviewing`. It derives prior states, prior digest/sequence, current plan/baseline/grant, stable block ID, bounded criteria, and safe existing-evidence digests. Exit the process. Fresh discovery returns `blocked-recovery-ready` with exact recorded resume states. Build a fully satisfied candidate, render the exact prompt, submit in another process, and assert one `resume-blocked-program` authorization, one ledger record, and restored prior states. Separately reach Plan A's typed `remediating` state, attempt blocked entry, require an exact pre-write rejection, and assert the complete program and workspace snapshots remain byte-identical.
 
 - [ ] **Step 2: Write fail-closed and prefix tests**
 
-Register `resume-blocked-program` as `explicit-local`. Reject caller-supplied resume targets, fabricated context, preapproval/final/accepted blocking, changed plan/baseline/grant, evidence created only for recovery, outside/unallocated/escaped/symlinked/changed evidence, duplicate/unsatisfied criteria, tampered prompt, stale status, and generic direct blocked edges. Inject after action authorization, resolution record, and resumed status; fresh discovery retries exact prefixes, lost response is idempotent, and divergent bytes remain preserved. Require action authorizations, block-resolutions, and status under `Modify` in the successor plan before resolution writes.
+Register `resume-blocked-program` as `explicit-local`. Reject caller-supplied resume targets, fabricated context, preapproval/final/accepted blocking, `remediating` blocking, changed plan/baseline/grant, evidence created only for recovery, outside/unallocated/escaped/symlinked/changed evidence, duplicate/unsatisfied criteria, tampered prompt, stale status, and generic direct blocked edges. The `remediating` rejection must occur before candidate construction, action authorization, block-context persistence, or status replacement; Plan A's typed remediation return remains the only legal exit. Inject after action authorization, resolution record, and resumed status; fresh discovery retries exact prefixes, lost response is idempotent, and divergent bytes remain preserved. Require action authorizations, block-resolutions, and status under `Modify` in the successor plan before resolution writes.
 
 - [ ] **Step 3: Run RED**
 
@@ -503,7 +522,7 @@ rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_blocked_recover
 
 - [ ] **Step 4: Implement one canonical context/evidence validator**
 
-Share the validator across block writer, discovery, prompt builder, and resume sink. Block entry validates all existing authority/workspace invariants and atomically replaces status with both states blocked. Resolution precomputes canonical action, ledger record, and resumed status, then appends/adopts action and record before compare-and-swap status. Target states come only from blocked context. The candidate transport file used by `render` is not persisted, cited as evidence, or treated as authority.
+Share the validator across block writer, discovery, prompt builder, and resume sink. Block entry first permits only `implementing` or `reviewing`, explicitly rejects `remediating` without writes, then validates all existing authority/workspace invariants and atomically replaces status with both states blocked. Resolution precomputes canonical action, ledger record, and resumed status, then appends/adopts action and record before compare-and-swap status. Target states come only from blocked context. The candidate transport file used by `render` is not persisted, cited as evidence, or treated as authority. Do not alter or intercept Plan A's `reviewing -> remediating -> reviewing` transaction.
 
 - [ ] **Step 5: Expose bounded CLIs and run GREEN**
 
@@ -520,7 +539,7 @@ rtk git diff --check
 rtk git diff -- skills/implementing-staged-plans/scripts/blocked_recovery.py skills/implementing-staged-plans/scripts/state_authority.py skills/implementing-staged-plans/scripts/program_discovery.py skills/implementing-staged-plans/scripts/approval_checkpoint.py skills/implementing-staged-plans/references/state-authorization.md skills/implementing-staged-plans/references/program-discovery.md tests/test_blocked_recovery.py tests/test_state_authority.py tests/test_program_discovery.py tests/test_approval_checkpoint.py tests/program_bootstrap_support.py
 ```
 
-Confirm every blocked byte originates from a production sink, resolution uses only managed ledger/evidence, resume cannot expand authority, and malformed legacy state is preserved rather than guessed or migrated.
+Confirm every blocked byte originates from a production sink, resolution uses only managed ledger/evidence, resume cannot expand authority, `remediating` cannot enter blocked and remains under Plan A's remediation lifecycle, and malformed legacy state is preserved rather than guessed or migrated.
 
 ---
 
@@ -756,8 +775,9 @@ Report exact changed files and commands; both plan-version owners; Plan A interf
 - Rollover persists action authorization, distinct successor grant, navigation, rollover record, and successor status in order; status-current authority replaces genesis authority and manifest bytes never change.
 - Every immediate and later rollover prefix is freshly discoverable, byte-identically adoptable, divergence-preserving, and idempotent after status.
 - Every successor plan repeats Plan A's future lifecycle-write allocation and uses Plan A's status-last exact-plan materialization under standard, pre-approve, and full-increment modes.
+- Successor baselines populate only the existing `inherited_paths` field from a validated canonical rollover chain and matching accepted product bytes; first-increment and frozen `0.1.1` baseline bytes remain unchanged with `inherited_paths: []`.
 - Inherited accepted product bytes become program history, never unexplained user dirt.
-- Blocked entry is legal only from a nonterminal state and derives resume context at the sink. Resolution uses a direct exact prompt, manifest-owned ledger, already-existing controlled evidence, and status last.
+- Blocked entry is legal only from `implementing` or `reviewing` and derives resume context at the sink. `remediating` fails before writes and remains exclusively in Plan A's typed remediation lifecycle. Resolution uses a direct exact prompt, manifest-owned ledger, already-existing controlled evidence, and status last.
 - The frozen `0.1.1` program continues under `0.1.2` without rewriting its manifest or first exact plan.
 - One causal branch reaches the second real diff gate through blocked recovery; another accepts the second diff and completes a further rollover to a third increment.
 - The complete failure-injection matrix covers every acceptance, immediate/later continuation, rollover, successor materialization, and blocked-resolution prefix with fresh-process adoption and divergence preservation.
