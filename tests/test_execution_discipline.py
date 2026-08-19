@@ -366,6 +366,18 @@ class SemanticSurfaceTests(unittest.TestCase):
         )
         self.assertTrue(EXECUTION.validate_execution_surfaces((changed,), (record,)))
 
+    def test_physical_path_rename_is_unsupported(self) -> None:
+        renamed = surface(
+            "archive-output.txt", surface_kind="path", change_kind="renamed"
+        )
+        issues = EXECUTION.validate_execution_surfaces(
+            (renamed,), (semantic_name("archive-output.txt"),)
+        )
+        self.assertIn(
+            "physical path rename is unsupported: archive-output.txt",
+            issues,
+        )
+
     def test_surface_and_naming_record_kinds_must_match(self) -> None:
         created = surface("archive-command", surface_kind="command")
         wrong_kind = semantic_name("archive-command", surface_kind="symbol")

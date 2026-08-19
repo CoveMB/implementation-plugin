@@ -1438,6 +1438,7 @@ def validate_state_authority(
                         if current_increment_state in {
                             "implementing",
                             "reviewing",
+                            "remediating",
                             "verified",
                             "awaiting-diff-approval",
                             "accepted",
@@ -1447,10 +1448,10 @@ def validate_state_authority(
                                 if current_increment_state == "implementing"
                                 else "reviewing"
                             )
-                            expected_prior = (
-                                "authorized"
+                            allowed_prior_states = (
+                                {"authorized"}
                                 if expected_target == "implementing"
-                                else "implementing"
+                                else {"implementing", "remediating"}
                             )
                             execution_authorization = status.get(
                                 "execution_authorization"
@@ -1467,7 +1468,7 @@ def validate_state_authority(
                                 and execution_transition.get(
                                     "prior_increment_state"
                                 )
-                                == expected_prior
+                                in allowed_prior_states
                                 and execution_transition.get(
                                     "target_increment_state"
                                 )
@@ -1491,7 +1492,8 @@ def validate_state_authority(
                                 )
                                 == 64
                                 and (
-                                    current_increment_state == "implementing"
+                                    current_increment_state
+                                    in {"implementing", "remediating"}
                                     or execution_transition.get(
                                         "product_delta_sha256"
                                     )
@@ -1499,26 +1501,39 @@ def validate_state_authority(
                                 )
                             )
                             if transition_valid:
+                                event_seed = {
+                                    "program_id": status["program_id"],
+                                    "program_revision": status[
+                                        "program_revision"
+                                    ],
+                                    "increment_id": status[
+                                        "current_increment_id"
+                                    ],
+                                    "prior_status_sha256": execution_transition[
+                                        "prior_status_sha256"
+                                    ],
+                                    "prior_increment_state": execution_transition[
+                                        "prior_increment_state"
+                                    ],
+                                    "target_increment_state": expected_target,
+                                    "product_delta_sha256": execution_transition[
+                                        "product_delta_sha256"
+                                    ],
+                                    "authorization_id": authorization_id,
+                                }
+                                if (
+                                    execution_transition.get(
+                                        "prior_increment_state"
+                                    )
+                                    == "remediating"
+                                ):
+                                    event_seed["review_remediation_sha256"] = (
+                                        execution_transition.get(
+                                            "review_remediation_sha256"
+                                        )
+                                    )
                                 expected_event_id = _derived_identifier(
-                                    "execution-transition",
-                                    {
-                                        "program_id": status["program_id"],
-                                        "program_revision": status[
-                                            "program_revision"
-                                        ],
-                                        "increment_id": status[
-                                            "current_increment_id"
-                                        ],
-                                        "prior_status_sha256": execution_transition[
-                                            "prior_status_sha256"
-                                        ],
-                                        "prior_increment_state": expected_prior,
-                                        "target_increment_state": expected_target,
-                                        "product_delta_sha256": execution_transition[
-                                            "product_delta_sha256"
-                                        ],
-                                        "authorization_id": authorization_id,
-                                    },
+                                    "execution-transition", event_seed
                                 )
                                 transition_valid = execution_transition.get(
                                     "event_id"
@@ -1544,6 +1559,97 @@ def validate_state_authority(
                             issues.append(
                                 "reviewed product delta differs from its status binding"
                             )
+                        remediation_history = status.get(
+                            "review_remediation_binding"
+                        )
+                        post_remediation_transition = (
+                            isinstance(execution_transition, dict)
+                            and execution_transition.get("prior_increment_state")
+                            == "remediating"
+                        )
+                        if (
+                            current_increment_state
+                            in {
+                                "reviewing",
+                                "verified",
+                                "awaiting-diff-approval",
+                                "accepted",
+                            }
+                            and (
+                                post_remediation_transition
+                                or remediation_history is not None
+                            )
+                        ):
+                            remediation_history_valid = (
+                                post_remediation_transition
+                                and isinstance(remediation_history, dict)
+                                and remediation_history.get("schema_version")
+                                == "implementation-review-remediation/v1"
+                                and execution_transition.get(
+                                    "review_remediation_sha256"
+                                )
+                                == hashlib.sha256(
+                                    _canonical_json_bytes(remediation_history)
+                                ).hexdigest()
+                            )
+                            if not remediation_history_valid:
+                                issues.append(
+                                    "review remediation history binding is invalid"
+                                )
+                        if current_increment_state == "remediating":
+                            remediation = status.get("review_remediation_binding")
+                            review_binding = status.get("review_binding")
+                            transition_authority = status.get(
+                                "transition_authority"
+                            )
+                            unresolved_finding_ids = (
+                                remediation.get("unresolved_finding_ids")
+                                if isinstance(remediation, dict)
+                                else None
+                            )
+                            remediation_valid = (
+                                isinstance(remediation, dict)
+                                and remediation.get("schema_version")
+                                == "implementation-review-remediation/v1"
+                                and isinstance(unresolved_finding_ids, list)
+                                and bool(unresolved_finding_ids)
+                                and all(
+                                    isinstance(finding_id, str) and finding_id
+                                    for finding_id in unresolved_finding_ids
+                                )
+                                and isinstance(review_binding, dict)
+                                and review_binding.get("schema_version")
+                                == "implementation-review-remediation/v1"
+                                and review_binding.get("candidate_sha256")
+                                == remediation.get("initial_product_delta_sha256")
+                                and review_binding.get(
+                                    "unresolved_material_findings"
+                                )
+                                == len(unresolved_finding_ids)
+                                and review_binding.get("finding_ids")
+                                == unresolved_finding_ids
+                            )
+                            if not remediation_valid:
+                                issues.append(
+                                    "remediating state requires an exact review "
+                                    "remediation binding"
+                                )
+                            remediation_authority_valid = (
+                                isinstance(remediation, dict)
+                                and isinstance(transition_authority, dict)
+                                and transition_authority.get("kind")
+                                == "action-authorization"
+                                and transition_authority.get("authorization_id")
+                                == authorization_id
+                                and transition_authority.get("event_id")
+                                == _derived_identifier(
+                                    "review-remediation", remediation
+                                )
+                            )
+                            if not remediation_authority_valid:
+                                issues.append(
+                                    "review remediation transition authority is invalid"
+                                )
                         execution_workspace_validated = True
             execution_authorization = status.get("execution_authorization")
             preparation = status.get("plan_preparation_binding")
@@ -2313,6 +2419,22 @@ def apply_state_transition(
     ):
         raise ValueError(
             "review-preparation-required: use the typed review evidence and packet sink"
+        )
+    if (
+        manifest.get("schema_version") == NEW_PROGRAM_MANIFEST_SCHEMA
+        and (
+            (
+                status.get("current_increment_state") == "reviewing"
+                and request.target_increment_state == "remediating"
+            )
+            or (
+                status.get("current_increment_state") == "remediating"
+                and request.target_increment_state == "reviewing"
+            )
+        )
+    ):
+        raise ValueError(
+            "typed-review-remediation-required: use the typed review remediation sink"
         )
     if (
         manifest.get("schema_version") == NEW_PROGRAM_MANIFEST_SCHEMA

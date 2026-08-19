@@ -20,7 +20,7 @@ Label controller self-review as non-independent with reduced assurance. Never in
 
 ## Contextual semantic naming
 
-Review every created or renamed path, symbol, command, test or fixture, heading, schema or identifier, and generated path in its implementation context. Record the surface kind, stable context, intention, compatibility disposition, and any finding. A planning coordinate is allowed only when it has a specific implementation-governance or durable-domain basis and named owner.
+Review every created or generated path and every created or renamed symbol, command, test or fixture, heading, schema or identifier in its implementation context. Physical path renames require a separate typed migration contract and are unsupported here. Record the surface kind, stable context, intention, compatibility disposition, and any finding. A planning coordinate is allowed only when it has a specific implementation-governance or durable-domain basis and named owner.
 
 ## Material findings
 
@@ -28,7 +28,7 @@ Classify only evidence-supported defects as material. Every material finding nee
 
 ## Remediation and renewed review
 
-Reconcile only after all initial reports are persisted. For each repaired material finding, capture one focused cycle: intended regression failure, observed failure, smallest repair, successful affected verification, and a renewed report for the affected scope. Preserve the initial report. Stop for a program amendment if repair changes approved requirements, acceptance, public behavior, protected contracts, risk posture, data ownership, dependencies, sequencing, or review cadence.
+Reconcile only after all initial reports are persisted. An open material finding enters the typed `reviewing -> remediating` transaction: status records the initial candidate digest, reports, findings, raw-report digests, and exact unresolved finding IDs before repair begins. For each repaired material finding, capture one focused cycle: intended regression failure, observed failure, smallest repair, successful affected verification, and a renewed report for the affected scope that names the initial finding ID. Preserve the initial report and every initial finding field; reconciliation changes only the disposition from `open` to `repaired`. The writer accepts `remediating -> reviewing` only when every initially unresolved finding has exactly one repaired follow-up, then binds both the retained remediation-history digest and repaired product delta for fresh final verification. Later states revalidate that history binding. A question or discussion does not close a finding or advance state. Stop for a program amendment if repair changes approved requirements, acceptance, public behavior, protected contracts, risk posture, data ownership, dependencies, sequencing, or review cadence.
 
 ## Fresh final verification
 
@@ -42,7 +42,7 @@ Require byte equality between the deterministic rendering and the persisted pack
 
 ## Lifecycle and authority boundary
 
-Review authorization does not authorize staging, a commit, diff acceptance, another increment, publication, deployment, migration, provider mutation, or other consequential action. Logical commit boundaries remain planning evidence until a separate exact commit grant exists. New-model `reviewing -> verified` is accepted only through the typed writer context; the generic transition sink fails before status persistence. Stop at `awaiting-diff-approval` for the direct user disposition.
+Review authorization does not authorize staging, a commit, diff acceptance, another increment, publication, deployment, migration, provider mutation, or other consequential action. Logical commit boundaries remain planning evidence until a separate exact commit grant exists. The complete review sequence is `reviewing -> remediating -> reviewing -> verified -> awaiting-diff-approval` when material findings are open; without open findings it is `reviewing -> verified -> awaiting-diff-approval`. These edges are accepted only through their typed writer contexts; the generic transition sink fails before status persistence. Stop at `awaiting-diff-approval` for the direct user disposition.
 
 ## Validation commands
 

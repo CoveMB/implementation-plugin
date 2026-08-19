@@ -73,6 +73,13 @@ push, open a pull request, or perform an external action.
 Questions about the diff do not accept it. Keep the status unchanged until the
 exact disposition is submitted directly.
 
+An open material finding uses a typed remediation round trip. Persist the
+initial review evidence in `reviewing`, enter `remediating`, make the bounded
+repair, and require renewed affected-scope reports that name every initial
+finding before returning to `reviewing`. Fresh verification then advances
+through `verified` to `awaiting-diff-approval`. Questions and discussion do not
+repair findings or advance the lifecycle.
+
 ## 5. Close a Final Program
 
 Use this route only after the accepted increment is final and traceability

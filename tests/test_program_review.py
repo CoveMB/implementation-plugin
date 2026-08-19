@@ -263,6 +263,233 @@ class ProgramReviewTests(unittest.TestCase):
             ],
         )
 
+    def repair_open_finding(
+        self,
+        fixture: BootstrapFixture,
+        *,
+        finding_id: str = "F-OPEN",
+    ) -> None:
+        requirements_path = fixture.repository / "reviews/requirements.json"
+        requirements = json.loads(requirements_path.read_text(encoding="utf-8"))
+        requirements.update(
+            report_id="requirements-follow-up",
+            follow_up_for_finding_ids=[finding_id],
+            persisted_at="2026-08-18T10:30:00Z",
+            reconciled_at="2026-08-18T10:40:00Z",
+            findings=[
+                {
+                    "finding_id": finding_id,
+                    "report_id": "requirements-follow-up",
+                    "scope": "requirements",
+                    "classification": "material",
+                    "summary": "review found a material defect",
+                    "evidence": "exact evidence",
+                    "impact": "requested behavior is not met",
+                    "confidence": "high",
+                    "remediation": "repair before diff approval",
+                    "disposition": "repaired",
+                    "affected_requirement_or_invariant": "archive output",
+                    "severity": "high",
+                    "inspection_path": "archive-output.txt",
+                    "decision_reference": "none",
+                }
+            ],
+        )
+        requirements_path.write_bytes(canonical_json(requirements))
+
+        evidence_path = fixture.repository / "reviews/test-evidence.json"
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        evidence["remediation_cycles"] = [
+            {
+                "cycle_id": "repair-open-finding",
+                "finding_ids": [finding_id],
+                "started_at": "2026-08-18T10:15:00Z",
+                "completed_at": "2026-08-18T10:20:00Z",
+                "regression_command": "python3 -m unittest tests.test_archive_output",
+                "intended_failure": "archive output failed its requirement",
+                "observed_failure": "archive output failed its requirement",
+                "repair": "corrected the archive output",
+                "verification_command": "python3 -m unittest tests.test_archive_output",
+                "verification_result": "passed with exit 0",
+                "renewed_report_ids": ["requirements-follow-up"],
+                "changed_paths": ["archive-output.txt"],
+                "affected_scopes": ["requirements"],
+            }
+        ]
+        evidence_path.write_bytes(canonical_json(evidence))
+
+    def test_material_finding_round_trip_returns_to_diff_gate(self) -> None:
+        fixture, program_root, observation = reviewing_program(self.add_open_finding)
+        try:
+            remediation = REVIEW.persist_review_remediation(program_root, observation)
+            self.assertEqual(remediation.increment_state, "remediating")
+            self.assertEqual(remediation.unresolved_finding_ids, ("F-OPEN",))
+
+            (fixture.repository / "archive-output.txt").write_text(
+                "repaired archive output\n", encoding="utf-8"
+            )
+            self.repair_open_finding(fixture)
+            repaired = ACTIVATION.inspect_repository(
+                fixture.repository, fixture.head
+            ).observation
+
+            returned = REVIEW.return_review_to_reviewing(program_root, repaired)
+            self.assertEqual(returned.increment_state, "reviewing")
+            completed = REVIEW.persist_review_preparation(program_root, repaired)
+            self.assertEqual(completed.increment_state, "awaiting-diff-approval")
+
+            evidence = json.loads(
+                (program_root / "increments/ARCHIVE-INDEX/review-evidence.json")
+                .read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                tuple(item["report_id"] for item in evidence["reports"]),
+                (
+                    "requirements-initial",
+                    "architecture-initial",
+                    "test-evidence-initial",
+                    "requirements-follow-up",
+                ),
+            )
+            self.assertEqual(evidence["findings"][0]["finding_id"], "F-OPEN")
+            self.assertEqual(evidence["findings"][0]["disposition"], "repaired")
+            self.assertEqual(
+                evidence["findings"][0]["evidence"], "exact evidence"
+            )
+            self.assertEqual(
+                evidence["findings"][0]["impact"],
+                "requested behavior is not met",
+            )
+            self.assertEqual(
+                evidence["findings"][0]["remediation"],
+                "repair before diff approval",
+            )
+            self.assertEqual(
+                evidence["remediation_cycles"][0]["finding_ids"], ["F-OPEN"]
+            )
+        finally:
+            fixture.close()
+
+    def test_review_remediation_rejects_incomplete_follow_up_without_status_write(
+        self,
+    ) -> None:
+        fixture, program_root, observation = reviewing_program(self.add_open_finding)
+        try:
+            REVIEW.persist_review_remediation(program_root, observation)
+            (fixture.repository / "archive-output.txt").write_text(
+                "changed but not reviewed\n", encoding="utf-8"
+            )
+            self.repair_open_finding(fixture, finding_id="F-OTHER")
+            changed = ACTIVATION.inspect_repository(
+                fixture.repository, fixture.head
+            ).observation
+            status_path = program_root / "state/status.json"
+            before = status_path.read_bytes()
+
+            with self.assertRaisesRegex(ValueError, "unknown initial finding"):
+                REVIEW.return_review_to_reviewing(program_root, changed)
+
+            self.assertEqual(status_path.read_bytes(), before)
+        finally:
+            fixture.close()
+
+    def test_review_remediation_rejects_unrelated_same_id_follow_up(self) -> None:
+        fixture, program_root, observation = reviewing_program(self.add_open_finding)
+        try:
+            REVIEW.persist_review_remediation(program_root, observation)
+            (fixture.repository / "archive-output.txt").write_text(
+                "repaired archive output\n", encoding="utf-8"
+            )
+            self.repair_open_finding(fixture)
+            requirements_path = fixture.repository / "reviews/requirements.json"
+            requirements = json.loads(
+                requirements_path.read_text(encoding="utf-8")
+            )
+            requirements["findings"][0]["summary"] = "unrelated replacement issue"
+            requirements_path.write_bytes(canonical_json(requirements))
+            repaired = ACTIVATION.inspect_repository(
+                fixture.repository, fixture.head
+            ).observation
+            status_path = program_root / "state/status.json"
+            before = status_path.read_bytes()
+
+            with self.assertRaisesRegex(ValueError, "does not match initial finding"):
+                REVIEW.return_review_to_reviewing(program_root, repaired)
+
+            self.assertEqual(status_path.read_bytes(), before)
+        finally:
+            fixture.close()
+
+    def test_review_remediation_status_boundaries_are_idempotent(self) -> None:
+        fixture, program_root, observation = reviewing_program(self.add_open_finding)
+        try:
+            first = REVIEW.persist_review_remediation(program_root, observation)
+            second = REVIEW.persist_review_remediation(program_root, observation)
+            self.assertFalse(first.recovered)
+            self.assertTrue(second.recovered)
+
+            (fixture.repository / "archive-output.txt").write_text(
+                "repaired archive output\n", encoding="utf-8"
+            )
+            self.repair_open_finding(fixture)
+            repaired = ACTIVATION.inspect_repository(
+                fixture.repository, fixture.head
+            ).observation
+            first_return = REVIEW.return_review_to_reviewing(program_root, repaired)
+            second_return = REVIEW.return_review_to_reviewing(program_root, repaired)
+            self.assertFalse(first_return.recovered)
+            self.assertTrue(second_return.recovered)
+        finally:
+            fixture.close()
+
+    def test_divergent_review_remediation_status_is_preserved_and_stops(self) -> None:
+        fixture, program_root, observation = reviewing_program(self.add_open_finding)
+        try:
+            REVIEW.persist_review_remediation(program_root, observation)
+            status_path = program_root / "state/status.json"
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            status["transition_authority"]["event_id"] = "DIVERGENT"
+            status_path.write_bytes(canonical_json(status))
+            before = status_path.read_bytes()
+
+            with self.assertRaisesRegex(ValueError, "transition authority"):
+                REVIEW.persist_review_remediation(program_root, observation)
+
+            self.assertEqual(status_path.read_bytes(), before)
+        finally:
+            fixture.close()
+
+    def test_retained_review_remediation_history_is_digest_bound(self) -> None:
+        fixture, program_root, observation = reviewing_program(self.add_open_finding)
+        try:
+            REVIEW.persist_review_remediation(program_root, observation)
+            (fixture.repository / "archive-output.txt").write_text(
+                "repaired archive output\n", encoding="utf-8"
+            )
+            self.repair_open_finding(fixture)
+            repaired = ACTIVATION.inspect_repository(
+                fixture.repository, fixture.head
+            ).observation
+            REVIEW.return_review_to_reviewing(program_root, repaired)
+
+            status_path = program_root / "state/status.json"
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            status["review_remediation_binding"]["raw_report_bindings"][0][
+                "sha256"
+            ] = "0" * 64
+            status_path.write_bytes(canonical_json(status))
+            before = repository_snapshot(program_root)
+
+            self.assertIn(
+                "review remediation history binding is invalid",
+                REVIEW.validate_state_authority(program_root, repaired),
+            )
+            with self.assertRaisesRegex(ValueError, "history binding"):
+                REVIEW.build_review_preparation(program_root, repaired)
+            self.assertEqual(repository_snapshot(program_root), before)
+        finally:
+            fixture.close()
+
     def change_verification_exit(self, fixture: BootstrapFixture) -> None:
         path = fixture.repository / "reviews/test-evidence.json"
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -319,6 +546,46 @@ class ProgramReviewTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "review-preparation-required"):
                 REVIEW.apply_state_transition(program_root, request, observation)
             self.assertEqual(status_path.read_bytes(), before)
+        finally:
+            fixture.close()
+
+    def test_direct_generic_review_remediation_edges_are_quarantined(self) -> None:
+        fixture, program_root, observation = reviewing_program(self.add_open_finding)
+        try:
+            status_path = program_root / "state/status.json"
+
+            def request(target: str):
+                status = json.loads(status_path.read_text(encoding="utf-8"))
+                return REVIEW.TransitionRequest(
+                    expected_status_sha256=REVIEW.sha256_file(status_path),
+                    expected_state_sequence=status["state_sequence"],
+                    target_program_state="active",
+                    target_increment_id="ARCHIVE-INDEX",
+                    target_increment_state=target,
+                    transition_event_id="GENERIC-REMEDIATION",
+                    action_authorization_id=status["execution_authorization"][
+                        "authorization_id"
+                    ],
+                    evidence={
+                        "action_scope": status["execution_authorization"]["scope"]
+                    },
+                    authority_kind="action-authorization",
+                )
+
+            before = status_path.read_bytes()
+            with self.assertRaisesRegex(ValueError, "typed-review-remediation-required"):
+                REVIEW.apply_state_transition(
+                    program_root, request("remediating"), observation
+                )
+            self.assertEqual(status_path.read_bytes(), before)
+
+            REVIEW.persist_review_remediation(program_root, observation)
+            remediating = status_path.read_bytes()
+            with self.assertRaisesRegex(ValueError, "typed-review-remediation-required"):
+                REVIEW.apply_state_transition(
+                    program_root, request("reviewing"), observation
+                )
+            self.assertEqual(status_path.read_bytes(), remediating)
         finally:
             fixture.close()
 

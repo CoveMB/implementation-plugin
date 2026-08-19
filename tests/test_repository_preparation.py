@@ -767,6 +767,68 @@ class ExecutionWorkspaceValidationTests(unittest.TestCase):
             ("archive-output.txt", "catalog.txt"),
         )
 
+    def test_reviewing_requires_every_declared_modify_path(self) -> None:
+        second_path = self.fixture.root / "second.txt"
+        second_path.write_text("second baseline\n", encoding="utf-8")
+        run_git(self.fixture.root, "add", "second.txt")
+        run_git(self.fixture.root, "commit", "-m", "add second baseline")
+        base = run_git(self.fixture.root, "rev-parse", "HEAD").stdout.decode().strip()
+        initial = PREPARATION.inspect_repository(self.fixture.root, base)
+        baseline = replace(
+            self.baseline,
+            workspace_observation=dict(initial.observation.__dict__),
+            file_map=replace(
+                self.baseline.file_map,
+                modify=("catalog.txt", "second.txt"),
+            ),
+            path_baselines=(
+                PREPARATION.ExecutionPathBaseline(
+                    "archive-output.txt", "Create", None
+                ),
+                PREPARATION.ExecutionPathBaseline(
+                    "catalog.txt",
+                    "Modify",
+                    sha256_file(self.fixture.root / "catalog.txt"),
+                ),
+                PREPARATION.ExecutionPathBaseline(
+                    "second.txt", "Modify", sha256_file(second_path)
+                ),
+                PREPARATION.ExecutionPathBaseline(
+                    "settings.txt",
+                    "Preserve",
+                    sha256_file(self.fixture.root / "settings.txt"),
+                ),
+            ),
+        )
+        (self.fixture.root / "catalog.txt").write_text("changed\n", encoding="utf-8")
+        (self.fixture.root / "archive-output.txt").write_text(
+            "complete\n", encoding="utf-8"
+        )
+
+        assessment = PREPARATION.validate_execution_workspace(
+            self.program_root,
+            baseline,
+            PREPARATION.inspect_repository(self.fixture.root, base),
+            increment_state="reviewing",
+        )
+
+        self.assertIn(
+            "reviewing workspace has unchanged Modify path: second.txt",
+            assessment.issues,
+        )
+        second_path.write_text("second changed\n", encoding="utf-8")
+        complete = PREPARATION.validate_execution_workspace(
+            self.program_root,
+            baseline,
+            PREPARATION.inspect_repository(self.fixture.root, base),
+            increment_state="reviewing",
+        )
+        self.assertTrue(complete.valid, complete.issues)
+        self.assertEqual(
+            tuple(item["path"] for item in complete.product_delta),
+            ("archive-output.txt", "catalog.txt", "second.txt"),
+        )
+
     def test_rejects_preserved_unmapped_staged_deleted_and_unsafe_paths(self) -> None:
         cases = (
             (

@@ -267,6 +267,8 @@ def load_raw_review_report(path: Path, expected_scope: str) -> dict[str, object]
         "review_basis",
         "prior_conclusions_withheld",
         "findings",
+        "report_id",
+        "follow_up_for_finding_ids",
         "risk_predicates",
         "test_first_evidence",
         "alternative_verification",
@@ -300,6 +302,18 @@ def load_raw_review_report(path: Path, expected_scope: str) -> dict[str, object]
         raise ValueError(f"raw report scope is not {expected_scope}")
     if not isinstance(value.get("findings"), list):
         raise ValueError(f"raw {expected_scope} report findings must be a list")
+    report_id = value.get("report_id")
+    if report_id is not None and not _nonempty(report_id):
+        raise ValueError(f"raw {expected_scope} report_id must be non-empty")
+    follow_up = value.get("follow_up_for_finding_ids")
+    if follow_up is not None and (
+        not isinstance(follow_up, list)
+        or not follow_up
+        or not all(_nonempty(item) for item in follow_up)
+    ):
+        raise ValueError(
+            f"raw {expected_scope} follow_up_for_finding_ids must be non-empty strings"
+        )
     if expected_scope == "architecture" and not isinstance(
         value.get("risk_predicates"), list
     ):
