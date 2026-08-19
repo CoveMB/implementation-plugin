@@ -6,14 +6,14 @@ clean final go/no-go before implementation-plan rewriting.
 **Reviewed source identities:**
 
 - `docs/superpowers/plans/2026-08-15-program-bootstrap-launch-repair.md`
-  - SHA-256: `b178265c61626f4bbe0e7d14a632e7a22d3401ad7fdde9665331a38e6181acee`
-  - 3,910 lines
+  - SHA-256: `a3614d7a7f49156a4466338789c5286054cc11ec63685cf65fa0000deab0d648`
+  - 1,036 lines
 - `docs/superpowers/plans/2026-08-14-continuation-hardening.md`
-  - SHA-256: `b5d6de6dd50350362dbba62a2ebcff7e3313fd3988d88e4c119874d1ecd9b8ab`
-  - 843 lines
+  - SHA-256: `6d37078bb3b6384c855694bb18540437f43d00f8cc7e21521386c81db865ec1e`
+  - 767 lines
 - Repository baseline: local `main` at
   `ad654b98634efdbb13d74b71ddbdc80e4fe5e157`.
-- Both source plans are untracked user-owned files. Rewriting must preserve their
+- Both source plans originated as user-owned files. Rewriting must preserve their
   approved obligations intentionally and must not silently discard later edits.
 
 ## Purpose
@@ -340,9 +340,9 @@ diff remains a direct user decision:
 The default is `approval:full-increment`. A request to create or activate a new
 program under `approval:full-diff` or `approval:full` fails before proposal,
 approval, grant, or status writes with
-`unsupported-new-program-approval-mode`. Those modes currently bypass user diff
-acceptance, while `approval:full` also implies automatic continuation; both
-contradict this design's explicit diff-disposition boundary.
+`unsupported-new-program-approval-mode`. Both modes permit automatic diff
+acceptance, and historical `approval:full` records may describe broader
+continuation semantics; neither grants successor authority under this design.
 
 Existing persisted legacy programs that already name either automatic mode
 remain readable and retain their existing validated current-increment behavior.

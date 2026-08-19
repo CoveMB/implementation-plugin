@@ -145,11 +145,11 @@ APPROVAL_MODE_POLICIES = {
     ),
     "approval:full": ApprovalModePolicy(
         mode="approval:full",
-        scope="conversation-bounded-multiple-increments",
+        scope="one-increment",
         routine_plan_pause=False,
         interruptions=("hard-stop",),
         diff_acceptance="automatic-after-verification-and-packet",
-        automatic_continuation=True,
+        automatic_continuation=False,
     ),
 }
 

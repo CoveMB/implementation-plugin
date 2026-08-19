@@ -116,14 +116,18 @@ def _candidate_file_digests(
     }
 
 
-def _repository_head(repository_root: Path) -> str:
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=repository_root,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+def _repository_head(repository_root: Path, *, timeout_seconds: float = 10.0) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repository_root,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise ValueError("repository HEAD resolution timed out") from error
     if result.returncode != 0:
         raise ValueError("repository HEAD could not be resolved")
     return result.stdout.strip()

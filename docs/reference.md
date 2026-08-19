@@ -109,8 +109,12 @@ Modes do not grant action authority.
 | `approval:standard` | One increment | Yes | User | Stops for plan approval, user-owned material decisions, contradictions, hard stops, and diff acceptance |
 | `approval:pre-approve` | One increment | No | User | Stops for user-owned decisions, program amendments, contradictions, hard stops, and diff acceptance |
 | `approval:full-increment` | One increment | No | User | Runs through verification, then stops for diff acceptance unless a hard stop occurs |
-| `approval:full-diff` | One increment | No | Policy permits automatic acceptance only after verification and a valid bound packet | The 0.1.1 typed route still ends at `accept-stop`; it cannot begin another increment |
-| `approval:full` | Future multi-increment policy | No | Policy permits automatic acceptance only after verification and a valid bound packet | Plan A does not persist continuation; the Plan B route is required |
+| `approval:full-diff` | Legacy current increment | No | Legacy policy permits automatic acceptance only after verification and a valid bound packet | Cannot begin another increment |
+| `approval:full` | Legacy current increment | No | Legacy policy permits automatic acceptance only after verification and a valid bound packet | Cannot begin another increment; discovery stops at `legacy-rollover-upgrade-required` |
+
+New-program proposal construction, bootstrap, and launch reject
+`approval:full-diff` and `approval:full` before every write. Those modes are
+dual-read compatibility for already persisted legacy programs only.
 
 When a direct creation request omits a mode, proposal construction defaults to
 `approval:full-increment` before producing any bytes. The selected mode is then

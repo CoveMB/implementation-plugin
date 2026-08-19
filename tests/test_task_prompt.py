@@ -66,6 +66,15 @@ class TaskPromptTests(unittest.TestCase):
                         {"schema_version": "example-command/v1", field: "0" * 64}
                     )
 
+    def test_self_digest_nested_in_a_tuple_is_rejected_before_rendering(self) -> None:
+        command = {
+            "schema_version": "example-command/v1",
+            "items": ({"prompt_sha256": "0" * 64},),
+        }
+
+        with self.assertRaisesRegex(ValueError, "self-digest"):
+            self.module.render_exact_prompt(command)
+
 
 if __name__ == "__main__":
     unittest.main()

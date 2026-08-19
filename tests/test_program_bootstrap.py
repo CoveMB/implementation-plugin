@@ -63,6 +63,28 @@ class ProgramBootstrapTestCase(unittest.TestCase):
 
 
 class PublicationTests(ProgramBootstrapTestCase):
+    def test_repository_head_timeout_is_bounded_and_translated(self) -> None:
+        def timeout_run(*args, timeout=None, **kwargs):
+            if timeout is None:
+                raise AssertionError("git HEAD resolution omitted its timeout")
+            raise subprocess.TimeoutExpired(args[0], timeout)
+
+        try:
+            with mock.patch.object(
+                BOOTSTRAP.subprocess,
+                "run",
+                side_effect=timeout_run,
+            ):
+                BOOTSTRAP._repository_head(self.fixture.repository)
+        except AssertionError as error:
+            self.fail(str(error))
+        except subprocess.TimeoutExpired as error:
+            self.fail(f"git HEAD timeout was not translated: {error}")
+        except ValueError as error:
+            self.assertIn("timed out", str(error))
+        else:
+            self.fail("git HEAD timeout did not fail closed")
+
     def test_manifest_last_publication_is_valid_and_idempotent(self) -> None:
         receipt = self.publish()
         self.assertEqual(receipt.program_root, str(self.fixture.program_root))

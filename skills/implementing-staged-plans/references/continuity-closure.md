@@ -26,7 +26,7 @@ The next legal action explains navigation only. It never renews conversational a
 
 For automatic continuation, record evidence for each approved suitability predicate: program-part boundary, risk or architecture domain, workspace or base, superseded discussion, evidence or expertise, and lossless summary. A failed or missing predicate requires a durable handoff.
 
-One-increment modes stop after their increment. `approval:full` can continue automatically only within the same suitable conversation. In every new conversation, require the submitted matching brief and explicit renewed user authority even when the requested mode remains `approval:full`.
+Every approval mode stops after its current increment. A successor requires the submitted matching brief and explicit renewed user authority, including when a persisted legacy program remains in `approval:full`; conversation suitability alone never supplies successor authority.
 
 ## Revalidate a Resume
 

@@ -628,13 +628,17 @@ def evaluate_continuation(candidate: ConversationAssessment) -> tuple[bool, tupl
                 issues.append(f"handoff required: {item[0]} is not suitable")
         if tuple(names) != CONVERSATION_SUITABILITY_PREDICATES:
             issues.append("each conversation suitability predicate is required exactly once in order")
-    if policy is not None and not policy.automatic_continuation:
+    if (
+        policy is not None
+        and not policy.automatic_continuation
+        and not candidate.explicit_renewed_authority
+    ):
         issues.append("one-increment approval mode requires a stop")
     if not _is_sha256(candidate.submitted_brief_sha256) or not _is_sha256(candidate.expected_brief_sha256):
         issues.append("conversation brief binding is invalid")
+    elif candidate.submitted_brief_sha256 != candidate.expected_brief_sha256:
+        issues.append("submitted brief does not match")
     if not candidate.same_conversation:
-        if candidate.submitted_brief_sha256 != candidate.expected_brief_sha256:
-            issues.append("new conversation submitted brief does not match")
         if not candidate.explicit_renewed_authority:
             issues.append("new conversation requires explicit renewed authority")
     return (not issues, tuple(sorted(set(issues))))
@@ -1391,17 +1395,8 @@ def validate_continuity_bundle(
     issues.extend(validate_increment_brief(brief_record))
     issues.extend(validate_handoff(handoff_record))
     continuation_allowed, continuation_issues = evaluate_continuation(conversation)
-    if conversation.approval_mode == "approval:full":
-        if not continuation_allowed:
-            issues.extend(continuation_issues)
-    elif continuation_allowed:
-        issues.append("one-increment mode cannot continue automatically")
-    else:
-        issues.extend(
-            issue
-            for issue in continuation_issues
-            if issue != "one-increment approval mode requires a stop"
-        )
+    if not continuation_allowed:
+        issues.extend(continuation_issues)
     issues.extend(validate_resume_record(resume))
     bundle_resume_bindings = {
         "program_id": handoff_record.program_id,

@@ -18,7 +18,7 @@ def _contains_self_digest(value: object) -> bool:
             key in SELF_DIGEST_FIELDS or _contains_self_digest(item)
             for key, item in value.items()
         )
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return any(_contains_self_digest(item) for item in value)
     return False
 

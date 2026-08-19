@@ -229,7 +229,7 @@ Require `destination="new-task"` to have `mandatory_stop=True` and one validated
 - [ ] **Step 2: Run RED**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_continuity_closure tests.test_front_door_contract -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_continuity_closure tests.test_front_door_contract -v
 ```
 
 Expected: failure naming the missing structured result.
@@ -241,7 +241,7 @@ Validate state/action text, destination, mandatory stop, and command schema. Ren
 - [ ] **Step 4: Run GREEN and focused self-review**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_continuity_closure tests.test_front_door_contract -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_continuity_closure tests.test_front_door_contract -v
 rtk git diff --check
 rtk git diff -- skills/implementing-staged-plans/scripts/continuity_closure.py skills/implementing-staged-plans/references/continuity-closure.md skills/implementing-staged-plans/SKILL.md tests/test_continuity_closure.py tests/test_front_door_contract.py
 ```
@@ -312,7 +312,7 @@ For immediate continue, persist/adopt diff approval then accepted-current status
 - [ ] **Step 4: Run RED**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_diff_disposition tests.test_program_continuation tests.test_program_discovery -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_diff_disposition tests.test_program_continuation tests.test_program_discovery -v
 ```
 
 - [ ] **Step 5: Implement pure builders and the acceptance prefix**
@@ -324,7 +324,7 @@ For a later request, validate accepted-stop plus exactly one satisfied successor
 - [ ] **Step 6: Run GREEN and focused self-review**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_diff_disposition tests.test_program_continuation tests.test_program_discovery tests.test_continuity_closure -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_diff_disposition tests.test_program_continuation tests.test_program_discovery tests.test_continuity_closure -v
 rtk git diff --check
 rtk git diff -- skills/implementing-staged-plans/scripts/diff_disposition.py skills/implementing-staged-plans/scripts/program_continuation.py skills/implementing-staged-plans/scripts/continuity_closure.py skills/implementing-staged-plans/scripts/program_discovery.py tests/test_diff_disposition.py tests/test_program_continuation.py tests/test_program_discovery.py tests/program_bootstrap_support.py
 ```
@@ -406,7 +406,7 @@ For immediate continuation, start after exact accepted-continue status. For late
 - [ ] **Step 3: Run RED**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_program_continuation tests.test_program_rollover tests.test_program_discovery tests.test_state_authority tests.test_repository_preparation tests.test_approval_checkpoint -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_program_continuation tests.test_program_rollover tests.test_program_discovery tests.test_state_authority tests.test_repository_preparation tests.test_approval_checkpoint -v
 ```
 
 - [ ] **Step 4: Implement authority-first status-last persistence**
@@ -422,9 +422,9 @@ Validate the unique rollover chain from genesis to status-current successor. Loa
 - [ ] **Step 6: Expose bounded CLIs and run GREEN**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 skills/implementing-staged-plans/scripts/program_continuation.py render PROGRAM_ROOT
-rtk env PYTHONDWRITEBYTECODE=1 python3 skills/implementing-staged-plans/scripts/program_rollover.py apply PROGRAM_ROOT --prompt-file PROMPT --repository REPOSITORY --base-commit BASE
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_program_continuation tests.test_program_rollover tests.test_program_discovery tests.test_state_authority tests.test_repository_preparation tests.test_approval_checkpoint tests.test_program_activation -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 skills/implementing-staged-plans/scripts/program_continuation.py render PROGRAM_ROOT
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 skills/implementing-staged-plans/scripts/program_rollover.py apply PROGRAM_ROOT --prompt-file PROMPT --repository REPOSITORY --base-commit BASE
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_program_continuation tests.test_program_rollover tests.test_program_discovery tests.test_state_authority tests.test_repository_preparation tests.test_approval_checkpoint tests.test_program_activation -v
 ```
 
 - [ ] **Step 7: Focused self-review**
@@ -498,7 +498,7 @@ Register `resume-blocked-program` as `explicit-local`. Reject caller-supplied re
 - [ ] **Step 3: Run RED**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_blocked_recovery tests.test_state_authority tests.test_program_discovery tests.test_approval_checkpoint -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_blocked_recovery tests.test_state_authority tests.test_program_discovery tests.test_approval_checkpoint -v
 ```
 
 - [ ] **Step 4: Implement one canonical context/evidence validator**
@@ -508,9 +508,9 @@ Share the validator across block writer, discovery, prompt builder, and resume s
 - [ ] **Step 5: Expose bounded CLIs and run GREEN**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 skills/implementing-staged-plans/scripts/blocked_recovery.py render PROGRAM_ROOT --candidate-file CANDIDATE
-rtk env PYTHONDWRITEBYTECODE=1 python3 skills/implementing-staged-plans/scripts/blocked_recovery.py apply PROGRAM_ROOT --prompt-file PROMPT --repository REPOSITORY --base-commit BASE
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_blocked_recovery tests.test_state_authority tests.test_program_discovery tests.test_approval_checkpoint -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 skills/implementing-staged-plans/scripts/blocked_recovery.py render PROGRAM_ROOT --candidate-file CANDIDATE
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 skills/implementing-staged-plans/scripts/blocked_recovery.py apply PROGRAM_ROOT --prompt-file PROMPT --repository REPOSITORY --base-commit BASE
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_blocked_recovery tests.test_state_authority tests.test_program_discovery tests.test_approval_checkpoint -v
 ```
 
 - [ ] **Step 6: Focused self-review**
@@ -573,13 +573,13 @@ Cover diff approval → accepted status; accepted status → action authorizatio
 - [ ] **Step 5: Run RED, implement only production-driven fixture support, then GREEN**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_multi_increment_lifecycle -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_multi_increment_lifecycle -v
 ```
 
 Expected RED: first missing production boundary, never a fixture-manufactured authority pass.
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_multi_increment_lifecycle tests.test_program_continuation tests.test_program_rollover tests.test_blocked_recovery -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_multi_increment_lifecycle tests.test_program_continuation tests.test_program_rollover tests.test_blocked_recovery -v
 ```
 
 - [ ] **Step 6: Focused self-review**
@@ -629,7 +629,7 @@ Require exactly the immediate and later scenario IDs, repository-contained norma
 - [ ] **Step 2: Run RED and implement the offline contract**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_integrated_pressure -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_integrated_pressure -v
 ```
 
 The evaluator subcommand runs each prompt in a fresh isolated session, stops on first failure, and never overwrites a result. It does not modify program state, install the skill, or choose a model/provider without the approved command.
@@ -637,7 +637,7 @@ The evaluator subcommand runs each prompt in a fresh isolated session, stops on 
 - [ ] **Step 3: Document and stop at the external gate**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 tests/integrated_pressure_support.py evaluate-continuation-replay --scenario-catalog tests/pressure/continuation-replay/scenarios.json --output-directory tests/pressure/continuation-replay/results --evaluator codex
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 tests/integrated_pressure_support.py evaluate-continuation-replay --scenario-catalog tests/pressure/continuation-replay/scenarios.json --output-directory tests/pressure/continuation-replay/results --evaluator codex
 ```
 
 Before running, report the exact command, evaluator/client version preflight, source-egress/authentication/model-capacity implications, number of fresh tasks, write targets, and existing-target check. Run once only after explicit evaluator and evidence-write authority. If not authorized, record `live continuation replay: not run`; deterministic source completion remains possible.
@@ -645,7 +645,7 @@ Before running, report the exact command, evaluator/client version preflight, so
 - [ ] **Step 4: Run offline GREEN and focused self-review**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_integrated_pressure -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_integrated_pressure -v
 rtk git diff --check
 rtk git diff -- tests/pressure/continuation-replay tests/integrated_pressure_support.py tests/test_integrated_pressure.py docs/maintainers.md
 ```
@@ -696,7 +696,7 @@ Add front-door sections `Dispose the Current Diff`, `Continue an Accepted Progra
 - [ ] **Step 3: Use alternative verification for synchronized prose**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_front_door_contract tests.test_distribution_documentation tests.test_package_validation -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_front_door_contract tests.test_distribution_documentation tests.test_package_validation -v
 rtk rg -n "accept-continue|accepted-state-continuation|current_increment_authority_binding|blocked-recovery|legacy-rollover-upgrade-required" skills/implementing-staged-plans docs implementing-staged-plans-consolidated-design-plan-final.md implementing-staged-plans-bootstrap-execution-review-runbook.md
 rtk git diff --check
 ```
@@ -706,17 +706,22 @@ Expected: tests pass, normative contracts have one owner with precise references
 - [ ] **Step 4: Run focused behavioral GREEN**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_diff_disposition tests.test_program_continuation tests.test_program_rollover tests.test_blocked_recovery tests.test_multi_increment_lifecycle tests.test_program_discovery tests.test_state_authority tests.test_repository_preparation tests.test_approval_checkpoint tests.test_continuity_closure tests.test_front_door_contract tests.test_package_validation tests.test_distribution_documentation -v
-rtk env PYTHONDWRITEBYTECODE=1 python3 /Users/CoveMB/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/implementing-staged-plans
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_diff_disposition tests.test_program_continuation tests.test_program_rollover tests.test_blocked_recovery tests.test_multi_increment_lifecycle tests.test_program_discovery tests.test_state_authority tests.test_repository_preparation tests.test_approval_checkpoint tests.test_continuity_closure tests.test_front_door_contract tests.test_package_validation tests.test_distribution_documentation -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 "$SKILL_CREATOR_VALIDATOR" skills/implementing-staged-plans
 ```
+
+The optional external Skill Creator check requires the caller to supply
+`SKILL_CREATOR_VALIDATOR` as the exact regular `quick_validate.py` path and
+confirm that path before running it. If unavailable, skip only that optional
+check and retain the repository-owned package validator below.
 
 - [ ] **Step 5: Run package validation and the full deterministic suite exactly once**
 
 Freshly verify status and exact Plan A/Plan B scope, then run on the final unchanged candidate:
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 skills/implementing-staged-plans/scripts/validate_package.py .
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 skills/implementing-staged-plans/scripts/validate_package.py .
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 rtk git diff --check
 rtk git status --short
 rtk git diff --stat

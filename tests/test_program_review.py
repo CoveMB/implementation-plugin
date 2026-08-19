@@ -179,7 +179,7 @@ class ProgramReviewTests(unittest.TestCase):
             (
                 "missing raw",
                 lambda fixture: (fixture.repository / "reviews/requirements.json").unlink(),
-                "raw requirements report",
+                "missing Create path",
             ),
             (
                 "symlink raw",
@@ -189,7 +189,7 @@ class ProgramReviewTests(unittest.TestCase):
                         "architecture.json"
                     ),
                 ),
-                "regular non-symlink",
+                "execution path is unsafe",
             ),
         )
         for label, mutate, message in mutations:
@@ -201,9 +201,7 @@ class ProgramReviewTests(unittest.TestCase):
                         fixture.repository, fixture.head
                     ).observation
                     before = repository_snapshot(program_root)
-                    with self.assertRaisesRegex(
-                        ValueError, "missing Create path|execution path is unsafe"
-                    ):
+                    with self.assertRaisesRegex(ValueError, message):
                         ACTIVATION.advance_execution_state(
                             program_root, "reviewing", changed
                         )

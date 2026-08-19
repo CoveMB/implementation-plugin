@@ -467,7 +467,7 @@ Parse exactly one `## File map` with one `### Create`, `### Modify`, and `### Pr
 - [ ] **Step 4: Enforce at every Plan A sink and run GREEN**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_state_authority tests.test_repository_preparation tests.test_approval_checkpoint tests.test_program_activation -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_state_authority tests.test_repository_preparation tests.test_approval_checkpoint tests.test_program_activation -v
 rtk git diff --check
 ```
 
@@ -535,7 +535,7 @@ Also drive the production transition sink through `authorized -> implementing ->
 - [ ] **Step 2: Run RED**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_program_activation tests.test_repository_preparation tests.test_state_authority -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_program_activation tests.test_repository_preparation tests.test_state_authority -v
 ```
 
 - [ ] **Step 3: Implement the shared typed transaction**
@@ -551,7 +551,7 @@ Before baseline, compare the normalized launch observation exactly. After baseli
 - [ ] **Step 5: Run GREEN and focused self-review**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_program_activation tests.test_repository_preparation tests.test_state_authority tests.test_program_discovery tests.test_front_door_contract -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_program_activation tests.test_repository_preparation tests.test_state_authority tests.test_program_discovery tests.test_front_door_contract -v
 rtk git diff --check
 rtk git diff -- skills/implementing-staged-plans/scripts/program_activation.py skills/implementing-staged-plans/scripts/repository_preparation.py skills/implementing-staged-plans/scripts/state_authority.py skills/implementing-staged-plans/scripts/approval_checkpoint.py skills/implementing-staged-plans/references/approval-checkpoints.md skills/implementing-staged-plans/references/execution-discipline.md tests/test_program_activation.py tests/test_repository_preparation.py tests/test_state_authority.py tests/test_front_door_contract.py
 ```
@@ -610,7 +610,7 @@ Reject caller-selected evidence or packet paths, files not declared by the exact
 - [ ] **Step 3: Run RED**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_review_coordination tests.test_program_review tests.test_state_authority tests.test_program_discovery -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_review_coordination tests.test_program_review tests.test_state_authority tests.test_program_discovery -v
 ```
 
 - [ ] **Step 4: Implement the pure builder and status-last phases**
@@ -620,7 +620,7 @@ Resolve evidence/packet only through status-current increment storage and requir
 - [ ] **Step 5: Run GREEN and focused self-review**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_review_coordination tests.test_program_review tests.test_state_authority tests.test_program_discovery -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_review_coordination tests.test_program_review tests.test_state_authority tests.test_program_discovery -v
 rtk git diff --check
 rtk git diff -- skills/implementing-staged-plans/scripts/program_review.py skills/implementing-staged-plans/scripts/review_coordination.py skills/implementing-staged-plans/scripts/state_authority.py skills/implementing-staged-plans/scripts/program_discovery.py skills/implementing-staged-plans/references/review-coordination.md tests/test_program_review.py tests/program_bootstrap_support.py
 ```
@@ -677,7 +677,7 @@ Test final increment, no successor, multiple successors, and unsatisfied success
 - [ ] **Step 2: Run RED**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_diff_disposition tests.test_state_authority tests.test_program_discovery -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_diff_disposition tests.test_state_authority tests.test_program_discovery -v
 ```
 
 - [ ] **Step 3: Implement topological construction and the typed sink**
@@ -687,7 +687,7 @@ Build the immutable base seed from persisted program/revision, current increment
 - [ ] **Step 4: Run GREEN and focused self-review**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_diff_disposition tests.test_state_authority tests.test_program_discovery -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_diff_disposition tests.test_state_authority tests.test_program_discovery -v
 rtk git diff --check
 rtk git diff -- skills/implementing-staged-plans/scripts/diff_disposition.py skills/implementing-staged-plans/scripts/state_authority.py skills/implementing-staged-plans/scripts/program_discovery.py skills/implementing-staged-plans/references/state-authorization.md tests/test_diff_disposition.py tests/program_bootstrap_support.py
 ```
@@ -735,7 +735,7 @@ Use an accepted final first increment whose exact plan allocates both derived cl
 - [ ] **Step 2: Run RED**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_continuity_closure tests.test_program_closure tests.test_program_discovery -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_continuity_closure tests.test_program_closure tests.test_program_discovery -v
 ```
 
 - [ ] **Step 3: Implement deterministic preparation and exact approval**
@@ -745,7 +745,7 @@ Reconcile every atomic requirement exactly once, validate accepted packets/adden
 - [ ] **Step 4: Run GREEN and focused self-review**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_continuity_closure tests.test_program_closure tests.test_program_discovery tests.test_state_authority -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_continuity_closure tests.test_program_closure tests.test_program_discovery tests.test_state_authority -v
 rtk git diff --check
 rtk git diff -- skills/implementing-staged-plans/scripts/program_closure.py skills/implementing-staged-plans/scripts/continuity_closure.py skills/implementing-staged-plans/scripts/state_authority.py skills/implementing-staged-plans/scripts/program_discovery.py skills/implementing-staged-plans/references/continuity-closure.md tests/test_program_closure.py tests/program_bootstrap_support.py
 ```
@@ -788,7 +788,7 @@ Call the legacy caller-authored rollover writer; generic new-model acceptance; d
 - [ ] **Step 2: Run RED**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_state_authority tests.test_continuity_closure tests.test_program_discovery -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_state_authority tests.test_continuity_closure tests.test_program_discovery -v
 ```
 
 - [ ] **Step 3: Add defense-in-depth guards at every write sink**
@@ -798,7 +798,7 @@ The old rollover API raises unconditionally before resolving a write target. Gen
 - [ ] **Step 4: Run GREEN and focused self-review**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_state_authority tests.test_continuity_closure tests.test_program_discovery -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_state_authority tests.test_continuity_closure tests.test_program_discovery -v
 rtk git diff --check
 rtk git diff -- skills/implementing-staged-plans/scripts/state_authority.py skills/implementing-staged-plans/scripts/continuity_closure.py skills/implementing-staged-plans/scripts/program_discovery.py skills/implementing-staged-plans/references/program-discovery.md skills/implementing-staged-plans/references/state-authorization.md tests/test_state_authority.py tests/test_continuity_closure.py tests/test_program_discovery.py
 ```
@@ -849,7 +849,7 @@ Require explicit create intent; creation-only control-plane authority; one copy-
 - [ ] **Step 2: Run RED**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_front_door_contract tests.test_distribution_documentation -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_front_door_contract tests.test_distribution_documentation -v
 ```
 
 - [ ] **Step 3: Rewrite the lifecycle routes and canonical references**
@@ -859,7 +859,7 @@ Put `Create a New Program`, `Activate a Generated Program`, `Before Production M
 - [ ] **Step 4: Use alternative verification for prose fidelity**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_front_door_contract tests.test_distribution_documentation -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_front_door_contract tests.test_distribution_documentation -v
 rtk rg -n "legacy-rollover-upgrade-required|accept-stop|implementation-closure-storage/v1|program-revision-workflow-required" skills/implementing-staged-plans docs implementing-staged-plans-consolidated-design-plan-final.md implementing-staged-plans-bootstrap-execution-review-runbook.md
 rtk git diff --check
 ```
@@ -914,7 +914,7 @@ Parameterize failures after every successfully persisted prefix named in Tasks 2
 - [ ] **Step 3: Run RED, then implement only fixture support needed by production calls**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_program_bootstrap_lifecycle -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_program_bootstrap_lifecycle -v
 ```
 
 Expected: nonzero at the first missing production boundary, never a fixture-manufactured pass.
@@ -926,7 +926,7 @@ After the lifecycle passes, copy only canonical `0.1.1` package/program bytes re
 - [ ] **Step 5: Run GREEN and focused self-review**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_program_bootstrap_lifecycle tests.test_pressure_evidence -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_program_bootstrap_lifecycle tests.test_pressure_evidence -v
 rtk git diff --check
 rtk git diff -- tests/test_program_bootstrap_lifecycle.py tests/fixtures/program-bootstrap/v0.1.1 tests/program_bootstrap_support.py tests/test_pressure_evidence.py
 ```
@@ -967,7 +967,7 @@ Require every Plan A production script, exact version/description equality acros
 - [ ] **Step 2: Run RED and implement read-only validation**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_package_validation tests.test_distribution_documentation tests.test_front_door_contract -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_package_validation tests.test_distribution_documentation tests.test_front_door_contract -v
 ```
 
 Traverse with sorted `os.scandir`, `follow_symlinks=False`, and SHA-256 of `.codex-plugin/plugin.json` plus every regular file under the skill root. `--compare-installed` accepts only the explicit caller path and never installs or repairs bytes.
@@ -975,19 +975,24 @@ Traverse with sorted `os.scandir`, `follow_symlinks=False`, and SHA-256 of `.cod
 - [ ] **Step 3: Run focused GREEN**
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest tests.test_package_validation tests.test_distribution_documentation tests.test_front_door_contract -v
-rtk env PYTHONDWRITEBYTECODE=1 python3 /Users/CoveMB/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/implementing-staged-plans
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_package_validation tests.test_distribution_documentation tests.test_front_door_contract -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 "$SKILL_CREATOR_VALIDATOR" skills/implementing-staged-plans
 ```
 
-Expected: zero exits. Do not run installed comparison unless the user separately supplies the exact root.
+The optional external Skill Creator check requires the caller to supply
+`SKILL_CREATOR_VALIDATOR` as the exact regular `quick_validate.py` path and
+confirm that path before running it. If unavailable, skip only that optional
+check and retain the repository-owned package validator below. Expected: zero
+exits. Do not run installed comparison unless the user separately supplies the
+exact root.
 
 - [ ] **Step 4: Run final package validation and full deterministic suite once**
 
 Freshly verify status and scope, then run on the unchanged candidate:
 
 ```bash
-rtk env PYTHONDWRITEBYTECODE=1 python3 skills/implementing-staged-plans/scripts/validate_package.py .
-rtk env PYTHONDWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 skills/implementing-staged-plans/scripts/validate_package.py .
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 rtk git diff --check
 rtk git status --short
 rtk git diff --stat

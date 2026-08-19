@@ -321,7 +321,8 @@ class ProgramBootstrapLifecycleTests(unittest.TestCase):
                     self.discover()["disposition"], expected_disposition
                 )
                 _completed, recovered = self.run_phase(phase, prompt=prompt)
-                self.assertTrue(recovered.get("recovered", True))
+                self.assertIn("recovered", recovered)
+                self.assertTrue(recovered["recovered"])
                 completed_snapshot = repository_snapshot(self.fixture.repository)
                 self.run_phase(phase, prompt=prompt)
                 self.assertEqual(

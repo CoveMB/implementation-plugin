@@ -38,7 +38,7 @@ from repository_preparation import (
     parse_exact_file_map,
     validate_execution_workspace,
 )
-from review_coordination import validate_review_bundle
+from review_coordination import _parse_timestamp, validate_review_bundle
 from state_authority import (
     APPROVAL_SCHEMA,
     RepositoryObservation,
@@ -245,12 +245,19 @@ def _review_context(
         ):
             raise ValueError("program command evidence is invalid")
         commands.append((command, exit_code, completed_at))
-    reconciled_at = [
+    reconciled_at = tuple(
         item.get("reconciled_at")
         for item in reports
         if isinstance(item, dict) and isinstance(item.get("reconciled_at"), str)
-    ]
-    if len(reconciled_at) != len(reports) or not reconciled_at:
+    )
+    parsed_reconciliations = tuple(
+        (value, _parse_timestamp(value)) for value in reconciled_at
+    )
+    if (
+        len(reconciled_at) != len(reports)
+        or not reconciled_at
+        or any(parsed is None for _value, parsed in parsed_reconciliations)
+    ):
         raise ValueError("review reconciliation timestamps are incomplete")
     unresolved = sum(
         item.get("classification") == "material" and item.get("disposition") == "open"
@@ -262,7 +269,11 @@ def _review_context(
         for item in findings
         if isinstance(item, dict)
     ) or ("No material findings were reported.",)
-    return evidence, packet_text, finding_summaries, tuple(commands), max(reconciled_at)
+    latest_reconciliation = max(
+        parsed_reconciliations,
+        key=lambda item: item[1],
+    )[0]
+    return evidence, packet_text, finding_summaries, tuple(commands), latest_reconciliation
 
 
 def _traceability_context(
@@ -417,7 +428,17 @@ def build_closure_preparation(
     unresolved_findings = final_verification.get("unresolved_material_findings")
     if not isinstance(unresolved_findings, int) or isinstance(unresolved_findings, bool):
         raise ValueError("review unresolved material finding count is invalid")
-    verification_is_fresh = all(completed_at > latest_evidence for _, _, completed_at in commands)
+    latest_evidence_instant = _parse_timestamp(latest_evidence)
+    command_instants = tuple(
+        _parse_timestamp(completed_at) for _, _, completed_at in commands
+    )
+    verification_is_fresh = (
+        latest_evidence_instant is not None
+        and all(
+            instant is not None and instant > latest_evidence_instant
+            for instant in command_instants
+        )
+    )
     preconditions = _closure_preconditions(
         successor_id=successor_id,
         paths_allocated=paths_allocated,

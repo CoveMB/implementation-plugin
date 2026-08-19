@@ -202,7 +202,12 @@ def _package_file_inventory(root: Path) -> tuple[dict[str, str], list[str]]:
         elif not path.is_file():
             issues.append(f"{relative.as_posix()}: missing or non-regular file")
         else:
-            digests[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+            try:
+                digests[relative.as_posix()] = hashlib.sha256(
+                    path.read_bytes()
+                ).hexdigest()
+            except OSError as error:
+                issues.append(f"{relative.as_posix()}: could not be read: {error}")
 
     add_file(root / PLUGIN_MANIFEST, PLUGIN_MANIFEST)
     skill_root = root / PACKAGE_CONTENT_ROOT

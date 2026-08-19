@@ -518,6 +518,26 @@ class CompletePackageTests(PackageValidationTestCase):
         self.assertNotIn("tests/test_private.py", digests)
         self.assertNotIn(".claude-plugin/private.json", digests)
 
+    def test_package_digest_inventory_records_an_unreadable_file(self) -> None:
+        self.fixture.write_valid_package()
+        unreadable = self.fixture.root / "skills/implementing-staged-plans/SKILL.md"
+        real_read_bytes = Path.read_bytes
+
+        def read_bytes(path: Path) -> bytes:
+            if path == unreadable:
+                raise OSError("injected read failure")
+            return real_read_bytes(path)
+
+        with mock.patch.object(Path, "read_bytes", autospec=True, side_effect=read_bytes):
+            try:
+                digests, issues = VALIDATOR._package_file_inventory(self.fixture.root)
+            except OSError as error:
+                self.fail(f"package inventory leaked a file read failure: {error}")
+
+        relative = "skills/implementing-staged-plans/SKILL.md"
+        self.assertNotIn(relative, digests)
+        self.assert_issue_contains(issues, f"{relative}: could not be read")
+
     def test_installed_comparison_reports_changed_missing_unexpected_and_symlink(self) -> None:
         self.fixture.write_valid_package()
         with tempfile.TemporaryDirectory() as directory:

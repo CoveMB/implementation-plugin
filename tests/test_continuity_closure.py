@@ -309,9 +309,10 @@ class BriefAndHandoffTests(unittest.TestCase):
 
 
 class ContinuationAndResumeTests(unittest.TestCase):
-    def test_full_mode_continues_only_in_a_suitable_same_conversation(self) -> None:
+    def test_legacy_full_mode_stops_in_a_suitable_same_conversation(self) -> None:
         allowed, issues = CONTINUITY.evaluate_continuation(assessment())
-        self.assertTrue(allowed, issues)
+        self.assertFalse(allowed)
+        self.assertIn("one-increment approval mode requires a stop", issues)
         for predicate in CONTINUITY.CONVERSATION_SUITABILITY_PREDICATES:
             changed = tuple(
                 (name, False, "boundary reached") if name == predicate else item
@@ -323,7 +324,13 @@ class ContinuationAndResumeTests(unittest.TestCase):
             self.assertIn("handoff", " ".join(issues).lower())
 
     def test_one_increment_modes_stop_and_new_conversation_requires_brief_plus_authority(self) -> None:
-        for mode in ("approval:standard", "approval:pre-approve", "approval:full-increment", "approval:full-diff"):
+        for mode in (
+            "approval:standard",
+            "approval:pre-approve",
+            "approval:full-increment",
+            "approval:full-diff",
+            "approval:full",
+        ):
             with self.subTest(mode=mode):
                 self.assertFalse(CONTINUITY.evaluate_continuation(assessment(approval_mode=mode))[0])
         resumed = assessment(same_conversation=False, explicit_renewed_authority=True)
@@ -331,6 +338,11 @@ class ContinuationAndResumeTests(unittest.TestCase):
         for changed in (
             replace(resumed, explicit_renewed_authority=False),
             replace(resumed, submitted_brief_sha256="0" * 64),
+            assessment(
+                explicit_renewed_authority=True,
+                submitted_brief_sha256="a" * 64,
+                expected_brief_sha256="b" * 64,
+            ),
         ):
             self.assertFalse(CONTINUITY.evaluate_continuation(changed)[0])
 

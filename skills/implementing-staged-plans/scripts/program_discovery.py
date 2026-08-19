@@ -1255,8 +1255,40 @@ def _bootstrap_prefix_disposition(repository: Path) -> tuple[str | None, tuple[s
             )
         activation_started = False
         if manifest_committed:
-            status, _status_issues = load_json_object(target / "state/status.json")
-            approvals_path = target / "state/approvals.jsonl"
+            committed_manifest, committed_manifest_issues = load_json_object(manifest)
+            if committed_manifest is None:
+                return (
+                    "proposal-publication-recovery-required",
+                    tuple(committed_manifest_issues),
+                )
+            logical_roles = committed_manifest.get("logical_roles")
+            if not isinstance(logical_roles, dict):
+                return (
+                    "proposal-publication-recovery-required",
+                    ("published manifest logical_roles must be an object",),
+                )
+            status_path, status_path_issues = resolve_managed_path(
+                target,
+                logical_roles.get("status"),
+                role="logical role status",
+            )
+            approvals_path, approvals_path_issues = resolve_managed_path(
+                target,
+                logical_roles.get("approvals"),
+                role="logical role approvals",
+            )
+            role_issues = (*status_path_issues, *approvals_path_issues)
+            if status_path is None or approvals_path is None or role_issues:
+                return (
+                    "proposal-publication-recovery-required",
+                    tuple(role_issues),
+                )
+            status, status_issues = load_json_object(status_path)
+            if status is None:
+                return (
+                    "proposal-publication-recovery-required",
+                    tuple(status_issues),
+                )
             activation_started = (
                 isinstance(status, dict)
                 and status.get("current_increment_state") != "not-started"

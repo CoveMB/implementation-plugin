@@ -646,11 +646,11 @@ class ApprovalModeTests(unittest.TestCase):
             False,
         ),
         "approval:full": (
-            "conversation-bounded-multiple-increments",
+            "one-increment",
             False,
             ("hard-stop",),
             "automatic-after-verification-and-packet",
-            True,
+            False,
         ),
     }
 
@@ -1612,6 +1612,7 @@ class StateApplicationAndCliTests(StateAuthorityTestCase):
             "approval:pre-approve",
             "approval:full-increment",
             "approval:full-diff",
+            "approval:full",
         ):
             with self.subTest(mode=mode):
                 self.assertFalse(
@@ -1619,21 +1620,6 @@ class StateApplicationAndCliTests(StateAuthorityTestCase):
                         mode, renewed_user_authority=False, conversation_suitable=True
                     )
                 )
-        self.assertTrue(
-            AUTHORITY.may_start_next_increment(
-                "approval:full",
-                renewed_user_authority=False,
-                conversation_suitable=True,
-            )
-        )
-        self.assertFalse(
-            AUTHORITY.may_start_next_increment(
-                "approval:full",
-                renewed_user_authority=False,
-                conversation_suitable=False,
-            )
-        )
-
     def test_cli_returns_zero_one_and_two_deterministically(self) -> None:
         common = [
             "validate-state",

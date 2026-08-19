@@ -64,6 +64,49 @@ class ProgramClosureTests(unittest.TestCase):
         finally:
             fixture.close()
 
+    def test_closure_freshness_orders_timezone_offsets_by_instant(self) -> None:
+        fixture, program_root, observation = accepted_program()
+        try:
+            evidence_path = (
+                program_root
+                / "increments/ARCHIVE-INDEX/review-evidence.json"
+            )
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            evidence["reports"][0].update(
+                persisted_at="2026-08-18T12:20:00+02:00",
+                reconciled_at="2026-08-18T12:30:00+02:00",
+            )
+            for report in evidence["reports"][1:]:
+                report.update(
+                    persisted_at="2026-08-18T10:50:00Z",
+                    reconciled_at="2026-08-18T11:00:00Z",
+                )
+            evidence["final_verification"]["commands"][0]["completed_at"] = (
+                "2026-08-18T11:15:00Z"
+            )
+            evidence["final_verification"]["verified_at"] = (
+                "2026-08-18T11:20:00Z"
+            )
+            evidence_path.write_bytes(canonical_json(evidence))
+
+            status_path = program_root / "state/status.json"
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            evidence_sha256 = CLOSURE.sha256_file(evidence_path)
+            status["review_evidence_binding"]["sha256"] = evidence_sha256
+            status["diff_disposition_binding"]["review_evidence_sha256"] = (
+                evidence_sha256
+            )
+            status_path.write_bytes(canonical_json(status))
+
+            try:
+                receipt = CLOSURE.prepare_program_closure(program_root, observation)
+            except ValueError as error:
+                self.fail(f"valid offset chronology was rejected: {error}")
+
+            self.assertEqual(receipt.program_state, "awaiting-closure-approval")
+        finally:
+            fixture.close()
+
     def test_every_exact_prefix_is_retry_safe_and_lost_responses_are_idempotent(self) -> None:
         cases = (
             ("reconciliation", "prepare", "closure-preparation-retry-ready"),

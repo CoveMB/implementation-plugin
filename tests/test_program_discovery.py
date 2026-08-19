@@ -295,6 +295,66 @@ class DiscoveryFixture:
 
 
 class ProgramDiscoveryTests(unittest.TestCase):
+    def test_publication_recovery_uses_manifest_roles_after_activation_started(self) -> None:
+        fixture = BootstrapFixture()
+        try:
+            manifest_path = fixture.candidate / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            custom_status = "records/custom-status.json"
+            custom_approvals = "records/custom-approvals.jsonl"
+            for role, custom_path in (
+                ("status", custom_status),
+                ("approvals", custom_approvals),
+            ):
+                original = fixture.candidate / manifest["logical_roles"][role]
+                replacement = fixture.candidate / custom_path
+                replacement.parent.mkdir(parents=True, exist_ok=True)
+                original.rename(replacement)
+                manifest["logical_roles"][role] = custom_path
+            manifest_path.write_bytes(canonical_json(manifest))
+
+            inventory = [
+                {
+                    "path": path.relative_to(fixture.candidate).as_posix(),
+                    "sha256": sha256_file(path),
+                }
+                for path in sorted(fixture.candidate.rglob("*"))
+                if path.is_file()
+            ]
+            owner_token = "0" * 16
+            owner_bytes = canonical_json(
+                {
+                    "schema_version": "implementation-proposal-publication-owner/v1",
+                    "owner_token": owner_token,
+                    "program_id": "ARCHIVE-PROGRAM",
+                    "target": "implementation-programs/ARCHIVE-PROGRAM",
+                    "inventory": inventory,
+                }
+            )
+            staging = fixture.repository / (
+                f".implementation-program-ARCHIVE-PROGRAM-{owner_token}"
+            )
+            target = fixture.repository / "implementation-programs/ARCHIVE-PROGRAM"
+            target.parent.mkdir()
+            shutil.copytree(fixture.candidate, staging)
+            shutil.copytree(fixture.candidate, target)
+            (staging / ".publication-owner.json").write_bytes(owner_bytes)
+            (target / ".publication-owner.json").write_bytes(owner_bytes)
+
+            status_path = target / custom_status
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            status["current_increment_state"] = "preparing"
+            status_path.write_bytes(canonical_json(status))
+
+            disposition, issues = DISCOVERY._bootstrap_prefix_disposition(
+                fixture.repository
+            )
+
+            self.assertIsNone(disposition, issues)
+            self.assertEqual(issues, ())
+        finally:
+            fixture.close()
+
     def test_publication_recovery_rejects_unsafe_program_id_before_target_access(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
@@ -923,7 +983,7 @@ class PlanADiscoveryTests(unittest.TestCase):
                 finally:
                     fixture.close()
 
-    def test_closure_approval_prefix_is_retry_ready(self) -> None:
+    def test_unbound_closure_approval_prefix_is_invalid(self) -> None:
         fixture = DiscoveryFixture()
         try:
             manifest_path = fixture.add_new_program(

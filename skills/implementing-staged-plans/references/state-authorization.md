@@ -30,8 +30,12 @@ Approval modes control routine interruption, diff acceptance, and continuation o
 - `approval:standard` pauses for the exact-file plan and user diff acceptance.
 - `approval:pre-approve` omits the routine plan pause but stops for user-owned decisions, program amendments, contradictions, and hard stops; diff acceptance remains with the user.
 - `approval:full-increment` runs one increment through verification, then stops for user diff acceptance unless a hard stop occurs.
-- `approval:full-diff` may accept one verified, packet-bound diff automatically; it does not continue to another increment.
-- `approval:full` may automatically accept a verified, packet-bound diff and continue only while the same conversation remains suitable.
+- Legacy `approval:full-diff` may accept one verified, packet-bound current-increment diff automatically; it does not continue to another increment.
+- Legacy `approval:full` may automatically accept one verified, packet-bound current-increment diff; it does not continue to another increment.
+
+`approval:full-diff` and `approval:full` are dual-read compatibility modes for already persisted legacy programs only. New-model proposal construction, bootstrap, and launch reject either mode before every write. New programs accept only `approval:standard`, `approval:pre-approve`, or `approval:full-increment` and always stop at the typed `accept-stop` boundary in version 0.1.1.
+
+For both legacy modes, automatic behavior ends with acceptance of the current increment. A successor requires the typed continuation route; neither legacy mode supplies successor authority.
 
 An omitted mode defaults to `approval:full-increment` only while constructing new state and before any proposal bytes exist. Persist the selected mode explicitly. Never default an omitted or unknown mode in persisted state. An explicit user gate remains controlling even when the mode would normally omit that pause.
 
@@ -73,7 +77,7 @@ New-model diff acceptance uses [`diff_disposition.py`](../scripts/diff_dispositi
 
 For a new-model manifest, `apply_state_transition` rejects generic diff acceptance with `typed-diff-disposition-required`. It rejects every direct transition into or out of `blocked` with `blocked-transaction-required`, and every direct supersession with `program-revision-workflow-required`, before general transition validation or persistence. Plan A has no typed blocked or revision writer. New-model closure likewise uses only the typed closure preparation and exact approval sinks. These guards do not change accepted legacy read validation or legacy state-transition compatibility.
 
-The transition must be a declared matrix edge and satisfy its conditional evidence gates. Blocked state may resume only to its recorded legal target. Terminal state has no same-entity outgoing edge. Starting another increment is a separate operation and requires renewed one-increment authority or suitable conversation-bound full authority.
+The transition must be a declared matrix edge and satisfy its conditional evidence gates. Blocked state may resume only to its recorded legal target. Terminal state has no same-entity outgoing edge. Starting another increment is a separate operation and requires renewed authority; conversation suitability and legacy approval modes do not supply it.
 
 State replacement uses a same-directory temporary file, flush and file sync, digest compare-and-swap, and atomic replacement. JSON Lines append preserves the exact prior byte prefix and rejects duplicate identifiers. Each receipt reports prior and current digests. This is per-file atomicity, not a multi-file transaction, lock, or hostile-concurrency guarantee. For an approval plus governance transition plus execution grants, use the ordered and retry-safe checkpoint procedure rather than treating those files as one transaction.
 
