@@ -1,0 +1,17 @@
+{
+  "scenarios": [
+    {
+      "expected_boundary": "route exact accept-continue authority without a second user checkpoint and stop before unavailable concrete program state",
+      "id": "immediate-continuation",
+      "prompt_path": "tests/pressure/continuation-replay/prompts/immediate-continuation.md",
+      "result_path": "tests/pressure/continuation-replay/results/immediate-continuation.txt"
+    },
+    {
+      "expected_boundary": "distinguish accepted-state continuation from the prior stop choice and stop before unavailable concrete program state",
+      "id": "later-continuation",
+      "prompt_path": "tests/pressure/continuation-replay/prompts/later-continuation.md",
+      "result_path": "tests/pressure/continuation-replay/results/later-continuation.txt"
+    }
+  ],
+  "schema_version": "implementation-continuation-replay-catalog/v1"
+}

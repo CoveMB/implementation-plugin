@@ -2,6 +2,8 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -18,6 +20,9 @@ FIXTURE_ROOT = (
     / "tests/fixtures/integrated-pressure/portable-library-program"
 )
 PRESSURE_ROOT = REPOSITORY_ROOT / "tests/pressure/integrated"
+CONTINUATION_REPLAY_ROOT = (
+    REPOSITORY_ROOT / "tests/pressure/continuation-replay"
+)
 EVIDENCE_PATH = (
     REPOSITORY_ROOT
     / "implementation-programs/ISP-001/increments/INC-008/integration-evidence.json"
@@ -360,6 +365,351 @@ class FreshContextEvidenceTests(unittest.TestCase):
             self.assertTrue(verdict.get("evidence"))
             self.assertTrue(verdict.get("limitations"))
             self.assertNotIn("score", verdict)
+
+
+class ContinuationReplayContractTests(unittest.TestCase):
+    def test_catalog_has_exact_routes_and_explicit_skill_prompts(self) -> None:
+        catalog = json.loads(
+            (CONTINUATION_REPLAY_ROOT / "scenarios.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        scenarios = SUPPORT.load_continuation_replay(
+            CONTINUATION_REPLAY_ROOT / "scenarios.json"
+        )
+        self.assertEqual(
+            tuple(item.scenario_id for item in scenarios),
+            ("immediate-continuation", "later-continuation"),
+        )
+        self.assertEqual(
+            scenarios[0].expected_boundary,
+            catalog["scenarios"][0]["expected_boundary"],
+        )
+        for scenario in scenarios:
+            prompt_path = REPOSITORY_ROOT / scenario.prompt_path
+            self.assertTrue(prompt_path.is_file())
+            self.assertFalse(prompt_path.is_symlink())
+            self.assertEqual(
+                prompt_path.read_text(encoding="utf-8").splitlines()[0],
+                "$implementing-staged-plans",
+            )
+
+    def test_catalog_rejects_wrong_boundary_types_before_evaluation(self) -> None:
+        for wrong_value in (1, True, [], {}):
+            with self.subTest(wrong_value=wrong_value):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    replay_root = root / "tests/pressure/continuation-replay"
+                    shutil.copytree(CONTINUATION_REPLAY_ROOT, replay_root)
+                    catalog_path = replay_root / "scenarios.json"
+                    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+                    catalog["scenarios"][0]["expected_boundary"] = wrong_value
+                    catalog_path.write_text(
+                        json.dumps(catalog, indent=2, sort_keys=True) + "\n",
+                        encoding="utf-8",
+                    )
+                    output_directory = replay_root / "results"
+
+                    with (
+                        mock.patch.object(SUPPORT, "REPOSITORY_ROOT", root),
+                        mock.patch.object(SUPPORT, "run_command") as run_command,
+                    ):
+                        with self.assertRaisesRegex(
+                            ValueError, "expected_boundary must be a string"
+                        ):
+                            SUPPORT.evaluate_continuation_replay(
+                                catalog_path=catalog_path,
+                                output_directory=output_directory,
+                                evaluator="codex",
+                            )
+                    run_command.assert_not_called()
+                    self.assertFalse(output_directory.exists())
+
+    def test_absent_live_results_are_valid_and_report_not_run(self) -> None:
+        self.assertFalse((CONTINUATION_REPLAY_ROOT / "results").exists())
+        self.assertFalse((CONTINUATION_REPLAY_ROOT / "verdicts.json").exists())
+        self.assertEqual(
+            SUPPORT.validate_continuation_replay_evidence(REPOSITORY_ROOT), []
+        )
+
+    def test_evidence_requires_complete_digest_bound_results_and_verdicts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            replay_root = root / "tests/pressure/continuation-replay"
+            shutil.copytree(CONTINUATION_REPLAY_ROOT, replay_root)
+            scenarios = SUPPORT.load_continuation_replay(
+                replay_root / "scenarios.json"
+            )
+            verdicts = []
+            for scenario in scenarios:
+                prompt_path = root / scenario.prompt_path
+                result_path = root / scenario.result_path
+                result_path.parent.mkdir(parents=True, exist_ok=True)
+                result_path.write_text(
+                    "schema_version: implementation-continuation-replay-evidence/v1\n"
+                    f"scenario_id: {scenario.scenario_id}\n"
+                    f"prompt_sha256: {digest(prompt_path)}\n"
+                    "evaluator: codex\n"
+                    "client_version: codex 1.2.3\n"
+                    "sandbox: read-only\n"
+                    "session: ephemeral\n"
+                    "exit_code: 0\n"
+                    f"expected_boundary: {scenario.expected_boundary}\n"
+                    "\n--- response ---\n"
+                    "Synthetic response.\n",
+                    encoding="utf-8",
+                )
+                verdicts.append(
+                    {
+                        "id": scenario.scenario_id,
+                        "outcome": "pass",
+                        "prompt_sha256": digest(prompt_path),
+                        "result_sha256": digest(result_path),
+                        "evidence": "The raw response reached the expected boundary.",
+                        "limitations": "Synthetic evaluator fixture only.",
+                    }
+                )
+            (replay_root / "verdicts.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "implementation-continuation-replay-verdicts/v1",
+                        "verdicts": verdicts,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                SUPPORT.validate_continuation_replay_evidence(root), []
+            )
+            first_result = root / scenarios[0].result_path
+            first_result.write_bytes(first_result.read_bytes() + b"tampered\n")
+            self.assertIn(
+                "result digest mismatch",
+                " ".join(SUPPORT.validate_continuation_replay_evidence(root)),
+            )
+
+    def test_evaluator_uses_fresh_sessions_and_never_overwrites_results(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            replay_root = root / "tests/pressure/continuation-replay"
+            shutil.copytree(CONTINUATION_REPLAY_ROOT, replay_root)
+            calls: list[tuple[tuple[str, ...], Path]] = []
+
+            def fake_run(arguments, *, cwd, timeout=30, environment=None):
+                calls.append((tuple(arguments), Path(cwd)))
+                if tuple(arguments) == ("codex", "--version"):
+                    return subprocess.CompletedProcess(
+                        arguments, 0, stdout="codex 1.2.3\n", stderr=""
+                    )
+                return subprocess.CompletedProcess(
+                    arguments,
+                    0,
+                    stdout=(
+                        '{"type":"item.completed","item":'
+                        '{"type":"agent_message","text":"Synthetic response."}}\n'
+                    ),
+                    stderr="",
+                )
+
+            def fake_isolation(isolated_root):
+                codex_home = Path(isolated_root) / "codex-home"
+                codex_home.mkdir()
+                return codex_home
+
+            with (
+                mock.patch.object(SUPPORT, "REPOSITORY_ROOT", root),
+                mock.patch.object(SUPPORT, "run_command", side_effect=fake_run),
+                mock.patch.object(
+                    SUPPORT,
+                    "_build_isolated_evaluation_root",
+                    side_effect=fake_isolation,
+                ),
+            ):
+                paths = SUPPORT.evaluate_continuation_replay(
+                    catalog_path=replay_root / "scenarios.json",
+                    output_directory=replay_root / "results",
+                    evaluator="codex",
+                )
+                self.assertEqual(len(paths), 2)
+                evaluation_calls = [call for call in calls if "exec" in call[0]]
+                self.assertEqual(len(evaluation_calls), 2)
+                self.assertNotEqual(
+                    evaluation_calls[0][1], evaluation_calls[1][1]
+                )
+                for arguments, _cwd in evaluation_calls:
+                    self.assertIn("--ephemeral", arguments)
+                    self.assertIn("read-only", arguments)
+                with self.assertRaisesRegex(ValueError, "must all be absent"):
+                    SUPPORT.evaluate_continuation_replay(
+                        catalog_path=replay_root / "scenarios.json",
+                        output_directory=replay_root / "results",
+                        evaluator="codex",
+                    )
+
+    def test_replay_evidence_binds_exact_transmitted_prompt_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            replay_root = root / "tests/pressure/continuation-replay"
+            shutil.copytree(CONTINUATION_REPLAY_ROOT, replay_root)
+            scenarios = SUPPORT.load_continuation_replay(
+                replay_root / "scenarios.json"
+            )
+            transmitted: dict[str, bytes] = {}
+            evaluation_index = 0
+
+            def fake_run(arguments, *, cwd, timeout=30, environment=None):
+                nonlocal evaluation_index
+                if tuple(arguments) == ("codex", "--version"):
+                    return subprocess.CompletedProcess(
+                        arguments, 0, stdout="codex 1.2.3\n", stderr=""
+                    )
+                scenario = scenarios[evaluation_index]
+                prompt = arguments[-1]
+                transmitted[scenario.scenario_id] = prompt.encode("utf-8")
+                if evaluation_index == 0:
+                    (root / scenario.prompt_path).write_text(
+                        prompt + "\nmutated after evaluator input\n",
+                        encoding="utf-8",
+                    )
+                evaluation_index += 1
+                return subprocess.CompletedProcess(
+                    arguments,
+                    0,
+                    stdout=(
+                        '{"type":"item.completed","item":'
+                        '{"type":"agent_message","text":"Synthetic response."}}\n'
+                    ),
+                    stderr="",
+                )
+
+            def fake_isolation(isolated_root):
+                codex_home = Path(isolated_root) / "codex-home"
+                codex_home.mkdir()
+                return codex_home
+
+            with (
+                mock.patch.object(SUPPORT, "REPOSITORY_ROOT", root),
+                mock.patch.object(SUPPORT, "run_command", side_effect=fake_run),
+                mock.patch.object(
+                    SUPPORT,
+                    "_build_isolated_evaluation_root",
+                    side_effect=fake_isolation,
+                ),
+            ):
+                result_paths = SUPPORT.evaluate_continuation_replay(
+                    catalog_path=replay_root / "scenarios.json",
+                    output_directory=replay_root / "results",
+                    evaluator="codex",
+                )
+
+            verdicts = []
+            for scenario, result_path in zip(
+                scenarios, result_paths, strict=True
+            ):
+                headers = SUPPORT._evidence_headers(
+                    result_path.read_text(encoding="utf-8")
+                )
+                transmitted_digest = hashlib.sha256(
+                    transmitted[scenario.scenario_id]
+                ).hexdigest()
+                self.assertEqual(headers["prompt_sha256"], transmitted_digest)
+                verdicts.append(
+                    {
+                        "id": scenario.scenario_id,
+                        "outcome": "pass",
+                        "prompt_sha256": transmitted_digest,
+                        "result_sha256": digest(result_path),
+                        "evidence": "Synthetic response reached the boundary.",
+                        "limitations": "Deterministic fake evaluator only.",
+                    }
+                )
+            self.assertNotEqual(
+                digest(root / scenarios[0].prompt_path),
+                verdicts[0]["prompt_sha256"],
+            )
+            (replay_root / "verdicts.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": (
+                            "implementation-continuation-replay-verdicts/v1"
+                        ),
+                        "verdicts": verdicts,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                SUPPORT.validate_continuation_replay_evidence(root), []
+            )
+
+    def test_atomic_result_creation_preserves_a_competing_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "result.txt"
+            real_link = SUPPORT.os.link
+
+            def competing_link(source, destination, **kwargs):
+                descriptor = SUPPORT.os.open(
+                    destination,
+                    SUPPORT.os.O_WRONLY | SUPPORT.os.O_CREAT | SUPPORT.os.O_EXCL,
+                    0o600,
+                    dir_fd=kwargs["dst_dir_fd"],
+                )
+                with SUPPORT.os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                    stream.write("foreign\n")
+                return real_link(source, destination, **kwargs)
+
+            with mock.patch.object(
+                SUPPORT.os, "link", side_effect=competing_link
+            ):
+                with self.assertRaisesRegex(ValueError, "appeared before creation"):
+                    SUPPORT._atomic_create_text(target, "candidate\n")
+            self.assertEqual(target.read_text(encoding="utf-8"), "foreign\n")
+
+    def test_symlinked_result_is_invalid_not_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            replay_root = root / "tests/pressure/continuation-replay"
+            shutil.copytree(CONTINUATION_REPLAY_ROOT, replay_root)
+            result_path = replay_root / "results/immediate-continuation.txt"
+            result_path.parent.mkdir()
+            result_path.symlink_to(replay_root / "prompts/immediate-continuation.md")
+
+            self.assertIn(
+                "result is not a regular non-symlink file",
+                " ".join(SUPPORT.validate_continuation_replay_evidence(root)),
+            )
+
+    def test_symlinked_result_directory_is_rejected_by_validator_and_writer(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "repository"
+            replay_root = root / "tests/pressure/continuation-replay"
+            shutil.copytree(CONTINUATION_REPLAY_ROOT, replay_root)
+            outside = Path(directory) / "outside-results"
+            outside.mkdir()
+            (replay_root / "results").symlink_to(outside, target_is_directory=True)
+
+            self.assertIn(
+                "symlinked path component",
+                " ".join(SUPPORT.validate_continuation_replay_evidence(root)),
+            )
+            with (
+                mock.patch.object(SUPPORT, "REPOSITORY_ROOT", root),
+                mock.patch.object(SUPPORT, "run_command") as run_command,
+            ):
+                with self.assertRaisesRegex(ValueError, "symlinked path component"):
+                    SUPPORT.evaluate_continuation_replay(
+                        catalog_path=replay_root / "scenarios.json",
+                        output_directory=replay_root / "results",
+                        evaluator="codex",
+                    )
+            run_command.assert_not_called()
+            self.assertEqual(tuple(outside.iterdir()), ())
 
 
 class IntegratedEvidenceTests(unittest.TestCase):
