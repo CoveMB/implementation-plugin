@@ -48,6 +48,8 @@ _RISK_CLASSES = {
     "modify-workspace": "routine-local",
     "run-local-verification": "routine-local",
     "create-workspace": "explicit-local",
+    "rollover-increment": "explicit-local",
+    "resume-blocked-program": "explicit-local",
     "create-local-commit": "explicit-local",
     "create-draft-pull-request": "bounded-external",
     "merge": "high-consequence",

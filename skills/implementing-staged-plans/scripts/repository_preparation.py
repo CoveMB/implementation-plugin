@@ -1041,6 +1041,11 @@ def execution_baseline_from_value(value: object) -> ExecutionBaseline:
         workspace = value["workspace_observation"]
         if not isinstance(authority, dict) or not isinstance(workspace, dict):
             raise TypeError("binding")
+        if any(not isinstance(path, str) for path in inherited_values):
+            raise TypeError("inherited_paths")
+        inherited_paths = tuple(
+            _normalized_file_map_path(path) for path in inherited_values
+        )
         baseline = ExecutionBaseline(
             schema_version=str(value["schema_version"]),
             program_id=str(value["program_id"]),
@@ -1052,7 +1057,7 @@ def execution_baseline_from_value(value: object) -> ExecutionBaseline:
             file_map=file_map,
             path_baselines=path_baselines,
             user_work_baselines=user_baselines,
-            inherited_paths=tuple(str(path) for path in inherited_values),
+            inherited_paths=inherited_paths,
         )
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError("execution baseline structure is invalid") from error
@@ -1081,8 +1086,25 @@ def execution_baseline_from_value(value: object) -> ExecutionBaseline:
         baseline.user_work_baselines
     ):
         raise ValueError("execution baseline user-work inventory is duplicated")
-    if baseline.inherited_paths:
-        raise ValueError("first-increment execution baseline inherited_paths must be empty")
+    if len(set(baseline.inherited_paths)) != len(baseline.inherited_paths):
+        raise ValueError("execution baseline inherited inventory is duplicated")
+    user_paths = {item.path for item in baseline.user_work_baselines}
+    for inherited_path in baseline.inherited_paths:
+        matches = [
+            item for item in baseline.path_baselines if item.path == inherited_path
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                "each inherited path requires exactly one path baseline"
+            )
+        if dispositions.get(inherited_path) not in {"Modify", "Preserve"}:
+            raise ValueError(
+                "inherited paths must be owned as Modify or Preserve"
+            )
+        if inherited_path in user_paths:
+            raise ValueError(
+                "inherited paths must be disjoint from user-work baselines"
+            )
     return baseline
 
 
@@ -1134,14 +1156,25 @@ def validate_execution_workspace(
         issues.append("execution workspace active Git operation changed")
 
     control_prefix = _relative_control_prefix(Path(program_root), workspace)
-    current_staged = _without_control_paths(observation.staged_paths, control_prefix)
+    inherited_paths = set(baseline.inherited_paths)
+    current_staged = _without_control_paths(
+        tuple(
+            path for path in observation.staged_paths if path not in inherited_paths
+        ),
+        control_prefix,
+    )
     recorded_staged = _without_control_paths(
         tuple(recorded.get("staged_paths", ())), control_prefix
     )
     if current_staged != recorded_staged:
         issues.append("execution workspace has new or changed staged paths")
     current_conflicted = _without_control_paths(
-        observation.conflicted_paths, control_prefix
+        tuple(
+            path
+            for path in observation.conflicted_paths
+            if path not in inherited_paths
+        ),
+        control_prefix,
     )
     recorded_conflicted = _without_control_paths(
         tuple(recorded.get("conflicted_paths", ())), control_prefix
@@ -1167,7 +1200,11 @@ def validate_execution_workspace(
         ),
         control_prefix,
     )
-    product_paths = set(baseline.file_map.create) | set(baseline.file_map.modify)
+    product_paths = (
+        set(baseline.file_map.create)
+        | set(baseline.file_map.modify)
+        | inherited_paths
+    )
     unexpected_dirty = current_dirty - recorded_dirty - product_paths
     if unexpected_dirty:
         issues.append(

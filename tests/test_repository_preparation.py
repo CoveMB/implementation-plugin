@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from unittest import mock
 
@@ -749,6 +749,70 @@ class ExecutionWorkspaceValidationTests(unittest.TestCase):
             "authorized workspace changed Modify path: catalog.txt",
             assessment.issues,
         )
+
+    def test_inherited_paths_require_one_safe_owned_non_user_baseline(self) -> None:
+        valid = json.loads(json.dumps(asdict(self.baseline)))
+        valid["inherited_paths"] = ["catalog.txt"]
+        parsed = PREPARATION.execution_baseline_from_value(valid)
+        self.assertEqual(parsed.inherited_paths, ("catalog.txt",))
+
+        cases = []
+        duplicate = json.loads(json.dumps(valid))
+        duplicate["inherited_paths"] = ["catalog.txt", "catalog.txt"]
+        cases.append(duplicate)
+        malformed = json.loads(json.dumps(valid))
+        malformed["inherited_paths"] = ["../catalog.txt"]
+        cases.append(malformed)
+        create_owned = json.loads(json.dumps(valid))
+        create_owned["inherited_paths"] = ["archive-output.txt"]
+        cases.append(create_owned)
+        missing_baseline = json.loads(json.dumps(valid))
+        missing_baseline["path_baselines"] = [
+            item
+            for item in missing_baseline["path_baselines"]
+            if item["path"] != "catalog.txt"
+        ]
+        cases.append(missing_baseline)
+        user_overlap = json.loads(json.dumps(valid))
+        user_overlap["user_work_baselines"] = [
+            {
+                "path": "catalog.txt",
+                "categories": ["modified"],
+                "sha256": sha256_file(self.fixture.root / "catalog.txt"),
+            }
+        ]
+        cases.append(user_overlap)
+        for value in cases:
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    PREPARATION.execution_baseline_from_value(value)
+
+    def test_inherited_preserve_path_is_not_unmapped_user_dirt(self) -> None:
+        inherited_path = self.fixture.root / "catalog.txt"
+        inherited_path.write_text("accepted predecessor bytes\n", encoding="utf-8")
+        baseline = replace(
+            self.baseline,
+            file_map=PREPARATION.ExactFileMap(
+                create=(),
+                modify=(),
+                preserve=("catalog.txt",),
+            ),
+            path_baselines=(
+                PREPARATION.ExecutionPathBaseline(
+                    "catalog.txt", "Preserve", sha256_file(inherited_path)
+                ),
+            ),
+            inherited_paths=("catalog.txt",),
+        )
+
+        assessment = PREPARATION.validate_execution_workspace(
+            self.program_root,
+            baseline,
+            PREPARATION.inspect_repository(self.fixture.root, self.fixture.base),
+            increment_state="authorized",
+        )
+
+        self.assertTrue(assessment.valid, assessment.issues)
 
     def test_implementing_allows_a_subset_but_reviewing_requires_complete_delta(self) -> None:
         (self.fixture.root / "catalog.txt").write_text("changed\n", encoding="utf-8")

@@ -1079,6 +1079,34 @@ class PlanADiscoveryTests(unittest.TestCase):
         finally:
             fixture.close()
 
+    def test_exact_accepted_continue_status_routes_to_compound_prompt_retry(self) -> None:
+        from tests.test_diff_disposition import DIFF, awaiting_diff_program
+        from tests.test_program_continuation import CONTINUATION
+
+        fixture, program_root, observation = awaiting_diff_program(
+            {"ARCHIVE-VERIFY": ("ARCHIVE-INDEX",)}
+        )
+        try:
+            prompt = CONTINUATION.render_accept_continue_prompt(program_root)
+
+            def interrupt(label: str) -> None:
+                if label == "accepted-status":
+                    raise RuntimeError("injected accepted-status response loss")
+
+            with mock.patch.object(DIFF, "_after_persist", side_effect=interrupt):
+                with self.assertRaisesRegex(RuntimeError, "response loss"):
+                    DIFF._persist_diff_acceptance_prefix(
+                        program_root, prompt, observation
+                    )
+            result = DISCOVERY.discover_programs(fixture.repository)
+            self.assertEqual(
+                result.disposition,
+                "accepted-continuation-retry-ready",
+            )
+            self.assertFalse(result.stop_required)
+        finally:
+            fixture.close()
+
 
 if __name__ == "__main__":
     unittest.main()

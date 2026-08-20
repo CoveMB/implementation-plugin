@@ -148,6 +148,8 @@ class CheckpointConstructionTests(unittest.TestCase):
         self.assertEqual(set(classified), set(CHECKPOINT.AUTHORITY_ACTIONS))
         self.assertEqual(classified["modify-workspace"], "routine-local")
         self.assertEqual(classified["create-local-commit"], "explicit-local")
+        self.assertEqual(classified["rollover-increment"], "explicit-local")
+        self.assertEqual(classified["resume-blocked-program"], "explicit-local")
         self.assertEqual(classified["create-draft-pull-request"], "bounded-external")
         self.assertEqual(classified["destructive-operation"], "high-consequence")
         with self.assertRaisesRegex(ValueError, "unsupported action"):

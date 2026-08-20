@@ -17,6 +17,7 @@ from state_authority import (
     approval_mode_policy,
     validate_state_authority,
 )
+from task_prompt import render_exact_prompt
 
 
 CONTINUITY_SCHEMA = "implementation-continuity-evidence/v1"
@@ -24,6 +25,7 @@ CONTINUATION_AUTHORIZATION_SCHEMA = "implementation-continuation-authorization/v
 RECONCILIATION_SCHEMA = "implementation-closure-reconciliation/v1"
 CLOSURE_PACKET_SCHEMA = "implementation-closure-packet/v1"
 EXPLICIT_SKILL_INVOCATION = "$implementing-staged-plans"
+CONTINUATION_DESTINATIONS = frozenset({"current-task", "new-task", "none"})
 
 APPROVAL_MODES = frozenset(APPROVAL_MODE_POLICIES)
 CONVERSATION_SUITABILITY_PREDICATES = (
@@ -128,6 +130,15 @@ class HandoffRecord:
     unresolved_risks: tuple[str, ...]
     next_legal_action: str
     first_read_files: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class BoundedContinuationResult:
+    current_state: str
+    next_legal_action: str
+    mandatory_stop: bool
+    destination: str
+    continuation_command: Mapping[str, object] | None
 
 
 @dataclass(frozen=True)
@@ -594,6 +605,146 @@ def render_handoff(candidate: HandoffRecord) -> str:
             "",
         )
     )
+
+
+def build_bounded_continuation_result(
+    current_state: str,
+    next_legal_action: str,
+    *,
+    destination: str,
+    mandatory_stop: bool,
+    continuation_command: Mapping[str, object] | None = None,
+) -> BoundedContinuationResult:
+    """Build one navigation-only result without storing rendered prompt text."""
+    candidate = BoundedContinuationResult(
+        current_state=current_state,
+        next_legal_action=next_legal_action,
+        mandatory_stop=mandatory_stop,
+        destination=destination,
+        continuation_command=continuation_command,
+    )
+    issues = validate_bounded_continuation_result(candidate)
+    if issues:
+        raise ValueError("; ".join(issues))
+    return candidate
+
+
+def _bounded_continuation_issues(
+    candidate: BoundedContinuationResult,
+) -> list[str]:
+    issues: list[str] = []
+    for label, value in (
+        ("current_state", candidate.current_state),
+        ("next_legal_action", candidate.next_legal_action),
+    ):
+        if not _nonempty(value) or "\n" in value or "\r" in value:
+            issues.append(f"bounded continuation {label} must be non-empty single-line text")
+        elif _SECRET_LIKE.search(value):
+            issues.append(f"bounded continuation {label} contains secret-like material")
+    if isinstance(candidate.next_legal_action, str) and _AUTHORIZING_TEXT.search(
+        candidate.next_legal_action
+    ):
+        issues.append("bounded continuation navigation cannot authorize an action")
+    if candidate.destination not in CONTINUATION_DESTINATIONS:
+        issues.append("bounded continuation destination is unsupported")
+    if not isinstance(candidate.mandatory_stop, bool):
+        issues.append("bounded continuation mandatory_stop must be a boolean")
+    if candidate.destination == "new-task":
+        if candidate.mandatory_stop is not True:
+            issues.append("new-task continuation requires a mandatory stop")
+        if not isinstance(candidate.continuation_command, Mapping):
+            issues.append("new-task continuation requires one command mapping")
+    elif candidate.continuation_command is not None:
+        issues.append("only a new-task continuation may carry a command")
+    return issues
+
+
+def validate_bounded_continuation_result(
+    candidate: BoundedContinuationResult,
+) -> list[str]:
+    """Validate bounded navigation and its derived exact-prompt command."""
+    issues = _bounded_continuation_issues(candidate)
+    if not issues and candidate.destination == "new-task":
+        try:
+            prompt = render_exact_prompt(candidate.continuation_command)
+        except ValueError as error:
+            issues.append(f"bounded continuation command is invalid: {error}")
+        else:
+            if prompt.splitlines()[0] != EXPLICIT_SKILL_INVOCATION:
+                issues.append("bounded continuation prompt has an invalid first line")
+    return sorted(set(issues))
+
+
+def render_bounded_continuation_result(
+    candidate: BoundedContinuationResult,
+) -> str:
+    """Render deterministic navigation and derive a new-task prompt once."""
+    issues = _bounded_continuation_issues(candidate)
+    if issues:
+        raise ValueError("; ".join(sorted(set(issues))))
+    lines = (
+        f"Current state: {candidate.current_state}",
+        f"Next legal action: {candidate.next_legal_action}",
+        f"Mandatory stop: {'yes' if candidate.mandatory_stop else 'no'}",
+        f"Destination: {candidate.destination}",
+    )
+    rendered = "\n".join(lines) + "\n"
+    if candidate.destination != "new-task":
+        return rendered
+    try:
+        prompt = render_exact_prompt(candidate.continuation_command)
+    except ValueError as error:
+        raise ValueError(f"bounded continuation command is invalid: {error}") from error
+    if prompt.splitlines()[0] != EXPLICIT_SKILL_INVOCATION:
+        raise ValueError("bounded continuation prompt has an invalid first line")
+    return f"{rendered}\nCopy-ready prompt:\n\n{prompt}"
+
+
+def select_unique_satisfied_successor(
+    atomic_requirements: Sequence[Mapping[str, object]],
+    current_increment_id: str,
+    accepted_increment_ids: set[str] | frozenset[str],
+) -> tuple[str | None, str]:
+    """Select one directly allocated successor whose dependencies are accepted."""
+    if not _nonempty(current_increment_id):
+        raise ValueError("current increment id is required")
+    if not isinstance(accepted_increment_ids, (set, frozenset)) or not all(
+        _nonempty(item) for item in accepted_increment_ids
+    ):
+        raise ValueError("accepted increment ids must be a string set")
+    normalized: list[tuple[str, ...]] = []
+    candidates: set[str] = set()
+    for requirement in atomic_requirements:
+        if not isinstance(requirement, Mapping):
+            raise ValueError("atomic requirement must be an object")
+        assigned = requirement.get("assigned_increments")
+        if (
+            not isinstance(assigned, list)
+            or not assigned
+            or not all(_nonempty(item) for item in assigned)
+            or len(assigned) != len(set(assigned))
+        ):
+            raise ValueError(
+                "atomic requirement assigned_increments must be unique strings"
+            )
+        allocation = tuple(assigned)
+        normalized.append(allocation)
+        if current_increment_id in allocation:
+            successor_index = allocation.index(current_increment_id) + 1
+            if successor_index < len(allocation):
+                candidates.add(allocation[successor_index])
+    if not candidates:
+        return None, "no allocated successor"
+    if len(candidates) != 1:
+        return None, "multiple allocated successors"
+    successor = next(iter(candidates))
+    for allocation in normalized:
+        if successor not in allocation:
+            continue
+        dependencies = allocation[: allocation.index(successor)]
+        if any(item not in accepted_increment_ids for item in dependencies):
+            return None, "successor dependencies are unsatisfied"
+    return successor, ""
 
 
 def evaluate_continuation(candidate: ConversationAssessment) -> tuple[bool, tuple[str, ...]]:

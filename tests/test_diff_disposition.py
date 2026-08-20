@@ -6,7 +6,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tests.program_bootstrap_support import canonical_json, repository_snapshot
+from tests.program_bootstrap_support import (
+    BootstrapFixture,
+    canonical_json,
+    repository_snapshot,
+    write_raw_review_reports,
+)
+from tests.test_program_activation import ACTIVATION, activated_program, exact_plan_bytes
 from tests.test_program_review import REVIEW as PROGRAM_REVIEW
 from tests.test_program_review import reviewing_program
 
@@ -28,7 +34,27 @@ finally:
     sys.path.remove(str(SCRIPT_ROOT))
 
 
-def awaiting_diff_program():
+def awaiting_diff_program(successors: dict[str, tuple[str, ...]] | None = None):
+    if successors is not None:
+        fixture = BootstrapFixture()
+        fixture.configure_successors(successors)
+        program_root, observation = activated_program(
+            fixture, "approval:full-increment"
+        )
+        ACTIVATION.prepare_exact_plan(
+            program_root, exact_plan_bytes(program_root, observation), observation
+        )
+        ACTIVATION.advance_execution_state(program_root, "implementing", observation)
+        (fixture.repository / "archive-output.txt").write_text(
+            "archive output\n", encoding="utf-8"
+        )
+        write_raw_review_reports(fixture.repository)
+        observation = ACTIVATION.inspect_repository(
+            fixture.repository, fixture.head
+        ).observation
+        ACTIVATION.advance_execution_state(program_root, "reviewing", observation)
+        PROGRAM_REVIEW.persist_review_preparation(program_root, observation)
+        return fixture, program_root, observation
     fixture, program_root, observation = reviewing_program()
     PROGRAM_REVIEW.persist_review_preparation(program_root, observation)
     return fixture, program_root, observation
@@ -69,6 +95,70 @@ class DiffDispositionTests(unittest.TestCase):
             self.assertNotIn("submitted_prompt_sha256", binding)
         finally:
             fixture.close()
+
+    def test_unique_satisfied_successor_adds_one_bound_continue_choice(self) -> None:
+        fixture, program_root, observation = awaiting_diff_program(
+            {"ARCHIVE-VERIFY": ("ARCHIVE-INDEX",)}
+        )
+        try:
+            prompt = DIFF.render_diff_disposition_prompt(program_root)
+            self.assertEqual(prompt.count("Accept and stop."), 1)
+            self.assertEqual(
+                prompt.count("Accept and continue to `ARCHIVE-VERIFY`."), 1
+            )
+            self.assertEqual(prompt.count("$implementing-staged-plans"), 2)
+            candidate = DIFF.build_diff_acceptance_candidate(program_root, observation)
+            self.assertEqual(candidate.decision, "accept-stop")
+        finally:
+            fixture.close()
+
+    def test_unavailable_successor_never_blocks_or_changes_stop_choice(self) -> None:
+        cases = (
+            (None, "no allocated successor"),
+            (
+                {
+                    "ARCHIVE-VERIFY": ("ARCHIVE-INDEX",),
+                    "ARCHIVE-EXPORT": ("ARCHIVE-INDEX",),
+                },
+                "multiple allocated successors",
+            ),
+            (
+                {"ARCHIVE-VERIFY": ("ARCHIVE-BLOCKER",)},
+                "successor dependencies are unsatisfied",
+            ),
+        )
+        for successors, reason in cases:
+            with self.subTest(reason=reason):
+                fixture, program_root, _observation = awaiting_diff_program(successors)
+                try:
+                    prompt = DIFF.render_diff_disposition_prompt(program_root)
+                    self.assertEqual(prompt.count("Accept and stop."), 1)
+                    self.assertNotIn("Accept and continue", prompt)
+                    if successors is None:
+                        from program_continuation import (
+                            build_continuation_extension,
+                            continuation_unavailability_reason,
+                        )
+
+                        candidate = DIFF.build_diff_acceptance_candidate(
+                            program_root, _observation
+                        )
+                        self.assertIsNone(
+                            build_continuation_extension(
+                                program_root, candidate, _observation
+                            )
+                        )
+                        self.assertEqual(
+                            continuation_unavailability_reason(
+                                program_root, candidate
+                            ),
+                            reason,
+                        )
+                    else:
+                        self.assertIn(reason, prompt)
+                    self.assertEqual(prompt.count("$implementing-staged-plans"), 1)
+                finally:
+                    fixture.close()
 
     def test_approval_only_and_status_lost_response_prefixes_are_exactly_retry_safe(self) -> None:
         for failure_label in ("diff-approval", "accepted-status"):
