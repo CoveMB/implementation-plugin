@@ -22,7 +22,7 @@ SPEC.loader.exec_module(VALIDATOR)
 
 EXPECTED_MANIFEST = {
     "name": "implementation-plugin",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "Run approved implementation programs one reviewable increment at a time.",
     "skills": "./skills/",
 }
@@ -184,8 +184,8 @@ class FrontDoorContractTests(unittest.TestCase):
             metadata,
             'interface:\n'
             '  display_name: "Implementing Staged Plans"\n'
-            '  short_description: "Create, activate, or continue implementation programs."\n'
-            '  default_prompt: "Use $implementing-staged-plans to create, activate, or continue a repository-backed implementation program."\n'
+            '  short_description: "Create, continue, or recover implementation programs."\n'
+            '  default_prompt: "Use $implementing-staged-plans to create, activate, continue, or recover a repository-backed implementation program."\n'
             '\n'
             'policy:\n'
             '  allow_implicit_invocation: false\n',
@@ -198,6 +198,10 @@ class FrontDoorContractTests(unittest.TestCase):
             "## Activate a Generated Program",
             "## Before Production Modification",
             "## Prepare Review and Diff Disposition",
+            "## Dispose the Current Diff",
+            "## Continue an Accepted Program",
+            "## Authorize a Successor Increment",
+            "## Resolve a Blocked Program",
             "## Close a Final Program",
         )
         positions = tuple(skill_markdown.index(heading) for heading in headings)
@@ -217,6 +221,46 @@ class FrontDoorContractTests(unittest.TestCase):
             "unsupported-program-mutation",
         ):
             self.assertIn(required, skill_markdown)
+
+    def test_plan_b_routes_are_explicit_prompt_bound_and_non_expansive(self) -> None:
+        skill_markdown = SKILL_PATH.read_text(encoding="utf-8")
+        for required in (
+            "accept-stop",
+            "accept-continue",
+            "accepted-state-continuation",
+            "current_increment_authority_binding",
+            "blocked-recovery",
+            "legacy-rollover-upgrade-required",
+        ):
+            self.assertIn(required, skill_markdown)
+        self.assertRegex(
+            skill_markdown,
+            re.compile(r"accept-continue.*no second.*checkpoint", re.IGNORECASE),
+        )
+        self.assertRegex(
+            skill_markdown,
+            re.compile(r"handoff.*never.*author", re.IGNORECASE),
+        )
+        self.assertRegex(
+            skill_markdown,
+            re.compile(r"legacy.*automatic.*never.*successor", re.IGNORECASE),
+        )
+        self.assertRegex(
+            skill_markdown,
+            re.compile(r"revision.*supersession.*cancellation.*unsupported", re.IGNORECASE),
+        )
+
+    def test_bounded_continuation_navigation_is_structured_and_non_authorizing(self) -> None:
+        skill_markdown = SKILL_PATH.read_text(encoding="utf-8")
+        for required in (
+            "bounded continuation result",
+            "next legal action",
+            "mandatory stop",
+            "destination",
+            "copy-ready prompt",
+            "navigation",
+        ):
+            self.assertIn(required, skill_markdown.lower())
 
     def test_navigation_and_quoted_prompts_never_grant_mutation_authority(self) -> None:
         skill_markdown = SKILL_PATH.read_text(encoding="utf-8").lower()

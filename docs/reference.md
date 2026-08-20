@@ -83,14 +83,17 @@ reconciliation succeeds.
 
 ## Lifecycle at a glance
 
-The implemented Plan A order is: **Create a New Program**, **Activate a
-Generated Program**, **Before Production Modification**, **Prepare Review and
-Diff Disposition**, then **Close a Final Program**. Creation publishes only the
-proposal control plane. Activation uses one exact prompt and separate typed
-receipts. Planning persists the execution baseline before product work. Review
-uses a typed preparation transaction. The only Plan A diff disposition is
-`accept-stop`. A final program derives its closure files from
-`implementation-closure-storage/v1` and closes only after another exact prompt.
+The implemented order is: **Create a New Program**, **Activate a Generated
+Program**, **Before Production Modification**, **Prepare Review and Diff
+Disposition**, **Dispose the Current Diff**, **Continue an Accepted Program**
+when requested, **Authorize a Successor Increment** when one is allocated,
+**Resolve a Blocked Program** when typed recovery is required, and **Close a
+Final Program** when no successor remains. Creation and first-increment behavior
+remain owned by Plan A. Plan B adds exact `accept-continue`, the distinct
+`accepted-state-continuation` route, status-current successor grants through
+`current_increment_authority_binding`, and prompt-bound `blocked-recovery`.
+Final programs reuse the unchanged Plan A closure transaction and derive paths
+from `implementation-closure-storage/v1`.
 
 Every typed transaction writes controlling status last and adopts only
 byte-identical prefixes. A divergent prefix stops for recovery without cleanup.
@@ -100,9 +103,9 @@ before relying on an earlier state.
 
 ## Approval modes
 
-Approval modes define policy, but the 0.1.1 Plan A persistence surface supports
-only first-increment `accept-stop`; successor continuation remains deferred.
-Modes do not grant action authority.
+Approval modes define routine interruption policy. Version 0.1.2 always offers
+`accept-stop` and conditionally offers exact `accept-continue` for one satisfied
+successor. Modes do not grant action authority or automatic successor rollover.
 
 | Mode | Scope | Routine plan pause | Diff acceptance | Continuation and mandatory stop |
 | --- | --- | --- | --- | --- |
@@ -110,7 +113,7 @@ Modes do not grant action authority.
 | `approval:pre-approve` | One increment | No | User | Stops for user-owned decisions, program amendments, contradictions, hard stops, and diff acceptance |
 | `approval:full-increment` | One increment | No | User | Runs through verification, then stops for diff acceptance unless a hard stop occurs |
 | `approval:full-diff` | Legacy current increment | No | Legacy policy permits automatic acceptance only after verification and a valid bound packet | Cannot begin another increment |
-| `approval:full` | Legacy current increment | No | Legacy policy permits automatic acceptance only after verification and a valid bound packet | Cannot begin another increment; discovery stops at `legacy-rollover-upgrade-required` |
+| `approval:full` | Legacy current increment | No | Legacy policy permits automatic acceptance only after verification and a valid bound packet | Cannot begin another increment automatically; discovery stops at `legacy-rollover-upgrade-required` |
 
 New-program proposal construction, bootstrap, and launch reject
 `approval:full-diff` and `approval:full` before every write. Those modes are
@@ -154,11 +157,14 @@ The workflow stops instead of guessing when it finds:
 - a user-owned decision or program amendment required by the selected mode; or
 - a requested Git, publication, provider, or external action outside the grant.
 
-The implemented deferred-operation stops are
-`legacy-rollover-upgrade-required`, `blocked-transaction-required`,
-`program-revision-workflow-required`, and `unsupported-program-mutation`.
-Accepted legacy programs and historical terminal records remain readable, but
-those read paths do not reactivate a mutation sink.
+Typed continuation and blocked recovery have their own exact prompts and
+retry/recovery routes. `legacy-rollover-upgrade-required` still quarantines the
+legacy rollover writer, and `blocked-transaction-required` still rejects generic
+direct blocked edges. `program-revision-workflow-required` and
+`unsupported-program-mutation` continue to stop unsupported revision,
+supersession, cancellation, or other program mutation. Accepted legacy programs
+and historical terminal records remain readable, but those read paths do not
+reactivate a mutation sink.
 
 The result should name the failed invariant and return the smallest action that
 can resolve it. The workflow does not manufacture replacement state to continue.

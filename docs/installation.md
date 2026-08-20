@@ -258,7 +258,7 @@ Claude Code 2.1.128 or later also accepts a local `.zip` archive through the
 same option:
 
 ```bash
-claude --plugin-dir /absolute/path/to/implementation-plugin-0.1.1.zip
+claude --plugin-dir /absolute/path/to/implementation-plugin-0.1.2.zip
 ```
 
 Neither command installs the plugin permanently. The archive must contain a
@@ -266,7 +266,7 @@ valid plugin at its root. Claude Code 2.1.129 or later can also load a packaged
 `.zip` archive from a trusted URL for one session:
 
 ```bash
-claude --plugin-url https://example.com/implementation-plugin-0.1.1.zip
+claude --plugin-url https://example.com/implementation-plugin-0.1.2.zip
 ```
 
 This repository does not currently publish a `.zip` archive. Do not point

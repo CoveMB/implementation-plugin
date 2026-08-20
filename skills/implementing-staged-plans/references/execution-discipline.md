@@ -8,6 +8,8 @@ Load the manifest-owned current status, brief, preparation, exact-file plan, exe
 
 Before the execution baseline exists, repository dirt must equal the normalized launch observation. After it exists, validate product paths by disposition and lifecycle state: `authorized` permits no product delta; `implementing` permits any subset of declared Create and Modify work; `reviewing` and later require every declared Create path to exist and every declared Modify path to differ from its baseline while Preserve remains byte-identical. Reject new staged, conflicted, unmapped, deleted, unsafe, or changed user-owned paths.
 
+For successor increments, validate every nonempty `inherited_paths` entry against the canonical rollover chain, matching accepted product bytes, and exact `Modify` or `Preserve` ownership. Inherited accepted history is not user-owned dirt and must not be merged into `user_work_baselines`. First-increment and frozen legacy baselines remain byte-compatible with `inherited_paths: []`.
+
 ## Meaningful test-first evidence
 
 For behavioral work, write one focused test before production code and observe it fail nonzero for the intended missing behavior. Record a stable slice identifier, purpose, exact command, expected and observed failure, exit status, confirmation that RED preceded the production change, intended-reason match, focused GREEN command and result, and RED-before-GREEN ordering. A test that passes immediately, fails from a harness error, or records a different reason is not test-first evidence.

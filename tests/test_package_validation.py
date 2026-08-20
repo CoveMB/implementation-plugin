@@ -79,11 +79,19 @@ PLAN_A_SCRIPTS = tuple(
         "program_closure",
     )
 )
+PLAN_B_SCRIPTS = tuple(
+    f"skills/implementing-staged-plans/scripts/{name}.py"
+    for name in (
+        "program_continuation",
+        "program_rollover",
+        "blocked_recovery",
+    )
+)
 
 
 VALID_MANIFEST = {
     "name": "implementation-plugin",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "Run approved implementation programs one reviewable increment at a time.",
     "skills": "./skills/",
 }
@@ -171,6 +179,8 @@ class PackageFixture:
         self.write(DISCOVERY_REFERENCE, "# Program Discovery\n")
         self.write(DISCOVERY_SCRIPT, "# deterministic read-only program discovery\n")
         for script in PLAN_A_SCRIPTS:
+            self.write(script, f"# {Path(script).stem}\n")
+        for script in PLAN_B_SCRIPTS:
             self.write(script, f"# {Path(script).stem}\n")
 
 
@@ -484,9 +494,9 @@ class CompletePackageTests(PackageValidationTestCase):
 
         self.assertEqual(VALIDATOR.validate_package(self.fixture.root), [])
 
-    def test_plan_a_scripts_and_three_manifest_identities_are_required(self) -> None:
+    def test_production_scripts_and_three_manifest_identities_are_required(self) -> None:
         self.fixture.write_valid_package()
-        for script in PLAN_A_SCRIPTS:
+        for script in (*PLAN_A_SCRIPTS, *PLAN_B_SCRIPTS):
             with self.subTest(script=script):
                 path = self.fixture.root / script
                 original = path.read_bytes()
@@ -500,7 +510,7 @@ class CompletePackageTests(PackageValidationTestCase):
         value["version"] = "0.1.0"
         self.fixture.write_json(".claude-plugin/plugin.json", value)
         self.assert_issue_contains(
-            VALIDATOR.validate_package(self.fixture.root), "version must equal '0.1.1'"
+            VALIDATOR.validate_package(self.fixture.root), "version must equal '0.1.2'"
         )
 
     def test_package_digest_inventory_is_sorted_and_excludes_repository_surfaces(self) -> None:

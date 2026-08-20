@@ -1,33 +1,34 @@
 # Implementing Staged Plans — Consolidated Design Plan
 
 **Date:** 2026-08-07  
-**Last amended:** 2026-08-18 — Plan A version 0.1.1 lifecycle alignment
-**Status:** Historical consolidated design with the implemented Plan A boundary below
+**Last amended:** 2026-08-19 — Plan B version 0.1.2 lifecycle alignment
+**Status:** Historical consolidated design with the implemented 0.1.2 boundary below
 **Scope:** Architecture and behavior of the `implementing-staged-plans` skill. This is not an exact-file implementation plan for a specific repository.  
 **Source basis:** Consolidates the strongest elements of the prior proposed design and copy-ready increment prompts, with a revised lean-prompt model.
 
 ---
 
-## Implemented Plan A boundary
+## Implemented 0.1.2 boundary
 
-The current 0.1.1 implementation routes **Create a New Program**, **Activate a
+The current implementation routes **Create a New Program**, **Activate a
 Generated Program**, **Before Production Modification**, **Prepare Review and
-Diff Disposition**, and **Close a Final Program** in that order. Program genesis
-publishes only an owner-bound control plane. Direct submission of one exact
-launch prompt persists separate typed approval, workspace-selection, and grant
-receipts. Exact planning owns an execution baseline. Review preparation is a
-typed status-last transaction. Diff disposition is `accept-stop` and is
-independent of any successor. Final closure derives its two paths from
-`implementation-closure-storage/v1` and requires a separate exact approval.
+Diff Disposition**, **Dispose the Current Diff**, **Continue an Accepted
+Program**, **Authorize a Successor Increment**, **Resolve a Blocked Program**,
+and **Close a Final Program**. Plan A remains the owner of genesis,
+first-increment planning, review, byte-compatible `accept-stop`, and closure.
+Plan B adds conditional prompt-bound `accept-continue`, distinct
+`accepted-state-continuation`, status-last successor rollover with
+`current_increment_authority_binding`, successor `inherited_paths`, and exact
+`blocked-recovery`.
 
-The 0.1.1 persistence boundary does not implement successor rollover, blocked
-recovery, program revision, supersession, or cancellation. Those requests stop
-at `legacy-rollover-upgrade-required`, `blocked-transaction-required`,
-`program-revision-workflow-required`, or `unsupported-program-mutation`.
+The legacy rollover writer remains quarantined at
+`legacy-rollover-upgrade-required`, and generic blocked edges remain guarded by
+`blocked-transaction-required`. Program revision, supersession, cancellation,
+and other unsupported mutations still stop at
+`program-revision-workflow-required` or `unsupported-program-mutation`.
 Handoffs and prompts remain navigation-only; direct user submission plus current
-typed authority is the mutation boundary. Where the historical design below
-describes a live continuation or blocked/revision writer, this implemented Plan
-A boundary controls until Plan B replaces it.
+typed authority is the mutation boundary. The historical design below is
+descriptive only where it differs from this implemented boundary.
 
 ## 1. Purpose
 

@@ -1,7 +1,7 @@
 interface:
   display_name: "Implementing Staged Plans"
-  short_description: "Create, activate, or continue implementation programs."
-  default_prompt: "Use $implementing-staged-plans to create, activate, or continue a repository-backed implementation program."
+  short_description: "Create, continue, or recover implementation programs."
+  default_prompt: "Use $implementing-staged-plans to create, activate, continue, or recover a repository-backed implementation program."
 
 policy:
   allow_implicit_invocation: false
