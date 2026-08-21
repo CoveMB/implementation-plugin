@@ -698,7 +698,7 @@ def evaluate_continuation_replay(
     client_version = evaluator_version.stdout.strip()
     if evaluator_version.returncode != 0 or not client_version:
         raise ValueError("continuation replay evaluator capability preflight failed")
-    completed_paths: list[Path] = []
+    pending_results: list[tuple[Path, str]] = []
     for scenario, result_path in zip(scenarios, result_paths, strict=True):
         prompt_path = REPOSITORY_ROOT / scenario.prompt_path
         if prompt_path.is_symlink() or not prompt_path.is_file():
@@ -763,9 +763,11 @@ def evaluate_continuation_replay(
             "\n--- response ---\n"
             f"{response}\n"
         )
-        _atomic_create_text(
-            result_path, evidence, trusted_root=REPOSITORY_ROOT
-        )
+        pending_results.append((result_path, evidence))
+
+    completed_paths: list[Path] = []
+    for result_path, evidence in pending_results:
+        _atomic_create_text(result_path, evidence, trusted_root=REPOSITORY_ROOT)
         completed_paths.append(result_path)
     return tuple(completed_paths)
 

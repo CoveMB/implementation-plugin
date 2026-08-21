@@ -624,6 +624,79 @@ class ContinuationReplayContractTests(unittest.TestCase):
                         evaluator="codex",
                     )
 
+    def test_second_evaluator_failure_leaves_no_partial_results_and_is_retryable(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            replay_root = root / "tests/pressure/continuation-replay"
+            shutil.copytree(CONTINUATION_REPLAY_ROOT, replay_root)
+            evaluation_calls = 0
+            fail_second_evaluation = True
+
+            def fake_run(arguments, *, cwd, timeout=30, environment=None):
+                nonlocal evaluation_calls
+                if tuple(arguments) == ("codex", "--version"):
+                    return subprocess.CompletedProcess(
+                        arguments, 0, stdout="codex 1.2.3\n", stderr=""
+                    )
+                evaluation_calls += 1
+                if fail_second_evaluation and evaluation_calls == 2:
+                    return subprocess.CompletedProcess(
+                        arguments,
+                        7,
+                        stdout="",
+                        stderr="provider unavailable\n",
+                    )
+                return subprocess.CompletedProcess(
+                    arguments,
+                    0,
+                    stdout=(
+                        '{"type":"item.completed","item":'
+                        '{"type":"agent_message","text":"Synthetic response."}}\n'
+                    ),
+                    stderr="",
+                )
+
+            def fake_isolation(isolated_root):
+                codex_home = Path(isolated_root) / "codex-home"
+                codex_home.mkdir()
+                return codex_home
+
+            output_directory = replay_root / "results"
+            with (
+                mock.patch.object(SUPPORT, "REPOSITORY_ROOT", root),
+                mock.patch.object(SUPPORT, "run_command", side_effect=fake_run),
+                mock.patch.object(
+                    SUPPORT,
+                    "_build_isolated_evaluation_root",
+                    side_effect=fake_isolation,
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "continuation replay evaluator failed for later-continuation: provider unavailable",
+                ):
+                    SUPPORT.evaluate_continuation_replay(
+                        catalog_path=replay_root / "scenarios.json",
+                        output_directory=output_directory,
+                        evaluator="codex",
+                    )
+                self.assertFalse(output_directory.exists())
+
+                fail_second_evaluation = False
+                paths = SUPPORT.evaluate_continuation_replay(
+                    catalog_path=replay_root / "scenarios.json",
+                    output_directory=output_directory,
+                    evaluator="codex",
+                )
+
+            self.assertEqual(
+                tuple(path.name for path in paths),
+                ("immediate-continuation.txt", "later-continuation.txt"),
+            )
+            self.assertTrue(all(path.is_file() for path in paths))
+
     def test_replay_evidence_binds_exact_transmitted_prompt_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

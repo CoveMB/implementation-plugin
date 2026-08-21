@@ -45,7 +45,7 @@ Review preparation stops at the exact diff-disposition prompt. Questions or disc
 
 ## Dispose the Current Diff
 
-The exact `accept-stop` choice is always available for new-model typed dispositions and preserves Plan A bytes. Legacy `approval:full` and `approval:full-diff` modes retain automatic acceptance. When traceability identifies exactly one successor whose dependencies are satisfied, the same prompt may also offer exact `accept-continue`. Direct submission persists or adopts the diff-acceptance prefix and accepted status first. `accept-continue` then completes its bound successor rollover with no second routine checkpoint; it does not grant any later or external action.
+The exact `accept-stop` choice is always available for new-model typed dispositions and preserves Plan A bytes. Already persisted legacy programs using `approval:full` or `approval:full-diff` retain automatic acceptance. When traceability identifies exactly one successor whose dependencies are satisfied, the same prompt may also offer exact `accept-continue`. Direct submission persists or adopts the diff-acceptance prefix and accepted status first. `accept-continue` then completes its bound successor rollover with no second routine checkpoint; it does not grant any later or external action.
 
 ## Continue an Accepted Program
 
