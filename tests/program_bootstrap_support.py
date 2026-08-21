@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Sequence
 
 
@@ -191,6 +191,42 @@ def write_raw_review_reports(
         (reviews / f"{scope}.json").write_bytes(
             canonical_json(raw_review_report(scope, increment_id))
         )
+
+
+def _rewrite_inherited_review_reports(
+    repository: Path,
+    status: dict[str, object],
+    increment_id: str,
+) -> None:
+    binding = status.get("inherited_workspace_binding", {})
+    inherited_paths = (
+        binding.get("inherited_paths", []) if isinstance(binding, dict) else []
+    )
+    if not isinstance(inherited_paths, list):
+        raise ValueError("inherited review paths must be a list")
+    report_names = {
+        "architecture.json",
+        "requirements.json",
+        "test-evidence.json",
+    }
+    for relative in inherited_paths:
+        if not isinstance(relative, str) or "\\" in relative:
+            raise ValueError("inherited review path must be a relative POSIX path")
+        relative_path = PurePosixPath(relative)
+        if relative_path.is_absolute() or any(
+            part in {"", ".", ".."} for part in relative_path.parts
+        ):
+            raise ValueError("inherited review path must be a relative POSIX path")
+        if relative_path.name not in report_names:
+            continue
+        report_path = Path(repository).joinpath(*relative_path.parts)
+        if not report_path.is_file() or report_path.is_symlink():
+            raise ValueError(f"inherited review report is invalid: {relative}")
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        if not isinstance(report, dict):
+            raise ValueError(f"inherited review report is invalid: {relative}")
+        report["increment_id"] = increment_id
+        report_path.write_bytes(canonical_json(report))
 
 
 class BootstrapFixture:
@@ -830,14 +866,11 @@ def run_lifecycle_phase(arguments: argparse.Namespace) -> dict[str, object]:
                 (repository / "archive-output.txt").write_text(
                     output, encoding="utf-8"
                 )
-                reviews = repository / "reviews"
-                if reviews.is_dir():
-                    for existing in sorted(reviews.rglob("requirements.json")):
-                        write_raw_review_reports(
-                            repository,
-                            str(increment_id),
-                            existing.parent.relative_to(repository).as_posix(),
-                        )
+                _rewrite_inherited_review_reports(
+                    repository,
+                    status,
+                    str(increment_id),
+                )
                 relative_review_directory = (
                     "reviews"
                     if increment_id == "ARCHIVE-INDEX"

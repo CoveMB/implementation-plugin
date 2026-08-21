@@ -451,6 +451,7 @@ class CompletePackageTests(PackageValidationTestCase):
             CHECKPOINT_SCRIPT,
             DISCOVERY_REFERENCE,
             DISCOVERY_SCRIPT,
+            *PLAN_B_SCRIPTS,
         ):
             with self.subTest(missing_path=missing_path):
                 self.fixture.write_valid_package()

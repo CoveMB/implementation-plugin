@@ -27,6 +27,7 @@ from program_authority import (
     sha256_file,
 )
 from repository_preparation import (
+    ExecutionBaseline,
     REPOSITORY_INSPECTION_SCHEMA,
     RepositoryInspection,
     execution_baseline_from_value,
@@ -160,7 +161,12 @@ def _execution_contract(
     root: Path,
     manifest: Mapping[str, object],
     status: Mapping[str, object],
-) -> tuple[object, dict[str, object], dict[str, object], dict[str, object]]:
+) -> tuple[
+    ExecutionBaseline,
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
+]:
     baseline_binding = status.get("execution_baseline_binding")
     authority_binding = status.get("current_increment_authority_binding")
     if not isinstance(baseline_binding, dict) or not isinstance(
@@ -206,7 +212,7 @@ def _execution_contract(
 
 def _validate_evidence_bindings(
     workspace: Path,
-    baseline: object,
+    baseline: ExecutionBaseline,
     bindings: Sequence[EvidenceBinding],
 ) -> tuple[dict[str, str], ...]:
     allowed = {
@@ -545,7 +551,7 @@ def build_block_resolution_candidate(
     """Build every prompt-bound recovery byte before persistence."""
     root = Path(program_root)
     normalized = _fresh_observation(root, observation)
-    manifest, status, status_path = _load_manifest_status(root)
+    _manifest, status, status_path = _load_manifest_status(root)
     context_issues = validate_blocked_context(root, status, normalized)
     if context_issues:
         raise ValueError("; ".join(context_issues))

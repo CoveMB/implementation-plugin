@@ -78,9 +78,11 @@ repair findings or advance the lifecycle.
 
 ## 5. Dispose the Current Diff
 
-The exact prompt always offers `accept-stop`. It offers `accept-continue` only
-when traceability names one successor and every dependency is satisfied. Both
-choices persist the same Plan A acceptance prefix and accepted status first.
+The new-model typed diff-disposition prompt always offers `accept-stop`. It
+offers `accept-continue` only when traceability names one successor and every
+dependency is satisfied. Both choices persist the same Plan A acceptance prefix
+and accepted status first. Legacy `approval:full` and `approval:full-diff` modes
+retain their automatic acceptance behavior.
 The continue choice then completes its prompt-bound rollover with no second
 routine checkpoint. Neither choice commits, pushes, opens a pull request, or
 performs an external action.

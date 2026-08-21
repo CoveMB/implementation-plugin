@@ -155,12 +155,19 @@ def _successor_selection(
 def continuation_unavailability_reason(
     program_root: Path,
     acceptance: DiffAcceptanceCandidate,
+    *,
+    allow_unbound_rollover_suffix: bool = False,
 ) -> str:
     root = Path(program_root)
     manifest, manifest_issues = load_json_object(root / "manifest.json")
     if manifest is None:
         raise ValueError("; ".join(manifest_issues))
-    successor, reason = _successor_selection(root, manifest, acceptance.accepted_status)
+    successor, reason = _successor_selection(
+        root,
+        manifest,
+        acceptance.accepted_status,
+        allow_unbound_rollover_suffix=allow_unbound_rollover_suffix,
+    )
     return "" if successor is not None else reason
 
 
@@ -275,7 +282,7 @@ def _continuation_inputs(
     if manifest is None:
         raise ValueError("; ".join(manifest_issues))
     status, _ = _load_role(root, manifest, "status")
-    workspace, workspace_path = _load_role(root, manifest, "workspace")
+    workspace, _workspace_path = _load_role(root, manifest, "workspace")
     traceability, _ = _load_role(root, manifest, "traceability")
     successor, reason = _successor_selection(
         root,
@@ -676,7 +683,13 @@ def _render_accept_continue_prompt(
         allow_unbound_rollover_suffix=allow_unbound_rollover_suffix,
     )
     if extension is None:
-        raise ValueError(continuation_unavailability_reason(root, acceptance))
+        raise ValueError(
+            continuation_unavailability_reason(
+                root,
+                acceptance,
+                allow_unbound_rollover_suffix=allow_unbound_rollover_suffix,
+            )
+        )
     candidate = build_accept_continue_candidate(acceptance, extension)
     return (
         f"Accept and continue to `{extension.successor_increment_id}`.\n\n"
@@ -721,7 +734,13 @@ def _build_accepted_state_command(
         allow_unbound_rollover_suffix=allow_unbound_rollover_suffix,
     )
     if extension is None:
-        raise ValueError(continuation_unavailability_reason(root, acceptance))
+        raise ValueError(
+            continuation_unavailability_reason(
+                root,
+                acceptance,
+                allow_unbound_rollover_suffix=allow_unbound_rollover_suffix,
+            )
+        )
     projection = dict(extension.successor_projection)
     selected_workspace = projection["selected_workspace"]
     inherited_workspace = {

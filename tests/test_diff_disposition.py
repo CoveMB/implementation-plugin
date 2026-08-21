@@ -34,6 +34,14 @@ finally:
     sys.path.remove(str(SCRIPT_ROOT))
 
 
+def setUpModule() -> None:
+    sys.path.insert(0, str(SCRIPT_ROOT))
+
+
+def tearDownModule() -> None:
+    sys.path.remove(str(SCRIPT_ROOT))
+
+
 def awaiting_diff_program(successors: dict[str, tuple[str, ...]] | None = None):
     if successors is not None:
         fixture = BootstrapFixture()
@@ -160,6 +168,29 @@ class DiffDispositionTests(unittest.TestCase):
                 finally:
                     fixture.close()
 
+    def test_stop_submission_does_not_derive_continuation(self) -> None:
+        fixture, program_root, observation = awaiting_diff_program(
+            {"ARCHIVE-VERIFY": ("ARCHIVE-INDEX",)}
+        )
+        try:
+            acceptance = DIFF.build_diff_acceptance_candidate(
+                program_root, observation
+            )
+            stop_prompt = "Accept and stop.\n\n" + acceptance.prompt
+            with mock.patch.object(
+                DIFF._continuation,
+                "build_continuation_extension",
+                side_effect=ValueError("unrelated continuation failure"),
+            ):
+                receipt = DIFF._persist_diff_acceptance_prefix(
+                    program_root, stop_prompt, observation
+                )
+
+            self.assertEqual(receipt.decision, "accept-stop")
+            self.assertEqual(receipt.increment_state, "accepted")
+        finally:
+            fixture.close()
+
     def test_approval_only_and_status_lost_response_prefixes_are_exactly_retry_safe(self) -> None:
         for failure_label in ("diff-approval", "accepted-status"):
             with self.subTest(label=failure_label):
@@ -167,8 +198,10 @@ class DiffDispositionTests(unittest.TestCase):
                 try:
                     prompt = DIFF.render_diff_disposition_prompt(program_root)
 
-                    def interrupt(label: str) -> None:
-                        if label == failure_label:
+                    def interrupt(
+                        label: str, *, expected_label: str = failure_label
+                    ) -> None:
+                        if label == expected_label:
                             raise RuntimeError("injected diff disposition interruption")
 
                     with mock.patch.object(DIFF, "_after_persist", side_effect=interrupt):

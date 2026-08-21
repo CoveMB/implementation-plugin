@@ -173,7 +173,9 @@ def _increment_paths(
         ),
     )
     resolved: list[Path] = []
-    for label, relative in zip(("current handoff", "successor brief"), relative_paths):
+    for label, relative in zip(
+        ("current handoff", "successor brief"), relative_paths, strict=True
+    ):
         path, issues = resolve_managed_path(
             root, relative, role=label, require_file=False
         )
@@ -298,7 +300,7 @@ def _continuation_candidate(
     manifest, manifest_issues = load_json_object(root / "manifest.json")
     if manifest is None:
         raise ValueError("; ".join(manifest_issues))
-    status, status_path = _load_role_object(root, manifest, "status")
+    status, _status_path = _load_role_object(root, manifest, "status")
     if status.get("current_increment_state") != "accepted":
         raise ValueError("increment rollover requires an accepted current increment")
     binding = status.get("diff_disposition_binding")
@@ -374,7 +376,7 @@ def _build_rollover_candidate(
     action_path = _load_role_path(root, manifest, "action_authorizations")
     grant_path = _load_role_path(root, manifest, "increment_grants")
     rollover_path = _load_role_path(root, manifest, "rollovers")
-    workspace, workspace_path = _load_role_object(root, manifest, "workspace")
+    _workspace, workspace_path = _load_role_object(root, manifest, "workspace")
     current_increment_id = str(status["current_increment_id"])
     successor_increment_id = extension.successor_increment_id
     handoff_path, successor_brief_path = _increment_paths(
@@ -551,9 +553,10 @@ def _build_rollover_candidate(
     }
     rollover_bytes = _canonical_json_line(rollover_record)
     rollover_sha256 = _sha256_bytes(rollover_bytes)
-    prior_inherited = status.get("inherited_workspace_binding", {}).get(
-        "inherited_paths", []
-    )
+    prior_inherited_binding = status.get("inherited_workspace_binding", {})
+    if not isinstance(prior_inherited_binding, Mapping):
+        raise ValueError("prior inherited workspace inventory is invalid")
+    prior_inherited = prior_inherited_binding.get("inherited_paths", [])
     if not isinstance(prior_inherited, list) or not all(
         isinstance(item, str) for item in prior_inherited
     ):

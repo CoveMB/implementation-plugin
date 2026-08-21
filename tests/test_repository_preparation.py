@@ -759,20 +759,40 @@ class ExecutionWorkspaceValidationTests(unittest.TestCase):
         cases = []
         duplicate = json.loads(json.dumps(valid))
         duplicate["inherited_paths"] = ["catalog.txt", "catalog.txt"]
-        cases.append(duplicate)
+        cases.append(
+            (
+                "duplicate",
+                duplicate,
+                "execution baseline inherited inventory is duplicated",
+            )
+        )
         malformed = json.loads(json.dumps(valid))
         malformed["inherited_paths"] = ["../catalog.txt"]
-        cases.append(malformed)
+        cases.append(
+            ("malformed", malformed, "execution baseline structure is invalid")
+        )
         create_owned = json.loads(json.dumps(valid))
         create_owned["inherited_paths"] = ["archive-output.txt"]
-        cases.append(create_owned)
+        cases.append(
+            (
+                "create-owned",
+                create_owned,
+                "inherited paths must be owned as Modify or Preserve",
+            )
+        )
         missing_baseline = json.loads(json.dumps(valid))
         missing_baseline["path_baselines"] = [
             item
             for item in missing_baseline["path_baselines"]
             if item["path"] != "catalog.txt"
         ]
-        cases.append(missing_baseline)
+        cases.append(
+            (
+                "missing-baseline",
+                missing_baseline,
+                "each inherited path requires exactly one path baseline",
+            )
+        )
         user_overlap = json.loads(json.dumps(valid))
         user_overlap["user_work_baselines"] = [
             {
@@ -781,10 +801,16 @@ class ExecutionWorkspaceValidationTests(unittest.TestCase):
                 "sha256": sha256_file(self.fixture.root / "catalog.txt"),
             }
         ]
-        cases.append(user_overlap)
-        for value in cases:
-            with self.subTest(value=value):
-                with self.assertRaises(ValueError):
+        cases.append(
+            (
+                "user-overlap",
+                user_overlap,
+                "inherited paths must be disjoint from user-work baselines",
+            )
+        )
+        for label, value, expected_error in cases:
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(ValueError, f"^{expected_error}$"):
                     PREPARATION.execution_baseline_from_value(value)
 
     def test_inherited_preserve_path_is_not_unmapped_user_dirt(self) -> None:

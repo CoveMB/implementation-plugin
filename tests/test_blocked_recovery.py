@@ -208,8 +208,10 @@ class BlockedRecoveryTests(unittest.TestCase):
                         program_root, resolution_candidate(program_root), observation
                     )
 
-                    def interrupt(completed_label: str) -> None:
-                        if completed_label == label:
+                    def interrupt(
+                        completed_label: str, *, expected_label: str = label
+                    ) -> None:
+                        if completed_label == expected_label:
                             raise RuntimeError("injected blocked recovery interruption")
 
                     with mock.patch.object(

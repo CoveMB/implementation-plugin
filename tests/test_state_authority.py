@@ -44,6 +44,7 @@ finally:
     sys.path.remove(str(SCRIPT_ROOT))
 
 from tests.test_diff_disposition import awaiting_diff_program
+from tests.test_blocked_recovery import BLOCKED, block_request, implementing_program
 from tests.test_program_rollover import ROLLOVER, accepted_continuation_program
 
 
@@ -274,6 +275,45 @@ def write_json_lines(path: Path, records: list[dict[str, object]]) -> None:
 
 
 class RolloverHistoryAuthorityTests(unittest.TestCase):
+    def test_inherited_path_validation_failure_is_reported(self) -> None:
+        fixture, program_root, observation, prompt = accepted_continuation_program(
+            "accepted-state"
+        )
+        try:
+            ROLLOVER.persist_increment_rollover(program_root, prompt, observation)
+            normalized = ROLLOVER._fresh_observation(program_root, observation)
+
+            with mock.patch(
+                "program_rollover.validated_inherited_paths",
+                side_effect=ValueError("inherited path diagnostics are unavailable"),
+            ):
+                issues = AUTHORITY.validate_state_authority(
+                    program_root, normalized
+                )
+
+            self.assertIn("inherited path diagnostics are unavailable", issues)
+        finally:
+            fixture.close()
+
+    def test_blocked_path_validation_failure_is_reported(self) -> None:
+        fixture, program_root, observation = implementing_program()
+        try:
+            BLOCKED.block_current_program(
+                program_root, block_request(fixture), observation
+            )
+
+            with mock.patch(
+                "blocked_recovery.blocked_workspace_paths",
+                side_effect=ValueError("blocked path diagnostics are unavailable"),
+            ):
+                issues = AUTHORITY.validate_state_authority(
+                    program_root, observation
+                )
+
+            self.assertIn("blocked path diagnostics are unavailable", issues)
+        finally:
+            fixture.close()
+
     def test_arbitrary_genesis_rollover_row_is_not_state_authority(self) -> None:
         fixture, program_root, observation = awaiting_diff_program(
             {"ARCHIVE-VERIFY": ("ARCHIVE-BLOCKER",)}

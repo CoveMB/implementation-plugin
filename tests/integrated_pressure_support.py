@@ -366,7 +366,9 @@ def validate_continuation_replay_evidence(root: Path) -> list[str]:
             or verdict_document.get("schema_version")
             != "implementation-continuation-replay-verdicts/v1"
             or not isinstance(verdicts, list)
-            or [item.get("id") for item in verdicts if isinstance(item, dict)]
+            or len(verdicts) != len(scenarios)
+            or not all(isinstance(item, dict) for item in verdicts)
+            or [item.get("id") for item in verdicts]
             != list(EXPECTED_CONTINUATION_REPLAY_IDS)
         ):
             issues.append("continuation replay verdict document is incomplete")
@@ -424,6 +426,45 @@ def _reject_symlink_components(
             )
 
 
+def _supports_result_descriptor_apis() -> bool:
+    dir_fd_names = {
+        getattr(function, "__name__", "") for function in os.supports_dir_fd
+    }
+    follow_symlink_names = {
+        getattr(function, "__name__", "")
+        for function in os.supports_follow_symlinks
+    }
+    return {"open", "link", "unlink"} <= dir_fd_names and (
+        "link" in follow_symlink_names
+    )
+
+
+def _exclusive_create_text(path: Path, value: str) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except FileExistsError as error:
+        raise ValueError(f"result target appeared before creation: {path}") from error
+    created_identity = os.fstat(descriptor)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(value)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        try:
+            current_identity = path.stat(follow_symlinks=False)
+            if (
+                current_identity.st_dev,
+                current_identity.st_ino,
+            ) == (created_identity.st_dev, created_identity.st_ino):
+                path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def _atomic_create_text(
     path: Path, value: str, *, trusted_root: Path | None = None
 ) -> None:
@@ -438,6 +479,9 @@ def _atomic_create_text(
     _reject_symlink_components(
         target, label="result target", trusted_root=boundary
     )
+    if not _supports_result_descriptor_apis():
+        _exclusive_create_text(target, value)
+        return
     directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
     directory_flags |= getattr(os, "O_NOFOLLOW", 0)
     directory_descriptor = os.open(target.parent, directory_flags)
@@ -694,8 +738,14 @@ def evaluate_continuation_replay(
                 environment=build_isolated_evaluator_environment(codex_home),
             )
         if completed.returncode != 0:
+            concise_error = (completed.stderr or completed.stdout).strip().splitlines()
+            detail = (
+                " | ".join(concise_error[-40:])
+                if concise_error
+                else "no evaluator error text"
+            )
             raise ValueError(
-                f"continuation replay evaluator failed for {scenario.scenario_id}"
+                f"continuation replay evaluator failed for {scenario.scenario_id}: {detail}"
             )
         response = _extract_agent_message(completed.stdout).replace(
             str(REPOSITORY_ROOT), "<repository-root>"

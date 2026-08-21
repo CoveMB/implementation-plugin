@@ -226,15 +226,21 @@ class ReaderDocumentationTests(unittest.TestCase):
 
     def test_distribution_descriptions_do_not_claim_unsupported_program_mutations(self) -> None:
         descriptions = (
-            str(load_json(CODEX_MANIFEST)["description"]),
-            str(load_json(CLAUDE_MANIFEST)["description"]),
-            str(load_json(CLAUDE_MARKETPLACE)["plugins"][0]["description"]),
-            reader_text(
-                Path("skills/implementing-staged-plans/agents/openai.yaml")
+            ("codex manifest", str(load_json(CODEX_MANIFEST)["description"])),
+            ("claude manifest", str(load_json(CLAUDE_MANIFEST)["description"])),
+            (
+                "claude marketplace",
+                str(load_json(CLAUDE_MARKETPLACE)["plugins"][0]["description"]),
+            ),
+            (
+                "openai agent metadata",
+                reader_text(
+                    Path("skills/implementing-staged-plans/agents/openai.yaml")
+                ),
             ),
         )
-        for description in descriptions:
-            with self.subTest(description=description):
+        for label, description in descriptions:
+            with self.subTest(label=label):
                 self.assertNotRegex(
                     description.lower(),
                     r"\b(?:revise|revision|supersede|supersession|cancel|cancellation)\b",

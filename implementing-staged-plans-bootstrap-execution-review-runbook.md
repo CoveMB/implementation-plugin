@@ -72,7 +72,8 @@ their identities, scopes, findings, risk predicates, product-delta binding, and
 fresh final verification. It creates review evidence, then the review packet,
 then writes verified and awaiting-diff statuses in order.
 
-Every exact disposition preserves the Plan A stop choice:
+Every new-model typed exact disposition preserves the Plan A stop choice; legacy
+`approval:full` and `approval:full-diff` modes retain automatic acceptance:
 
 ```text
 accept-stop

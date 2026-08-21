@@ -252,6 +252,9 @@ class FrontDoorContractTests(unittest.TestCase):
 
     def test_bounded_continuation_navigation_is_structured_and_non_authorizing(self) -> None:
         skill_markdown = SKILL_PATH.read_text(encoding="utf-8")
+        continuation_section = skill_markdown.split(
+            "## Route Continuity and Closure Work", 1
+        )[1].split("## Route Optional Post-Closure Housekeeping", 1)[0]
         for required in (
             "bounded continuation result",
             "next legal action",
@@ -260,7 +263,7 @@ class FrontDoorContractTests(unittest.TestCase):
             "copy-ready prompt",
             "navigation",
         ):
-            self.assertIn(required, skill_markdown.lower())
+            self.assertIn(required, continuation_section.lower())
 
     def test_navigation_and_quoted_prompts_never_grant_mutation_authority(self) -> None:
         skill_markdown = SKILL_PATH.read_text(encoding="utf-8").lower()

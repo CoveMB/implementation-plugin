@@ -103,9 +103,11 @@ before relying on an earlier state.
 
 ## Approval modes
 
-Approval modes define routine interruption policy. Version 0.1.2 always offers
-`accept-stop` and conditionally offers exact `accept-continue` for one satisfied
-successor. Modes do not grant action authority or automatic successor rollover.
+Approval modes define routine interruption policy. New-model typed dispositions
+in version 0.1.2 always offer `accept-stop` and conditionally offer exact
+`accept-continue` for one satisfied successor. Modes do not grant action authority
+or automatic successor rollover. Legacy `approval:full` and
+`approval:full-diff` modes retain their automatic acceptance behavior.
 
 | Mode | Scope | Routine plan pause | Diff acceptance | Continuation and mandatory stop |
 | --- | --- | --- | --- | --- |

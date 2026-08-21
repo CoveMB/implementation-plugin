@@ -137,8 +137,10 @@ class ProgramContinuationTests(unittest.TestCase):
                 try:
                     prompt = CONTINUATION.render_accept_continue_prompt(program_root)
 
-                    def interrupt(label: str) -> None:
-                        if label == failure_label:
+                    def interrupt(
+                        label: str, *, expected_label: str = failure_label
+                    ) -> None:
+                        if label == expected_label:
                             raise RuntimeError("injected continuation acceptance failure")
 
                     with mock.patch.object(DIFF, "_after_persist", side_effect=interrupt):

@@ -60,7 +60,7 @@ class ProgramRolloverTests(unittest.TestCase):
         return json.loads(completed.stdout)
 
     def test_required_rollover_writes_compose_with_plan_a_allocations(self) -> None:
-        fixture, program_root, observation, _prompt = accepted_continuation_program(
+        fixture, program_root, _observation, _prompt = accepted_continuation_program(
             "immediate"
         )
         try:
@@ -107,8 +107,10 @@ class ProgramRolloverTests(unittest.TestCase):
                     try:
                         manifest_before = (program_root / "manifest.json").read_bytes()
 
-                        def interrupt(completed_label: str) -> None:
-                            if completed_label == label:
+                        def interrupt(
+                            completed_label: str, *, expected_label: str = label
+                        ) -> None:
+                            if completed_label == expected_label:
                                 raise RuntimeError("injected rollover interruption")
 
                         with mock.patch.object(
@@ -169,6 +171,67 @@ class ProgramRolloverTests(unittest.TestCase):
                     finally:
                         fixture.close()
 
+    def test_continuation_reason_preserves_rollover_retry_authority(self) -> None:
+        fixture, program_root, observation, prompt = accepted_continuation_program(
+            "accepted-state"
+        )
+        try:
+            acceptance = DIFF.build_diff_acceptance_candidate(
+                program_root, observation
+            )
+
+            def interrupt(
+                completed_label: str, *, label: str = "rollover-record"
+            ) -> None:
+                if completed_label == label:
+                    raise RuntimeError("injected rollover interruption")
+
+            with mock.patch.object(
+                ROLLOVER, "_after_persist", side_effect=interrupt
+            ):
+                with self.assertRaisesRegex(RuntimeError, "injected"):
+                    ROLLOVER.persist_increment_rollover(
+                        program_root, prompt, observation
+                    )
+
+            self.assertEqual(
+                CONTINUATION.continuation_unavailability_reason(
+                    program_root,
+                    acceptance,
+                    allow_unbound_rollover_suffix=True,
+                ),
+                "",
+            )
+        finally:
+            fixture.close()
+
+    def test_rollover_rejects_non_object_inherited_workspace_binding(self) -> None:
+        for inherited_binding in (None, [], "invalid", 1):
+            with self.subTest(inherited_binding=inherited_binding):
+                fixture, program_root, observation, _prompt = (
+                    accepted_continuation_program("accepted-state")
+                )
+                try:
+                    status_path = program_root / "state/status.json"
+                    status = json.loads(status_path.read_text(encoding="utf-8"))
+                    status["inherited_workspace_binding"] = inherited_binding
+                    status_path.write_bytes(ROLLOVER._canonical_json_bytes(status))
+                    prompt = (
+                        CONTINUATION.render_accepted_state_continuation_prompt(
+                            program_root
+                        )
+                    )
+
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "^prior inherited workspace inventory is invalid$",
+                    ):
+                        ROLLOVER._build_rollover_candidate(
+                            program_root, prompt, observation
+                        )
+                finally:
+                    fixture.close()
+
     def test_completed_rollover_history_requires_activation_authority_anchor(
         self,
     ) -> None:
@@ -202,7 +265,10 @@ class ProgramRolloverTests(unittest.TestCase):
             (program_root / "state/status.json").write_bytes(
                 ROLLOVER._canonical_json_bytes(status)
             )
-            with self.assertRaisesRegex(ValueError, "authority"):
+            with self.assertRaisesRegex(
+                ValueError,
+                "^rollover chain prior increment authority is invalid$",
+            ):
                 ROLLOVER.validated_inherited_paths(
                     program_root, status, observation
                 )
@@ -252,7 +318,10 @@ class ProgramRolloverTests(unittest.TestCase):
             )
             status_path.write_bytes(ROLLOVER._canonical_json_bytes(status))
 
-            with self.assertRaisesRegex(ValueError, "authority"):
+            with self.assertRaisesRegex(
+                ValueError,
+                "^rollover chain increment authority is invalid$",
+            ):
                 ROLLOVER.validated_inherited_paths(
                     program_root, status, observation
                 )

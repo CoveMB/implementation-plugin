@@ -426,6 +426,10 @@ class ContinuationReplayContractTests(unittest.TestCase):
                     self.assertFalse(output_directory.exists())
 
     def test_absent_live_results_are_valid_and_report_not_run(self) -> None:
+        if (CONTINUATION_REPLAY_ROOT / "results").exists() or (
+            CONTINUATION_REPLAY_ROOT / "verdicts.json"
+        ).exists():
+            self.skipTest("live continuation replay evidence is present")
         self.assertFalse((CONTINUATION_REPLAY_ROOT / "results").exists())
         self.assertFalse((CONTINUATION_REPLAY_ROOT / "verdicts.json").exists())
         self.assertEqual(
@@ -483,6 +487,35 @@ class ContinuationReplayContractTests(unittest.TestCase):
             )
             self.assertEqual(
                 SUPPORT.validate_continuation_replay_evidence(root), []
+            )
+            malformed_verdicts = [*verdicts, "unexpected"]
+            (replay_root / "verdicts.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "implementation-continuation-replay-verdicts/v1",
+                        "verdicts": malformed_verdicts,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            self.assertIn(
+                "continuation replay verdict document is incomplete",
+                SUPPORT.validate_continuation_replay_evidence(root),
+            )
+            (replay_root / "verdicts.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "implementation-continuation-replay-verdicts/v1",
+                        "verdicts": verdicts,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
             )
             first_result = root / scenarios[0].result_path
             first_result.write_bytes(first_result.read_bytes() + b"tampered\n")
@@ -543,6 +576,48 @@ class ContinuationReplayContractTests(unittest.TestCase):
                     self.assertIn("--ephemeral", arguments)
                     self.assertIn("read-only", arguments)
                 with self.assertRaisesRegex(ValueError, "must all be absent"):
+                    SUPPORT.evaluate_continuation_replay(
+                        catalog_path=replay_root / "scenarios.json",
+                        output_directory=replay_root / "results",
+                        evaluator="codex",
+                    )
+
+    def test_continuation_evaluator_failure_reports_concise_detail(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            replay_root = root / "tests/pressure/continuation-replay"
+            shutil.copytree(CONTINUATION_REPLAY_ROOT, replay_root)
+
+            def fake_run(arguments, *, cwd, timeout=30, environment=None):
+                if tuple(arguments) == ("codex", "--version"):
+                    return subprocess.CompletedProcess(
+                        arguments, 0, stdout="codex 1.2.3\n", stderr=""
+                    )
+                return subprocess.CompletedProcess(
+                    arguments,
+                    7,
+                    stdout="",
+                    stderr="provider unavailable\n",
+                )
+
+            def fake_isolation(isolated_root):
+                codex_home = Path(isolated_root) / "codex-home"
+                codex_home.mkdir()
+                return codex_home
+
+            with (
+                mock.patch.object(SUPPORT, "REPOSITORY_ROOT", root),
+                mock.patch.object(SUPPORT, "run_command", side_effect=fake_run),
+                mock.patch.object(
+                    SUPPORT,
+                    "_build_isolated_evaluation_root",
+                    side_effect=fake_isolation,
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "continuation replay evaluator failed for immediate-continuation: provider unavailable",
+                ):
                     SUPPORT.evaluate_continuation_replay(
                         catalog_path=replay_root / "scenarios.json",
                         output_directory=replay_root / "results",
@@ -670,6 +745,30 @@ class ContinuationReplayContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "appeared before creation"):
                     SUPPORT._atomic_create_text(target, "candidate\n")
             self.assertEqual(target.read_text(encoding="utf-8"), "foreign\n")
+
+    def test_atomic_result_creation_falls_back_without_descriptor_apis(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "result.txt"
+            real_open = SUPPORT.os.open
+
+            def guarded_open(path, flags, mode=0o777, *, dir_fd=None):
+                if dir_fd is not None:
+                    raise AssertionError("descriptor-relative open is unsupported")
+                return real_open(path, flags, mode)
+
+            with (
+                mock.patch.object(SUPPORT.os, "supports_dir_fd", set()),
+                mock.patch.object(SUPPORT.os, "supports_follow_symlinks", set()),
+                mock.patch.object(SUPPORT.os, "open", side_effect=guarded_open),
+                mock.patch.object(
+                    SUPPORT.os,
+                    "link",
+                    side_effect=AssertionError("hard-link fallback was not selected"),
+                ),
+            ):
+                SUPPORT._atomic_create_text(target, "candidate\n")
+
+            self.assertEqual(target.read_text(encoding="utf-8"), "candidate\n")
 
     def test_symlinked_result_is_invalid_not_absent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -2158,7 +2158,8 @@ def validate_state_authority(
             inherited_paths = set(
                 validated_inherited_paths(root, status, observation)
             )
-        except (ImportError, KeyError, OSError, TypeError, ValueError):
+        except (ImportError, KeyError, OSError, TypeError, ValueError) as error:
+            issues.append(str(error))
             inherited_paths = set()
         if inherited_paths:
             workspace_observation = replace(
@@ -2184,12 +2185,17 @@ def validate_state_authority(
                     if path not in inherited_paths
                 ),
             )
-    if status is not None and status.get("program_state") == "blocked":
+    if (
+        status is not None
+        and status.get("program_state") == "blocked"
+        and isinstance(status.get("blocked_context"), dict)
+    ):
         try:
             from blocked_recovery import blocked_workspace_paths
 
             blocked_paths = set(blocked_workspace_paths(root, status))
-        except (ImportError, KeyError, OSError, TypeError, ValueError):
+        except (ImportError, KeyError, OSError, TypeError, ValueError) as error:
+            issues.append(str(error))
             blocked_paths = set()
         if blocked_paths:
             workspace_observation = replace(

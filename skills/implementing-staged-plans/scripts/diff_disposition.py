@@ -390,11 +390,11 @@ def _persist_diff_acceptance_prefix(
     root = Path(program_root)
     acceptance = build_diff_acceptance_candidate(root, observation)
     stop_prompt = "Accept and stop.\n\n" + acceptance.prompt
+    if submitted_prompt == stop_prompt:
+        return persist_accept_stop(root, submitted_prompt, observation)
     extension = _continuation.build_continuation_extension(
         root, acceptance, observation
     )
-    if submitted_prompt == stop_prompt:
-        return persist_accept_stop(root, submitted_prompt, observation)
     if extension is None:
         reason = _continuation.continuation_unavailability_reason(root, acceptance)
         rendered_stop_only = (

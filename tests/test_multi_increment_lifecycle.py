@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import sys
 import unittest
@@ -31,6 +32,56 @@ class MultiIncrementLifecycleTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.fixture.close()
+
+    def test_inherited_review_rewrite_preserves_reports_and_scope(self) -> None:
+        inherited_paths = [
+            "reviews/architecture.json",
+            "reviews/requirements.json",
+            "reviews/test-evidence.json",
+        ]
+        expected: dict[str, dict[str, object]] = {}
+        for scope, relative in zip(
+            ("architecture", "requirements", "test-evidence"),
+            inherited_paths,
+            strict=True,
+        ):
+            value = bootstrap_support.raw_review_report(scope)
+            value["findings"] = [{"id": f"preserved-{scope}"}]
+            path = self.fixture.repository / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(bootstrap_support.canonical_json(value))
+            expected[relative] = value
+        unowned = self.fixture.repository / "reviews/unowned/requirements.json"
+        unowned.parent.mkdir(parents=True)
+        unowned.write_bytes(
+            bootstrap_support.canonical_json(
+                bootstrap_support.raw_review_report("requirements")
+            )
+        )
+        unowned_before = unowned.read_bytes()
+        status = {
+            "inherited_workspace_binding": {
+                "inherited_paths": inherited_paths,
+            }
+        }
+
+        bootstrap_support._rewrite_inherited_review_reports(
+            self.fixture.repository,
+            status,
+            "ARCHIVE-VERIFY",
+        )
+
+        for relative, prior in expected.items():
+            with self.subTest(relative=relative):
+                rewritten = json.loads(
+                    (self.fixture.repository / relative).read_text(encoding="utf-8")
+                )
+                self.assertEqual(rewritten["increment_id"], "ARCHIVE-VERIFY")
+                self.assertEqual(
+                    {key: value for key, value in rewritten.items() if key != "increment_id"},
+                    {key: value for key, value in prior.items() if key != "increment_id"},
+                )
+        self.assertEqual(unowned.read_bytes(), unowned_before)
 
     def run_phase(
         self,
@@ -406,8 +457,7 @@ class MultiIncrementLifecycleTests(unittest.TestCase):
         )
         self.assertTrue(
             all(
-                len(item["sha256"]) == 64
-                and int(item["sha256"], 16) >= 0
+                re.fullmatch(r"[0-9a-f]{64}", item["sha256"]) is not None
                 for item in inventory["files"]
             )
         )
