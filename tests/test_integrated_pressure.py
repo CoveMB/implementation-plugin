@@ -697,6 +697,143 @@ class ContinuationReplayContractTests(unittest.TestCase):
             )
             self.assertTrue(all(path.is_file() for path in paths))
 
+    def test_second_publication_failure_removes_owned_results_and_is_retryable(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            replay_root = root / "tests/pressure/continuation-replay"
+            shutil.copytree(CONTINUATION_REPLAY_ROOT, replay_root)
+            real_create = SUPPORT._atomic_create_text
+            publication_calls = 0
+            fail_publication = True
+
+            def fake_run(arguments, *, cwd, timeout=30, environment=None):
+                if tuple(arguments) == ("codex", "--version"):
+                    return subprocess.CompletedProcess(
+                        arguments, 0, stdout="codex 1.2.3\n", stderr=""
+                    )
+                return subprocess.CompletedProcess(
+                    arguments,
+                    0,
+                    stdout=(
+                        '{"type":"item.completed","item":'
+                        '{"type":"agent_message","text":"Synthetic response."}}\n'
+                    ),
+                    stderr="",
+                )
+
+            def fake_isolation(isolated_root):
+                codex_home = Path(isolated_root) / "codex-home"
+                codex_home.mkdir()
+                return codex_home
+
+            def fail_second_create(path, value, *, trusted_root=None):
+                nonlocal publication_calls
+                publication_calls += 1
+                if fail_publication and publication_calls == 2:
+                    raise OSError("publication unavailable")
+                return real_create(path, value, trusted_root=trusted_root)
+
+            output_directory = replay_root / "results"
+            with (
+                mock.patch.object(SUPPORT, "REPOSITORY_ROOT", root),
+                mock.patch.object(SUPPORT, "run_command", side_effect=fake_run),
+                mock.patch.object(
+                    SUPPORT,
+                    "_build_isolated_evaluation_root",
+                    side_effect=fake_isolation,
+                ),
+                mock.patch.object(
+                    SUPPORT, "_atomic_create_text", side_effect=fail_second_create
+                ),
+            ):
+                with self.assertRaisesRegex(OSError, "publication unavailable"):
+                    SUPPORT.evaluate_continuation_replay(
+                        catalog_path=replay_root / "scenarios.json",
+                        output_directory=output_directory,
+                        evaluator="codex",
+                    )
+                self.assertEqual(tuple(output_directory.iterdir()), ())
+
+                fail_publication = False
+                paths = SUPPORT.evaluate_continuation_replay(
+                    catalog_path=replay_root / "scenarios.json",
+                    output_directory=output_directory,
+                    evaluator="codex",
+                )
+
+            self.assertTrue(all(path.is_file() for path in paths))
+
+    def test_incomplete_publication_recovery_preserves_foreign_replacement(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            replay_root = root / "tests/pressure/continuation-replay"
+            shutil.copytree(CONTINUATION_REPLAY_ROOT, replay_root)
+            real_create = SUPPORT._atomic_create_text
+            publication_calls = 0
+            first_result = replay_root / "results/immediate-continuation.txt"
+
+            def fake_run(arguments, *, cwd, timeout=30, environment=None):
+                if tuple(arguments) == ("codex", "--version"):
+                    return subprocess.CompletedProcess(
+                        arguments, 0, stdout="codex 1.2.3\n", stderr=""
+                    )
+                return subprocess.CompletedProcess(
+                    arguments,
+                    0,
+                    stdout=(
+                        '{"type":"item.completed","item":'
+                        '{"type":"agent_message","text":"Synthetic response."}}\n'
+                    ),
+                    stderr="",
+                )
+
+            def fake_isolation(isolated_root):
+                codex_home = Path(isolated_root) / "codex-home"
+                codex_home.mkdir()
+                return codex_home
+
+            def replace_before_second_failure(path, value, *, trusted_root=None):
+                nonlocal publication_calls
+                publication_calls += 1
+                if publication_calls == 2:
+                    first_result.unlink()
+                    first_result.write_text("foreign\n", encoding="utf-8")
+                    raise OSError("publication unavailable")
+                return real_create(path, value, trusted_root=trusted_root)
+
+            with (
+                mock.patch.object(SUPPORT, "REPOSITORY_ROOT", root),
+                mock.patch.object(SUPPORT, "run_command", side_effect=fake_run),
+                mock.patch.object(
+                    SUPPORT,
+                    "_build_isolated_evaluation_root",
+                    side_effect=fake_isolation,
+                ),
+                mock.patch.object(
+                    SUPPORT,
+                    "_atomic_create_text",
+                    side_effect=replace_before_second_failure,
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "continuation replay publication recovery failed.*immediate-continuation.txt",
+                ):
+                    SUPPORT.evaluate_continuation_replay(
+                        catalog_path=replay_root / "scenarios.json",
+                        output_directory=replay_root / "results",
+                        evaluator="codex",
+                    )
+
+            self.assertEqual(first_result.read_text(encoding="utf-8"), "foreign\n")
+            self.assertFalse(
+                (replay_root / "results/later-continuation.txt").exists()
+            )
+
     def test_replay_evidence_binds_exact_transmitted_prompt_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

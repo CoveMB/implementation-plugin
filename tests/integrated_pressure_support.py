@@ -439,7 +439,7 @@ def _supports_result_descriptor_apis() -> bool:
     )
 
 
-def _exclusive_create_text(path: Path, value: str) -> None:
+def _exclusive_create_text(path: Path, value: str) -> tuple[int, int]:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     flags |= getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -463,11 +463,12 @@ def _exclusive_create_text(path: Path, value: str) -> None:
         except FileNotFoundError:
             pass
         raise
+    return (created_identity.st_dev, created_identity.st_ino)
 
 
 def _atomic_create_text(
     path: Path, value: str, *, trusted_root: Path | None = None
-) -> None:
+) -> tuple[int, int]:
     target = Path(path)
     boundary = target.parent.parent if trusted_root is None else trusted_root
     _reject_symlink_components(
@@ -480,12 +481,12 @@ def _atomic_create_text(
         target, label="result target", trusted_root=boundary
     )
     if not _supports_result_descriptor_apis():
-        _exclusive_create_text(target, value)
-        return
+        return _exclusive_create_text(target, value)
     directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
     directory_flags |= getattr(os, "O_NOFOLLOW", 0)
     directory_descriptor = os.open(target.parent, directory_flags)
     temporary_name: str | None = None
+    created_identity: tuple[int, int] | None = None
     try:
         for candidate_index in range(100):
             name = f".{target.name}.{os.getpid()}.{candidate_index}.tmp"
@@ -506,6 +507,11 @@ def _atomic_create_text(
             temporary.write(value)
             temporary.flush()
             os.fsync(temporary.fileno())
+            temporary_identity = os.fstat(temporary.fileno())
+            created_identity = (
+                temporary_identity.st_dev,
+                temporary_identity.st_ino,
+            )
         _reject_symlink_components(
             target, label="result target", trusted_root=boundary
         )
@@ -530,6 +536,27 @@ def _atomic_create_text(
             except FileNotFoundError:
                 pass
         os.close(directory_descriptor)
+    if created_identity is None:
+        raise RuntimeError("result creation completed without a filesystem identity")
+    return created_identity
+
+
+def _remove_created_result(path: Path, expected_identity: tuple[int, int]) -> bool:
+    try:
+        current_identity = path.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    if (current_identity.st_dev, current_identity.st_ino) != expected_identity:
+        return False
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return True
 
 
 def _extract_agent_message(json_lines: str) -> str:
@@ -765,10 +792,30 @@ def evaluate_continuation_replay(
         )
         pending_results.append((result_path, evidence))
 
-    completed_paths: list[Path] = []
-    for result_path, evidence in pending_results:
-        _atomic_create_text(result_path, evidence, trusted_root=REPOSITORY_ROOT)
-        completed_paths.append(result_path)
+    created_results: list[tuple[Path, tuple[int, int]]] = []
+    try:
+        for result_path, evidence in pending_results:
+            created_identity = _atomic_create_text(
+                result_path, evidence, trusted_root=REPOSITORY_ROOT
+            )
+            created_results.append((result_path, created_identity))
+    except BaseException as publication_error:
+        recovery_failures = tuple(
+            path
+            for path, identity in reversed(created_results)
+            if not _remove_created_result(path, identity)
+        )
+        if recovery_failures:
+            failed_paths = ", ".join(
+                path.relative_to(REPOSITORY_ROOT).as_posix()
+                for path in recovery_failures
+            )
+            raise ValueError(
+                "continuation replay publication recovery failed for: "
+                f"{failed_paths}"
+            ) from publication_error
+        raise
+    completed_paths = [path for path, _identity in created_results]
     return tuple(completed_paths)
 
 
