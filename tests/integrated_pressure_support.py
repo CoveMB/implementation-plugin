@@ -817,10 +817,12 @@ def evaluate_continuation_replay(
                 path.relative_to(REPOSITORY_ROOT).as_posix()
                 for path in recovery_failures
             )
-            publication_error.add_note(
-                "continuation replay publication recovery failed for: "
-                f"{failed_paths}"
-            )
+            add_note = getattr(publication_error, "add_note", None)
+            if callable(add_note):
+                add_note(
+                    "continuation replay publication recovery failed for: "
+                    f"{failed_paths}"
+                )
         raise
     completed_paths = [path for path, _identity in created_results]
     return tuple(completed_paths)

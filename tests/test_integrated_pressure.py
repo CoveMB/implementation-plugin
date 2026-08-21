@@ -768,7 +768,15 @@ class ContinuationReplayContractTests(unittest.TestCase):
     def test_incomplete_publication_recovery_preserves_foreign_replacement(
         self,
     ) -> None:
-        for exception_type in (OSError, KeyboardInterrupt, SystemExit):
+        class LegacyPublicationError(BaseException):
+            add_note = None
+
+        for exception_type, note_supported in (
+            (OSError, True),
+            (KeyboardInterrupt, True),
+            (SystemExit, True),
+            (LegacyPublicationError, False),
+        ):
             with self.subTest(exception_type=exception_type.__name__):
                 with tempfile.TemporaryDirectory() as directory:
                     root = Path(directory)
@@ -804,7 +812,13 @@ class ContinuationReplayContractTests(unittest.TestCase):
                         return codex_home
 
                     def replace_before_second_failure(
-                        path, value, *, trusted_root=None
+                        path,
+                        value,
+                        *,
+                        trusted_root=None,
+                        first_result=first_result,
+                        exception_type=exception_type,
+                        real_create=real_create,
                     ):
                         nonlocal publication_calls
                         publication_calls += 1
@@ -838,12 +852,20 @@ class ContinuationReplayContractTests(unittest.TestCase):
                             )
 
                     self.assertEqual(str(raised.exception), "publication unavailable")
-                    self.assertIn(
+                    recovery_note = (
                         "continuation replay publication recovery failed for: "
                         "tests/pressure/continuation-replay/results/"
-                        "immediate-continuation.txt",
-                        getattr(raised.exception, "__notes__", ()),
+                        "immediate-continuation.txt"
                     )
+                    if note_supported:
+                        self.assertIn(
+                            recovery_note,
+                            getattr(raised.exception, "__notes__", ()),
+                        )
+                    else:
+                        self.assertEqual(
+                            getattr(raised.exception, "__notes__", ()), ()
+                        )
                     self.assertEqual(
                         first_result.read_text(encoding="utf-8"), "foreign\n"
                     )
