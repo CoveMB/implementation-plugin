@@ -47,7 +47,7 @@ class DistributionMetadataTests(unittest.TestCase):
         claude_marketplace = load_json(CLAUDE_MARKETPLACE)
 
         self.assertEqual(codex_manifest["name"], "implementation-plugin")
-        self.assertEqual(codex_manifest["version"], "0.1.1")
+        self.assertEqual(codex_manifest["version"], "0.1.2")
         self.assertEqual(codex_manifest["skills"], "./skills/")
         self.assertEqual(claude_manifest["name"], codex_manifest["name"])
         self.assertEqual(claude_manifest["version"], codex_manifest["version"])
@@ -162,7 +162,7 @@ class ReaderDocumentationTests(unittest.TestCase):
         for required_text in (
             "Claude Code in VS Code",
             "/plugins",
-            "claude --plugin-dir /absolute/path/to/implementation-plugin-0.1.1.zip",
+            "claude --plugin-dir /absolute/path/to/implementation-plugin-0.1.2.zip",
             "```powershell",
             "if (Test-Path $skillDestination)",
             'throw "Destination already exists: $skillDestination"',
@@ -177,7 +177,7 @@ class ReaderDocumentationTests(unittest.TestCase):
             4,
         )
 
-    def test_plan_a_reader_routes_are_truthful_and_deferred_operations_are_named(self) -> None:
+    def test_reader_routes_describe_the_complete_supported_lifecycle(self) -> None:
         documents = {
             path: reader_text(path)
             for path in (
@@ -193,8 +193,16 @@ class ReaderDocumentationTests(unittest.TestCase):
             "Activate a Generated Program",
             "Before Production Modification",
             "Prepare Review and Diff Disposition",
+            "Dispose the Current Diff",
+            "Continue an Accepted Program",
+            "Authorize a Successor Increment",
+            "Resolve a Blocked Program",
             "Close a Final Program",
             "accept-stop",
+            "accept-continue",
+            "accepted-state-continuation",
+            "current_increment_authority_binding",
+            "blocked-recovery",
             "implementation-closure-storage/v1",
             "legacy-rollover-upgrade-required",
             "blocked-transaction-required",
@@ -202,18 +210,40 @@ class ReaderDocumentationTests(unittest.TestCase):
             "unsupported-program-mutation",
         ):
             self.assertIn(required, combined)
-        self.assertNotIn("Accept an increment and authorize the next increment", combined)
+        self.assertIn("Plan A closure", combined)
         self.assertNotIn("execute `INC-001` under `approval:full-increment`", combined)
         continuity = reader_text(
             Path("skills/implementing-staged-plans/references/continuity-closure.md")
         )
-        self.assertNotIn("## Apply an Authorized Rollover", continuity)
+        self.assertIn("## Apply Prompt-Bound Successor Rollover", continuity)
         self.assertIn("legacy-rollover-upgrade-required", continuity)
         for path, text in documents.items():
             with self.subTest(path=path):
                 self.assertNotRegex(
                     text.lower(),
                     r"(?:handoff|retrieved prompt|assistant-quoted prompt).*authoriz(?:e|es) mutation",
+                )
+
+    def test_distribution_descriptions_do_not_claim_unsupported_program_mutations(self) -> None:
+        descriptions = (
+            ("codex manifest", str(load_json(CODEX_MANIFEST)["description"])),
+            ("claude manifest", str(load_json(CLAUDE_MANIFEST)["description"])),
+            (
+                "claude marketplace",
+                str(load_json(CLAUDE_MARKETPLACE)["plugins"][0]["description"]),
+            ),
+            (
+                "openai agent metadata",
+                reader_text(
+                    Path("skills/implementing-staged-plans/agents/openai.yaml")
+                ),
+            ),
+        )
+        for label, description in descriptions:
+            with self.subTest(label=label):
+                self.assertNotRegex(
+                    description.lower(),
+                    r"\b(?:revise|revision|supersede|supersession|cancel|cancellation)\b",
                 )
 
 

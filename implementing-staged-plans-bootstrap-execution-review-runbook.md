@@ -1,8 +1,8 @@
 # Implementing Staged Plans — Bootstrap, Execution, and Review Runbook
 
-**Version boundary:** Plan A 0.1.1
-**Purpose:** Operate the implemented first-increment lifecycle without claiming
-the deferred Plan B continuation, blocked recovery, or program revision routes.
+**Version boundary:** Plan A 0.1.1 plus Plan B 0.1.2
+**Purpose:** Operate the implemented multi-increment lifecycle without claiming
+unsupported program revision, supersession, or cancellation routes.
 
 This runbook supplements the canonical
 [`implementing-staged-plans` skill](skills/implementing-staged-plans/SKILL.md).
@@ -72,20 +72,48 @@ their identities, scopes, findings, risk predicates, product-delta binding, and
 fresh final verification. It creates review evidence, then the review packet,
 then writes verified and awaiting-diff statuses in order.
 
-Plan A exposes one exact disposition:
+Every new-model typed exact disposition preserves the Plan A stop choice.
+Already persisted legacy programs using `approval:full` or `approval:full-diff`
+retain automatic acceptance:
 
 ```text
 accept-stop
 ```
 
-The prompt is independent of successor state. Direct submission appends or
-adopts the exact diff approval and writes accepted status last. It never starts
-another increment, creates successor navigation, stages or commits files, or
-performs an external action.
+When exactly one traceability successor is dependency-ready, the prompt also
+offers `accept-continue`. Direct submission appends or adopts the exact diff
+approval and writes accepted status last. Stop ends there. Continue completes
+its bound rollover with no second routine checkpoint. Neither choice stages or
+commits files or performs an external action.
 
 Questions and review feedback do not constitute acceptance. If a validated
 material defect is repaired, renew affected review and final verification before
 rendering another exact disposition.
+
+## Continue an Accepted Program
+
+An accepted-stop status never continues by replay. A later fresh task uses the
+distinct `accepted-state-continuation` prompt derived from current status and the
+one canonical successor. The handoff is navigation only. Persist or adopt the
+rollover action, successor grant, handoff, successor brief, rollover record, and
+successor status in that order. Status last binds
+`current_increment_authority_binding` and leaves the manifest byte-identical.
+
+## Authorize a Successor Increment
+
+Every successor repeats Plan A's exact-plan allocation and materialization
+contract. The successor baseline uses the existing `inherited_paths` field only
+for accepted product bytes proven by the canonical rollover chain and owned as
+`Modify` or `Preserve`. It keeps those bytes separate from user-work baselines.
+All first-increment and frozen 0.1.1 baselines retain `inherited_paths: []`.
+
+## Resolve a Blocked Program
+
+Typed block entry is legal only from `implementing` or `reviewing` and derives
+the prior states and all controlling bindings at the sink. `remediating` stays
+under Plan A's typed review lifecycle. Resolution requires the exact
+`blocked-recovery` prompt, persists action then ledger, and restores only the
+recorded prior states with status last.
 
 ## Close a Final Program
 
@@ -119,15 +147,16 @@ After interruption:
   `*-recovery-required` stop; and
 - recovery never deletes, overwrites, substitutes, or silently skips a prefix.
 
-## Deferred Plan B routes
+## Unsupported routes
 
-Plan A does not implement live successor rollover, blocked recovery, program
-revision, supersession, or cancellation.
+Version 0.1.2 implements typed successor rollover and blocked recovery. It does
+not implement program revision, supersession, or cancellation, and it does not
+reactivate legacy automatic rollover.
 
 | Requested operation | Mandatory result |
 | --- | --- |
-| caller-authored successor rollover | `legacy-rollover-upgrade-required` |
-| transition into or out of blocked | `blocked-transaction-required` |
+| legacy automatic or caller-authored rollover | `legacy-rollover-upgrade-required` |
+| generic transition into or out of blocked | `blocked-transaction-required` |
 | revise or supersede a live program | `program-revision-workflow-required` |
 | cancel or another unsupported mutation | `unsupported-program-mutation` |
 
@@ -137,23 +166,26 @@ or invoke a generic transition to bypass the stop.
 
 ## Review checklist
 
-Before accepting the Plan A candidate, verify:
+Before accepting the 0.1.2 candidate, verify:
 
 1. the source, branch, HEAD, workspace, and dirty-state bindings are current;
 2. every product change appears in the exact plan and execution baseline;
 3. user-owned work remains byte-identical;
 4. required raw reviews, findings, dispositions, and final verification match
    the accepted delta;
-5. `accept-stop` contains no continuation dependency or later authority;
-6. closure is final-only and uses only manifest-derived paths;
-7. interruption tests cover every durable write boundary;
-8. deferred mutation calls preserve every repository byte; and
-9. no test or static document check is described as proof of live provider,
+5. `accept-stop` remains byte-compatible and `accept-continue` appears only for
+   one dependency-ready successor;
+6. accepted-state continuation uses a distinct prompt and status-current grant;
+7. blocked recovery restores only sink-recorded prior states;
+8. Plan A closure is final-only and uses only manifest-derived paths;
+9. interruption tests cover every durable write boundary;
+10. unsupported mutation calls preserve every repository byte; and
+11. no test or static document check is described as proof of live provider,
    deployment, accessibility, human-review, or production behavior.
 
 ## Verification commands
 
-Run focused checks while implementing each task. On the final unchanged 0.1.1
+Run focused checks while implementing each task. On the final unchanged 0.1.2
 candidate, run package validation and the full deterministic suite exactly once,
 then obtain one bounded independent material review. A review finding is repair
 authority only when the controller validates it as material and in scope.

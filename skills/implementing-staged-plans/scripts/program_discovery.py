@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -59,6 +60,7 @@ PLAN_A_DISCOVERY_DISPOSITIONS = frozenset(
         "plan-materialization-retry-ready",
         "review-preparation-retry-ready",
         "increment-acceptance-retry-ready",
+        "accepted-continuation-retry-ready",
         "closure-preparation-retry-ready",
         "closure-approval-retry-ready",
         "resume",
@@ -133,6 +135,36 @@ PLAN_A_ROUTE_DETAILS = {
         "Preserve the diff-acceptance prefix and resolve its divergence before retrying.",
         True,
     ),
+    "accepted-continuation-retry-ready": (
+        None,
+        "Resubmit the same exact accept-and-continue prompt to complete its suffix.",
+        False,
+    ),
+    "increment-continuation-retry-ready": (
+        None,
+        "Resubmit the same immediate continuation prompt to adopt its authority prefix.",
+        False,
+    ),
+    "increment-rollover-retry-ready": (
+        None,
+        "Resubmit the same immediate continuation prompt to adopt its rollover prefix.",
+        False,
+    ),
+    "accepted-state-continuation-retry-ready": (
+        None,
+        "Resubmit the same accepted-state continuation prompt to adopt its authority prefix.",
+        False,
+    ),
+    "accepted-state-rollover-retry-ready": (
+        None,
+        "Resubmit the same accepted-state continuation prompt to adopt its rollover prefix.",
+        False,
+    ),
+    "accepted-state-continuation-recovery-required": (
+        "plan-b-accepted-state-continuation-recovery",
+        "Preserve the accepted-state successor prefix and resolve its divergence before retrying.",
+        True,
+    ),
     "closure-preparation-retry-ready": (
         None,
         "Resubmit the same exact closure-preparation operation to adopt the valid prefix.",
@@ -179,6 +211,16 @@ PLAN_A_ROUTE_DETAILS = {
         "Preserve the blocked prefix and use the Plan B blocked recovery workflow.",
         True,
     ),
+    "blocked-recovery-ready": (
+        "block-resolution-candidate",
+        "Provide complete satisfied criteria and render the exact block-resolution prompt.",
+        True,
+    ),
+    "blocked-resolution-retry-ready": (
+        None,
+        "Resubmit the same exact block-resolution prompt to adopt its valid prefix.",
+        False,
+    ),
     "legacy-rollover-upgrade-required": (
         "legacy-rollover-upgrade",
         "Stop before successor writes; the accepted legacy program requires an explicit upgrade workflow.",
@@ -209,6 +251,8 @@ class ProgramCandidate:
     status_path: str
     status_sha256: str
     status_sequence: int
+    resume_program_state: str | None = None
+    resume_increment_state: str | None = None
 
 
 @dataclass(frozen=True)
@@ -300,6 +344,30 @@ def _canonical_json_bytes(value: object) -> bytes:
     return (
         json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     ).encode("utf-8")
+
+
+def _has_unbound_block_resolution(
+    ledgers: dict[str, list[dict[str, object]]],
+) -> bool:
+    actions = ledgers.get("action_authorizations", [])
+    for resolution in ledgers.get("block_resolutions", []):
+        authorization_id = resolution.get("action_authorization_id")
+        matches = [
+            record
+            for record in actions
+            if record.get("authorization_id") == authorization_id
+        ]
+        if (
+            resolution.get("schema_version")
+            != "implementation-block-resolution/v1"
+            or not isinstance(authorization_id, str)
+            or len(matches) != 1
+            or matches[0].get("actions") != ["resume-blocked-program"]
+            or hashlib.sha256(_canonical_json_line(matches[0])).hexdigest()
+            != resolution.get("action_authorization_sha256")
+        ):
+            return True
+    return False
 
 
 def _exact_activation_prefix(
@@ -477,8 +545,14 @@ def _exact_plan_prefix_disposition(
         record
         for record in ledgers.get("approvals", [])
         if record.get("type") == "exact-file-plan-approval"
+        and record.get("increment_id") == status.get("current_increment_id")
     ]
-    actions = ledgers.get("action_authorizations", [])
+    actions = [
+        record
+        for record in ledgers.get("action_authorizations", [])
+        if record.get("increment_id") == status.get("current_increment_id")
+        and record.get("actions") == ["modify-workspace", "run-local-verification"]
+    ]
     material_prefix = bool(plan_approvals or baseline_present or actions)
     recovery = (
         "plan-materialization-recovery-required"
@@ -633,7 +707,17 @@ def _exact_acceptance_prefix_disposition(
         for record in ledgers.get("approvals", [])
         if record.get("type") == "increment-diff-approval"
     ]
-    if state == "awaiting-diff-approval" and not approvals:
+    current_approvals = [
+        record
+        for record in approvals
+        if record.get("increment_id") == status.get("current_increment_id")
+    ]
+    if state == "awaiting-diff-approval" and not current_approvals:
+        if any(
+            not isinstance(record.get("increment_id"), str)
+            for record in approvals
+        ):
+            return "increment-acceptance-recovery-required"
         return None
     try:
         roles = manifest["logical_roles"]
@@ -652,13 +736,45 @@ def _exact_acceptance_prefix_disposition(
         candidate = build_diff_acceptance_candidate(root, observation)
     except (KeyError, OSError, TypeError, ValueError):
         return "increment-acceptance-recovery-required"
-    if approvals != [candidate.approval_record]:
+    candidate_approvals = [
+        record
+        for record in approvals
+        if record.get("event_id") == candidate.approval_event_id
+    ]
+    if candidate_approvals == [candidate.approval_record]:
+        if state == "awaiting-diff-approval":
+            return "increment-acceptance-retry-ready"
+        if _canonical_json_bytes(status) != candidate.accepted_status_bytes:
+            return "increment-acceptance-recovery-required"
+        return "accepted-stop"
+    try:
+        from program_continuation import (
+            build_accept_continue_candidate,
+            build_continuation_extension,
+        )
+
+        extension = build_continuation_extension(root, candidate, observation)
+        continued = build_accept_continue_candidate(candidate, extension)
+    except (KeyError, OSError, TypeError, ValueError):
+        return "increment-acceptance-recovery-required"
+    continued_approvals = [
+        record
+        for record in approvals
+        if record.get("event_id") == continued.approval_event_id
+    ]
+    if (
+        state == "awaiting-diff-approval"
+        and not candidate_approvals
+        and not continued_approvals
+    ):
+        return None
+    if continued_approvals != [continued.approval_record]:
         return "increment-acceptance-recovery-required"
     if state == "awaiting-diff-approval":
         return "increment-acceptance-retry-ready"
-    if _canonical_json_bytes(status) != candidate.accepted_status_bytes:
+    if _canonical_json_bytes(status) != continued.accepted_status_bytes:
         return "increment-acceptance-recovery-required"
-    return "accepted-stop"
+    return "accepted-continuation-retry-ready"
 
 
 def _exact_closure_prefix_disposition(
@@ -857,7 +973,17 @@ def _load_new_candidate(
         status_sequence=int(sequence),
     )
 
-    has_rollover_prefix = bool(ledgers.get("rollovers"))
+    has_rollover_prefix = (
+        bool(ledgers.get("rollovers"))
+        or any(
+            record.get("actions") == ["rollover-increment"]
+            for record in ledgers.get("action_authorizations", [])
+        )
+        or any(
+            record.get("continuation_domain") in {"immediate", "accepted-state"}
+            for record in ledgers.get("increment_grants", [])
+        )
+    )
     has_blocked_prefix = bool(ledgers.get("block_resolutions")) or program_state == "blocked"
 
     if program_state == "awaiting-program-approval":
@@ -917,10 +1043,99 @@ def _load_new_candidate(
         return candidate, None, tuple(
             f"{display_path}: {issue}" for issue in authority_issues
         )
-    if has_rollover_prefix:
-        return candidate, "continuation-recovery-required", ()
-    if has_blocked_prefix:
+    lifecycle_observation = None
+    try:
+        workspace_path, workspace_path_issues = resolve_managed_path(
+            root, roles.get("workspace"), role="logical role workspace"
+        )
+        if workspace_path is None or workspace_path_issues:
+            raise ValueError("workspace binding is unavailable")
+        workspace, workspace_issues = load_json_object(workspace_path)
+        if workspace is None or workspace_issues:
+            raise ValueError("workspace binding is invalid")
+        selected = workspace["implementation_workspace"]
+        lifecycle_observation = _without_owned_program_paths(
+            root,
+            inspect_repository(
+                Path(selected["path"]), selected["base_commit"]
+            ).observation,
+        )
+    except (KeyError, OSError, TypeError, ValueError):
+        pass
+    blocked_inspection = None
+    if lifecycle_observation is not None and (
+        has_blocked_prefix
+        or isinstance(status.get("block_resolution_binding"), dict)
+    ):
+        try:
+            from blocked_recovery import inspect_blocked_recovery
+
+            blocked_inspection = inspect_blocked_recovery(
+                root, lifecycle_observation
+            )
+        except (ImportError, KeyError, OSError, TypeError, ValueError):
+            blocked_inspection = None
+    if blocked_inspection is not None and blocked_inspection.disposition is not None:
+        candidate = replace(
+            candidate,
+            resume_program_state=blocked_inspection.prior_program_state,
+            resume_increment_state=blocked_inspection.prior_increment_state,
+        )
+        return candidate, blocked_inspection.disposition, ()
+    if has_blocked_prefix and status.get("program_state") == "blocked":
         return candidate, "blocked-recovery-required", ()
+    if _has_unbound_block_resolution(ledgers):
+        return candidate, "blocked-recovery-required", ()
+    rollover_inspection = None
+    if lifecycle_observation is not None and (
+        has_rollover_prefix
+        or isinstance(status.get("rollover_binding"), dict)
+        or (
+            status.get("current_increment_state") == "accepted"
+            and isinstance(status.get("diff_disposition_binding"), dict)
+        )
+    ):
+        try:
+            from program_rollover import inspect_increment_rollover
+
+            rollover_inspection = inspect_increment_rollover(
+                root, lifecycle_observation
+            )
+        except (ImportError, KeyError, OSError, TypeError, ValueError):
+            if has_rollover_prefix:
+                return candidate, "continuation-recovery-required", ()
+    if rollover_inspection is not None and rollover_inspection.disposition is not None:
+        if rollover_inspection.disposition != "resume":
+            return candidate, rollover_inspection.disposition, ()
+        storage = manifest.get("increment_storage")
+        current_plan_exists = False
+        if isinstance(storage, dict):
+            relative_plan = (
+                f"{storage.get('root')}/{status.get('current_increment_id')}/"
+                f"{storage.get('exact_file_plan_filename')}"
+            )
+            current_plan, current_plan_issues = resolve_managed_path(
+                root,
+                relative_plan,
+                role="status-current exact-file plan",
+                require_file=False,
+            )
+            current_plan_exists = (
+                not current_plan_issues
+                and current_plan is not None
+                and current_plan.is_file()
+                and not current_plan.is_symlink()
+            )
+        if (
+            status.get("current_increment_state") == "preparing"
+            and not current_plan_exists
+        ):
+            return candidate, "resume", ()
+    if has_rollover_prefix and (
+        rollover_inspection is None
+        or rollover_inspection.disposition is None
+    ) and not isinstance(status.get("rollover_binding"), dict):
+        return candidate, "continuation-recovery-required", ()
     transaction_files, transaction_issues = _inspect_transaction_files(
         root, manifest, status
     )

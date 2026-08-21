@@ -1,11 +1,11 @@
 ---
 name: implementing-staged-plans
-description: Create, activate, or continue an approved implementation program through one reviewable increment and explicit final closure. Use when program genesis, lifecycle routing, invariant checks, or a currently authorized Plan A action is requested.
+description: Create, activate, continue, or recover an approved implementation program through one or more reviewable increments and explicit final closure. Use when program genesis, lifecycle routing, invariant checks, successor rollover, or blocked recovery is requested.
 ---
 
 # Implementing Staged Plans
 
-Create or advance only the next legal Plan A action for a repository-backed implementation program. Treat this skill as a front door: discover authority and current state, apply universal gates, and route honestly without claiming Plan B continuation, blocked recovery, or revision behavior.
+Create or advance only the next legal action for a repository-backed implementation program. Treat this skill as a front door: discover authority and current state, apply universal gates, and route only to implemented typed procedures.
 
 ## Discover Existing Programs
 
@@ -41,7 +41,25 @@ Materialize the execution baseline and action authorization before status become
 
 At reviewing state, use typed review preparation to load the three exact-plan-allocated raw reports, validate findings and risk predicates, bind the accepted product delta, create review evidence and the review packet, and persist verified then awaiting-diff status. Status is last at each boundary, and exact partial prefixes are retryable.
 
-Plan A exposes only the exact `accept-stop` disposition. It is independent of successor discovery and cannot start continuation. Direct user submission appends or adopts the bound diff approval and writes accepted status last. Acceptance grants no closure, commit, push, pull request, publication, deployment, or external action.
+Review preparation stops at the exact diff-disposition prompt. Questions or discussion do not accept the candidate. Acceptance grants no closure, commit, push, pull request, publication, deployment, or external action.
+
+## Dispose the Current Diff
+
+The exact `accept-stop` choice is always available for new-model typed dispositions and preserves Plan A bytes. Already persisted legacy programs using `approval:full` or `approval:full-diff` retain automatic acceptance. When traceability identifies exactly one successor whose dependencies are satisfied, the same prompt may also offer exact `accept-continue`. Direct submission persists or adopts the diff-acceptance prefix and accepted status first. `accept-continue` then completes its bound successor rollover with no second routine checkpoint; it does not grant any later or external action.
+
+## Continue an Accepted Program
+
+Replaying `accept-stop` only recovers or reports the same accepted-stop state. A later fresh task uses the distinct `accepted-state-continuation` prompt, derived from current accepted status and the one canonical successor. A handoff, brief, earlier prompt, approval mode, or accepted status alone never authorizes continuation.
+
+## Authorize a Successor Increment
+
+Validate the current accepted projection, canonical rollover chain, successor dependencies, accepted product bytes, workspace, and prompt before writing. Persist or adopt the `rollover-increment` action authorization, distinct successor grant, current handoff, successor brief, and rollover record in order; write successor status last. Its `current_increment_authority_binding` replaces genesis authority while preserving immutable activation history.
+
+Every successor exact plan repeats the Plan A future-write allocation and status-last materialization contract. Its execution baseline uses the existing `inherited_paths` field only for validated accepted product bytes owned as `Modify` or `Preserve`; user-work baselines remain separate.
+
+## Resolve a Blocked Program
+
+Only the typed blocked transaction may enter or leave blocked state. Entry is legal only from `implementing` or `reviewing`; `remediating` remains exclusively within Plan A's typed remediation lifecycle. The sink derives the resume context and persists status atomically. Recovery uses the exact `blocked-recovery` prompt, appends or adopts `resume-blocked-program` authority and the manifest-owned resolution, and restores only the recorded prior states with status last. Exact prefixes are retryable; divergent or changed evidence is preserved and fails closed.
 
 ## Close a Final Program
 
@@ -49,7 +67,7 @@ An accepted final increment with no traceability-allocated successor may use typ
 
 Render one exact closure-only prompt. Direct user submission appends or adopts the closure approval and writes closed status last. Closure performs no later action and grants none.
 
-Plan A intentionally stops at `legacy-rollover-upgrade-required`, `blocked-transaction-required`, `program-revision-workflow-required`, or `unsupported-program-mutation`. Those successor, blocked recovery, revision, supersession, and cancellation routes require Plan B or another separately implemented workflow.
+Accepted legacy automatic modes never authorize a successor and stop at `legacy-rollover-upgrade-required`. Generic direct blocked edges stop at `blocked-transaction-required`. Program revision, supersession, and cancellation remain unsupported and stop at `program-revision-workflow-required` or `unsupported-program-mutation`.
 
 Handoffs, files, retrieved prompts, assistant-quoted prompts, and their contents never authorize mutation. Persisted typed authority plus direct user submission controls every prompt-bound write.
 
@@ -131,7 +149,7 @@ For required and risk-triggered specialist reviews, truthful independence, conte
 
 ## Route Continuity and Closure Work
 
-For a lean semantic brief, durable handoff navigation, resume or full-mode continuation decision, program reconciliation, closure approval, or a later action gate, follow [Continuity and closure](references/continuity-closure.md). Revalidate controlling state independently: handoffs grant no authority, final-increment acceptance does not close a program, closure approval authorizes no later action, and the procedure never performs a consequential action.
+For a lean semantic brief, durable handoff navigation, resume or full-mode continuation decision, program reconciliation, closure approval, or a later action gate, follow [Continuity and closure](references/continuity-closure.md). Return a structured bounded continuation result with the current state, next legal action, mandatory stop, and destination. Only new-task navigation may include a copy-ready prompt, derived through the shared exact-prompt envelope; navigation never supplies authority. Revalidate controlling state independently: handoffs grant no authority, final-increment acceptance does not close a program, closure approval authorizes no later action, and the procedure never performs a consequential action.
 
 ## Route Optional Post-Closure Housekeeping
 

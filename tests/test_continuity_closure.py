@@ -308,6 +308,128 @@ class BriefAndHandoffTests(unittest.TestCase):
                 self.assertTrue(CONTINUITY.validate_handoff(candidate))
 
 
+class BoundedContinuationResultTests(unittest.TestCase):
+    def test_semantic_successor_selection_requires_one_satisfied_candidate(self) -> None:
+        current = "ARCHIVE-INDEX"
+        direct = {
+            "id": "DIRECT",
+            "assigned_increments": [current, "ARCHIVE-VERIFY"],
+        }
+        blocked = {
+            "id": "BLOCKED",
+            "assigned_increments": ["ARCHIVE-BLOCKER", "ARCHIVE-VERIFY"],
+        }
+        alternate = {
+            "id": "ALTERNATE",
+            "assigned_increments": [current, "ARCHIVE-EXPORT"],
+        }
+        self.assertEqual(
+            CONTINUITY.select_unique_satisfied_successor(
+                [direct], current, {current}
+            ),
+            ("ARCHIVE-VERIFY", ""),
+        )
+        self.assertEqual(
+            CONTINUITY.select_unique_satisfied_successor([], current, {current}),
+            (None, "no allocated successor"),
+        )
+        self.assertEqual(
+            CONTINUITY.select_unique_satisfied_successor(
+                [direct, alternate], current, {current}
+            ),
+            (None, "multiple allocated successors"),
+        )
+        self.assertEqual(
+            CONTINUITY.select_unique_satisfied_successor(
+                [direct, blocked], current, {current}
+            ),
+            (None, "successor dependencies are unsatisfied"),
+        )
+
+    def test_new_task_result_renders_one_exact_derived_prompt(self) -> None:
+        command = {
+            "schema_version": "implementation-continuation-command/v1",
+            "program_id": "portable-catalog",
+            "next_increment_id": "catalog-index",
+        }
+        candidate = CONTINUITY.build_bounded_continuation_result(
+            "accepted",
+            "Continue to the uniquely allocated catalog-index increment.",
+            destination="new-task",
+            mandatory_stop=True,
+            continuation_command=command,
+        )
+
+        self.assertEqual(CONTINUITY.validate_bounded_continuation_result(candidate), [])
+        rendered = CONTINUITY.render_bounded_continuation_result(candidate)
+        self.assertEqual(rendered.count("$implementing-staged-plans"), 1)
+        self.assertIn("Mandatory stop: yes", rendered)
+        self.assertEqual(
+            rendered.split("Copy-ready prompt:\n\n", 1)[1],
+            CONTINUITY.render_exact_prompt(command),
+        )
+
+    def test_invalid_destinations_prompts_and_authorizing_prose_are_rejected(self) -> None:
+        command = {"schema_version": "implementation-continuation-command/v1"}
+        cases = (
+            CONTINUITY.BoundedContinuationResult(
+                "accepted", "Continue safely.", False, "new-task", command
+            ),
+            CONTINUITY.BoundedContinuationResult(
+                "accepted", "Continue safely.", True, "new-task", None
+            ),
+            CONTINUITY.BoundedContinuationResult(
+                "accepted", "Continue safely.", False, "current-task", command
+            ),
+            CONTINUITY.BoundedContinuationResult(
+                "accepted", "Continue safely.", True, "elsewhere", None
+            ),
+            CONTINUITY.BoundedContinuationResult(
+                "accepted",
+                "You are authorized to modify the workspace.",
+                True,
+                "none",
+                None,
+            ),
+            CONTINUITY.BoundedContinuationResult(
+                "accepted", None, True, "none", None
+            ),
+        )
+        for candidate in cases:
+            with self.subTest(candidate=candidate):
+                self.assertTrue(
+                    CONTINUITY.validate_bounded_continuation_result(candidate)
+                )
+                with self.assertRaises(ValueError):
+                    CONTINUITY.render_bounded_continuation_result(candidate)
+
+    def test_current_task_and_none_results_never_render_a_prompt(self) -> None:
+        for destination, mandatory_stop in (
+            ("current-task", False),
+            ("none", True),
+        ):
+            with self.subTest(destination=destination):
+                candidate = CONTINUITY.build_bounded_continuation_result(
+                    "implementing",
+                    "Use the current status to select the next legal action.",
+                    destination=destination,
+                    mandatory_stop=mandatory_stop,
+                )
+                rendered = CONTINUITY.render_bounded_continuation_result(candidate)
+                self.assertNotIn("$implementing-staged-plans", rendered)
+                self.assertNotIn("Copy-ready prompt", rendered)
+
+    def test_legacy_brief_and_handoff_bytes_are_unchanged(self) -> None:
+        self.assertEqual(
+            digest_text(CONTINUITY.render_increment_brief(brief())),
+            "c4aa34b929aae944868d4e47c77db5aa2c5193146fc570f2407e2d2c35ea6c2e",
+        )
+        self.assertEqual(
+            digest_text(CONTINUITY.render_handoff(handoff())),
+            "8f45d7ef13e2519a73febed483a5bd565753dba47170299ee4f1efd97ba9efcb",
+        )
+
+
 class ContinuationAndResumeTests(unittest.TestCase):
     def test_legacy_full_mode_stops_in_a_suitable_same_conversation(self) -> None:
         allowed, issues = CONTINUITY.evaluate_continuation(assessment())

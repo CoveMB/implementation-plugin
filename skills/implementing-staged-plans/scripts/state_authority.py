@@ -9,7 +9,8 @@ import os
 import sys
 import tempfile
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass
+from contextvars import ContextVar
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,11 @@ WORKSPACE_SCHEMA_V2 = "implementation-workspace/v2"
 WORKSPACE_SCHEMAS = frozenset({WORKSPACE_SCHEMA, WORKSPACE_SCHEMA_V2})
 APPROVAL_SCHEMA = "implementation-approval/v1"
 ACTION_AUTHORIZATION_SCHEMA = "implementation-action-authorization/v1"
+
+_INSPECTING_UNBOUND_ROLLOVER_SUFFIX = ContextVar(
+    "inspecting_unbound_rollover_suffix",
+    default=False,
+)
 
 PROGRAM_TRANSITIONS = {
     "captured": frozenset(
@@ -156,6 +162,8 @@ APPROVAL_MODE_POLICIES = {
 ACTION_NAMES = frozenset(
     {
         "write-program-artifact",
+        "rollover-increment",
+        "resume-blocked-program",
         "create-workspace",
         "modify-workspace",
         "run-local-verification",
@@ -215,25 +223,32 @@ def _traceability_successor(
     atomic_requirements = traceability.get("atomic_requirements")
     if not isinstance(atomic_requirements, list):
         raise ValueError("traceability atomic_requirements must be a list")
-    increments: list[str] = []
+    current_found = False
+    candidates: set[str] = set()
     for requirement in atomic_requirements:
         assigned = (
             requirement.get("assigned_increments")
             if isinstance(requirement, dict)
             else None
         )
-        if not isinstance(assigned, list):
-            raise ValueError("traceability assigned_increments must be a list")
-        for candidate in assigned:
-            if not isinstance(candidate, str) or not candidate:
-                raise ValueError("traceability increment identifiers must be strings")
-            if candidate not in increments:
-                increments.append(candidate)
-    if increment_id not in increments:
+        if (
+            not isinstance(assigned, list)
+            or not assigned
+            or not all(isinstance(candidate, str) and candidate for candidate in assigned)
+            or len(assigned) != len(set(assigned))
+        ):
+            raise ValueError(
+                "traceability assigned_increments must be unique strings"
+            )
+        if increment_id not in assigned:
+            continue
+        current_found = True
+        successor_index = assigned.index(increment_id) + 1
+        if successor_index < len(assigned):
+            candidates.add(assigned[successor_index])
+    if not current_found:
         raise ValueError("current increment is absent from traceability allocation")
-    index = increments.index(increment_id)
-    successor_index = index + 1
-    return increments[successor_index] if successor_index < len(increments) else None
+    return next(iter(candidates)) if len(candidates) == 1 else None
 
 
 def required_future_lifecycle_writes(
@@ -729,6 +744,57 @@ def _derived_identifier(label: str, seed: dict[str, object]) -> str:
     return f"{label.upper()}-{digest[:24]}"
 
 
+def _rollover_history_authority_issues(
+    program_root: Path,
+    status: dict[str, object],
+    observation: RepositoryObservation,
+) -> list[str]:
+    try:
+        from program_rollover import (
+            _validated_completed_rollover_records,
+            inspect_increment_rollover,
+        )
+
+        _validated_completed_rollover_records(
+            program_root,
+            status,
+            allow_unbound_suffix=False,
+        )
+    except (ImportError, KeyError, OSError, TypeError, ValueError) as error:
+        if str(error) != "unbound rollover history is not lifecycle authority":
+            return [str(error)]
+    else:
+        return []
+
+    if _INSPECTING_UNBOUND_ROLLOVER_SUFFIX.get():
+        return []
+    token = _INSPECTING_UNBOUND_ROLLOVER_SUFFIX.set(True)
+    try:
+        inspection = inspect_increment_rollover(program_root, observation)
+    except (ImportError, KeyError, OSError, TypeError, ValueError):
+        return ["unbound rollover history is not lifecycle authority"]
+    finally:
+        _INSPECTING_UNBOUND_ROLLOVER_SUFFIX.reset(token)
+    if (
+        not inspection.issues
+        and inspection.disposition
+        in {
+            "increment-rollover-retry-ready",
+            "accepted-state-rollover-retry-ready",
+        }
+        and inspection.completed_steps
+        == (
+            "action-authorization",
+            "successor-grant",
+            "handoff",
+            "successor-brief",
+            "rollover-record",
+        )
+    ):
+        return []
+    return ["unbound rollover history is not lifecycle authority"]
+
+
 def _validate_new_program_state(
     program_root: Path,
     manifest: dict[str, object],
@@ -827,6 +893,189 @@ def _validate_new_program_state(
                     issues.append(
                         "status-current increment grant brief binding mismatch"
                     )
+
+    issues.extend(
+        _rollover_history_authority_issues(program_root, status, observation)
+    )
+    rollover = status.get("rollover_binding")
+    if rollover is not None:
+        inherited = status.get("inherited_workspace_binding")
+        transition = status.get("transition_authority")
+        increment_state = status.get("current_increment_state")
+        rollover_transition_valid = (
+            isinstance(rollover, dict)
+            and (
+                increment_state != "preparing"
+                or (
+                    isinstance(transition, dict)
+                    and transition.get("kind") == "action-authorization"
+                    and transition.get("authorization_id")
+                    == rollover.get("rollover_authorization_id")
+                    and transition.get("event_id") == rollover.get("rollover_id")
+                    and transition.get("checkpoint_id")
+                    == rollover.get("continuation_checkpoint_id")
+                )
+            )
+        )
+        rollover_valid = (
+            isinstance(rollover, dict)
+            and rollover.get("schema_version")
+            == "implementation-increment-rollover-binding/v1"
+            and status.get("program_state") == "active"
+            and increment_state
+            in {
+                "preparing",
+                "awaiting-plan-approval",
+                "authorized",
+                "implementing",
+                "reviewing",
+                "remediating",
+                "verified",
+                "awaiting-diff-approval",
+                "accepted",
+            }
+            and rollover.get("successor_increment_id")
+            == status.get("current_increment_id")
+            and rollover.get("current_increment_id")
+            != rollover.get("successor_increment_id")
+            and rollover_transition_valid
+            and isinstance(inherited, dict)
+            and inherited.get("schema_version")
+            == "implementation-inherited-workspace/v1"
+        )
+        if not rollover_valid:
+            issues.append("successor rollover binding is invalid")
+        else:
+            try:
+                from program_rollover import _validated_inherited_paths
+
+                inherited_paths = _validated_inherited_paths(
+                    program_root,
+                    status,
+                    observation,
+                    allow_unbound_suffix=True,
+                )
+            except (ImportError, KeyError, OSError, TypeError, ValueError) as error:
+                issues.append(str(error))
+            else:
+                if inherited.get("inherited_paths") != list(inherited_paths):
+                    issues.append("inherited workspace inventory mismatch")
+
+            rollover_path, rollover_path_issues = resolve_managed_path(
+                program_root,
+                logical_roles.get("rollovers"),
+                role="logical role rollovers",
+            )
+            action_path, action_path_issues = resolve_managed_path(
+                program_root,
+                logical_roles.get("action_authorizations"),
+                role="logical role action_authorizations",
+            )
+            issues.extend((*rollover_path_issues, *action_path_issues))
+            rollover_records = None
+            action_records = None
+            if rollover_path is not None:
+                rollover_records, load_issues = load_json_lines(rollover_path)
+                issues.extend(load_issues)
+            if action_path is not None:
+                action_records, load_issues = load_json_lines(action_path)
+                issues.extend(load_issues)
+            rollover_matches = (
+                []
+                if rollover_records is None
+                else [
+                    record
+                    for record in rollover_records
+                    if record.get("rollover_id") == rollover.get("rollover_id")
+                ]
+            )
+            action_matches = (
+                []
+                if action_records is None
+                else [
+                    record
+                    for record in action_records
+                    if record.get("authorization_id")
+                    == rollover.get("rollover_authorization_id")
+                ]
+            )
+            if len(rollover_matches) != 1:
+                issues.append("status-current rollover must exist exactly once")
+            else:
+                record = rollover_matches[0]
+                delta = record.get("accepted_product_delta")
+                delta_paths = (
+                    sorted(item.get("path") for item in delta)
+                    if isinstance(delta, list)
+                    and all(
+                        isinstance(item, dict)
+                        and isinstance(item.get("path"), str)
+                        for item in delta
+                    )
+                    else None
+                )
+                inherited_inventory = inherited.get("inherited_paths")
+                if (
+                    record.get("schema_version")
+                    != "implementation-increment-rollover/v1"
+                    or _canonical_json_line_sha256(record)
+                    != rollover.get("rollover_sha256")
+                    or record.get("current_increment_id")
+                    != rollover.get("current_increment_id")
+                    or record.get("successor_increment_id")
+                    != rollover.get("successor_increment_id")
+                    or record.get("rollover_authorization_id")
+                    != rollover.get("rollover_authorization_id")
+                    or record.get("rollover_authorization_sha256")
+                    != rollover.get("rollover_authorization_sha256")
+                    or record.get("successor_grant_id")
+                    != rollover.get("successor_grant_id")
+                    or record.get("successor_grant_sha256")
+                    != rollover.get("successor_grant_sha256")
+                    or record.get("accepted_status_sha256")
+                    != rollover.get("prior_status_sha256")
+                    or record.get("accepted_status_sequence")
+                    != rollover.get("prior_status_sequence")
+                    or record.get("submitted_prompt_sha256")
+                    != rollover.get("submitted_prompt_sha256")
+                    or inherited.get("accepted_product_delta_sha256")
+                    != record.get("accepted_product_delta_sha256")
+                    or delta_paths is None
+                    or not isinstance(inherited_inventory, list)
+                    or not all(
+                        isinstance(item, str) for item in inherited_inventory
+                    )
+                    or not set(delta_paths).issubset(
+                        set(inherited_inventory)
+                    )
+                ):
+                    issues.append("status-current rollover record binding mismatch")
+            if len(action_matches) != 1:
+                issues.append("rollover action authorization must exist exactly once")
+            elif (
+                action_matches[0].get("schema_version")
+                != ACTION_AUTHORIZATION_SCHEMA
+                or action_matches[0].get("decision") != "authorized"
+                or action_matches[0].get("actions") != ["rollover-increment"]
+                or action_matches[0].get("current_increment_id")
+                != rollover.get("current_increment_id")
+                or action_matches[0].get("successor_increment_id")
+                != rollover.get("successor_increment_id")
+                or _canonical_json_line_sha256(action_matches[0])
+                != rollover.get("rollover_authorization_sha256")
+            ):
+                issues.append("rollover action authorization binding mismatch")
+            if isinstance(authority, dict) and (
+                authority.get("grant_id") != rollover.get("successor_grant_id")
+                or authority.get("grant_sha256")
+                != rollover.get("successor_grant_sha256")
+                or (
+                    isinstance(activation, dict)
+                    and authority.get("grant_id")
+                    == activation.get("increment_grant_id")
+                )
+            ):
+                issues.append("successor grant must be distinct and rollover-bound")
 
     brief = status.get("brief_binding")
     if not isinstance(brief, dict):
@@ -973,7 +1222,12 @@ def validate_state(
                 else None
             )
             authority_invalid = (
-                authority_kind not in {"approval-event", "action-authorization"}
+                authority_kind
+                not in {
+                    "approval-event",
+                    "action-authorization",
+                    "blocked-context",
+                }
                 or not isinstance(event_id, str)
                 or not event_id
                 or (
@@ -982,6 +1236,10 @@ def validate_state(
                 )
                 or (
                     authority_kind == "approval-event"
+                    and authorization_id is not None
+                )
+                or (
+                    authority_kind == "blocked-context"
                     and authorization_id is not None
                 )
                 or (
@@ -1008,6 +1266,28 @@ def validate_state(
     if not isinstance(logical_roles, dict):
         return sorted(set([*issues, "manifest logical_roles must be an object"]))
     if manifest.get("schema_version") == NEW_PROGRAM_MANIFEST_SCHEMA:
+        if status.get("program_state") == "blocked" or status.get(
+            "current_increment_state"
+        ) == "blocked":
+            try:
+                from blocked_recovery import validate_blocked_context
+
+                issues.extend(
+                    validate_blocked_context(program_root, status, observation)
+                )
+            except ImportError as error:
+                issues.append(str(error))
+        if status.get("block_resolution_binding") is not None:
+            try:
+                from blocked_recovery import validate_block_resolution_history
+
+                issues.extend(
+                    validate_block_resolution_history(
+                        program_root, status, observation
+                    )
+                )
+            except ImportError as error:
+                issues.append(str(error))
         issues.extend(
             _validate_new_program_state(
                 program_root, manifest, status, observation
@@ -1870,6 +2150,77 @@ def validate_state_authority(
                             != command.get("checkpoint_id")
                         ):
                             issues.append("closed status closure command binding is invalid")
+    workspace_observation = observation
+    if status is not None and isinstance(status.get("rollover_binding"), dict):
+        try:
+            from program_rollover import validated_inherited_paths
+
+            inherited_paths = set(
+                validated_inherited_paths(root, status, observation)
+            )
+        except (ImportError, KeyError, OSError, TypeError, ValueError) as error:
+            issues.append(str(error))
+            inherited_paths = set()
+        if inherited_paths:
+            workspace_observation = replace(
+                observation,
+                staged_paths=tuple(
+                    path
+                    for path in observation.staged_paths
+                    if path not in inherited_paths
+                ),
+                modified_paths=tuple(
+                    path
+                    for path in observation.modified_paths
+                    if path not in inherited_paths
+                ),
+                untracked_paths=tuple(
+                    path
+                    for path in observation.untracked_paths
+                    if path not in inherited_paths
+                ),
+                conflicted_paths=tuple(
+                    path
+                    for path in observation.conflicted_paths
+                    if path not in inherited_paths
+                ),
+            )
+    if (
+        status is not None
+        and status.get("program_state") == "blocked"
+        and isinstance(status.get("blocked_context"), dict)
+    ):
+        try:
+            from blocked_recovery import blocked_workspace_paths
+
+            blocked_paths = set(blocked_workspace_paths(root, status))
+        except (ImportError, KeyError, OSError, TypeError, ValueError) as error:
+            issues.append(str(error))
+            blocked_paths = set()
+        if blocked_paths:
+            workspace_observation = replace(
+                workspace_observation,
+                staged_paths=tuple(
+                    path
+                    for path in workspace_observation.staged_paths
+                    if path not in blocked_paths
+                ),
+                modified_paths=tuple(
+                    path
+                    for path in workspace_observation.modified_paths
+                    if path not in blocked_paths
+                ),
+                untracked_paths=tuple(
+                    path
+                    for path in workspace_observation.untracked_paths
+                    if path not in blocked_paths
+                ),
+                conflicted_paths=tuple(
+                    path
+                    for path in workspace_observation.conflicted_paths
+                    if path not in blocked_paths
+                ),
+            )
     if workspace is not None:
         if workspace.get("program_id") != manifest.get("program_id"):
             issues.append("workspace program_id mismatch")
@@ -1884,7 +2235,9 @@ def validate_state_authority(
             observable_workspace["schema_version"] = WORKSPACE_SCHEMA
             if not execution_workspace_validated:
                 issues.extend(
-                    validate_workspace_selection(observable_workspace, observation)
+                    validate_workspace_selection(
+                        observable_workspace, workspace_observation
+                    )
                 )
             activation = status.get("activation_binding") if status is not None else None
             if isinstance(activation, dict):
@@ -1923,7 +2276,9 @@ def validate_state_authority(
                                     f"activation {event_type} record must exist exactly once"
                                 )
         elif not execution_workspace_validated:
-            issues.extend(validate_workspace_selection(workspace, observation))
+            issues.extend(
+                validate_workspace_selection(workspace, workspace_observation)
+            )
     return sorted(set(issues))
 
 

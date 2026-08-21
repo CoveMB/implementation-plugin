@@ -53,6 +53,11 @@ to reach installed users, update the synchronized package version deliberately
 and document the release. Do not bump versions merely to make local validation
 pass.
 
+Version `0.1.2` is the current package owner for typed continuation and blocked
+recovery. The frozen `tests/fixtures/program-bootstrap/v0.1.1/` tree remains
+historical compatibility evidence and must not be rewritten during a version
+sync.
+
 ## Refresh platform instructions
 
 Installation commands and schemas can change. Before publication, compare this
@@ -119,6 +124,31 @@ claude --plugin-dir /absolute/path/to/implementation-plugin
 
 Loading a plugin starts a host session and is separate from static package
 validation. Do not perform it silently in a maintenance-only task.
+
+## Optional continuation replay
+
+The continuation replay catalog under
+`tests/pressure/continuation-replay/` has deterministic immediate and later
+routes. Its loader, evidence validator, isolated-session command shape, and
+atomic no-overwrite result boundary are covered by the offline suite. Passing
+those checks does not prove live front-door behavior.
+
+Run the live campaign only with explicit authority to invoke the selected
+evaluator, transmit the prompt and packaged skill to that provider, and create
+raw evidence under `tests/pressure/continuation-replay/results/`. Before a run,
+record the exact evaluator and client version, authentication and model-capacity
+implications, two fresh ephemeral tasks, result targets, and confirmation that
+every target is absent. The authorized command shape is:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 tests/integrated_pressure_support.py evaluate-continuation-replay --scenario-catalog tests/pressure/continuation-replay/scenarios.json --output-directory tests/pressure/continuation-replay/results --evaluator codex
+```
+
+The runner stops on the first evaluator failure and never overwrites a result.
+Raw outputs are evidence, not authority. A human must review them and create a
+digest-bound `verdicts.json` before any runtime-success claim. When the campaign
+is not separately authorized, leave both results and verdicts absent and report
+`live continuation replay: not run`.
 
 ## What these checks prove
 

@@ -60,6 +60,8 @@ The plan contains exactly one `## File map`, followed by exactly one ordered `##
 
 For new-model programs, compare the parsed map with the manifest-derived lifecycle requirements before any plan, baseline, approval, authorization, review, acceptance, rollover, blocked-resolution, or closure sink writes. Final increments allocate closure files and no successor navigation. Nonfinal increments with one traceability successor allocate the current handoff and successor brief and no closure files. Allocation records ownership; it does not grant write authority.
 
+Repeat this full allocation for every successor exact plan. A successor execution baseline may populate only the existing `inherited_paths` field, and only from a canonical rollover chain whose accepted product bytes match one-for-one with `Modify` or `Preserve` plan ownership. Keep inherited accepted history separate from pre-existing user-work baselines. First-increment baselines retain `inherited_paths: []`.
+
 Reject a missing, symlinked, stale, digest-mismatched, or structurally incomplete plan. Before the first plan write, validate every manifest-derived future lifecycle allocation, every product path disposition, the status-current increment grant, and the complete execution-baseline and action-authorization candidates. Bind pre-existing user work separately so it cannot be claimed as Create or Modify. A content-valid plan is not write authority.
 
 ## Approval and Action Gate

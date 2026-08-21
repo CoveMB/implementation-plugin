@@ -44,6 +44,8 @@ finally:
     sys.path.remove(str(SCRIPT_ROOT))
 
 from tests.test_diff_disposition import awaiting_diff_program
+from tests.test_blocked_recovery import BLOCKED, block_request, implementing_program
+from tests.test_program_rollover import ROLLOVER, accepted_continuation_program
 
 
 BASE_COMMIT = "b" * 40
@@ -65,6 +67,12 @@ def write_json(path: Path, value: object) -> None:
 
 
 class ManagedLifecycleWriteTests(unittest.TestCase):
+    def test_rollover_is_a_supported_distinct_lifecycle_action(self) -> None:
+        self.assertIn("rollover-increment", AUTHORITY.ACTION_NAMES)
+
+    def test_blocked_resume_is_a_supported_distinct_lifecycle_action(self) -> None:
+        self.assertIn("resume-blocked-program", AUTHORITY.ACTION_NAMES)
+
     def test_status_brief_must_match_the_status_current_increment_grant(self) -> None:
         fixture = BootstrapFixture()
         try:
@@ -133,6 +141,41 @@ class ManagedLifecycleWriteTests(unittest.TestCase):
             self.assertEqual(by_disposition["Preserve"], set())
         finally:
             fixture.close()
+
+    def test_traceability_successor_does_not_cross_disjoint_allocations(self) -> None:
+        traceability = {
+            "atomic_requirements": [
+                {"assigned_increments": ["INCREMENT-A", "INCREMENT-B"]},
+                {"assigned_increments": ["INCREMENT-C", "INCREMENT-D"]},
+            ]
+        }
+
+        self.assertIsNone(
+            AUTHORITY._traceability_successor(traceability, "INCREMENT-B")
+        )
+
+    def test_traceability_successor_suppresses_multiple_direct_successors(self) -> None:
+        traceability = {
+            "atomic_requirements": [
+                {"assigned_increments": ["INCREMENT-A", "INCREMENT-B"]},
+                {"assigned_increments": ["INCREMENT-A", "INCREMENT-C"]},
+            ]
+        }
+
+        self.assertIsNone(
+            AUTHORITY._traceability_successor(traceability, "INCREMENT-A")
+        )
+
+    def test_traceability_successor_rejects_duplicate_allocation_entries(self) -> None:
+        traceability = {
+            "atomic_requirements": [
+                {"assigned_increments": ["INCREMENT-A", "INCREMENT-A"]},
+            ]
+        }
+
+        with self.assertRaisesRegex(ValueError, "unique strings"):
+            AUTHORITY._traceability_successor(traceability, "INCREMENT-A")
+
     def test_unique_traceability_successor_replaces_closure_with_navigation(self) -> None:
         fixture = BootstrapFixture()
         try:
@@ -143,12 +186,9 @@ class ManagedLifecycleWriteTests(unittest.TestCase):
             traceability_path = program_root / manifest["logical_roles"]["traceability"]
             traceability = json.loads(traceability_path.read_text(encoding="utf-8"))
             traceability["atomic_requirements"][0]["assigned_increments"] = [
-                "ARCHIVE-INDEX"
+                "ARCHIVE-INDEX",
+                "ARCHIVE-SUCCESSOR",
             ]
-            successor = copy.deepcopy(traceability["atomic_requirements"][0])
-            successor["id"] = "INTEGRITY-SUCCESSOR"
-            successor["assigned_increments"] = ["ARCHIVE-SUCCESSOR"]
-            traceability["atomic_requirements"].append(successor)
             traceability_path.write_bytes(canonical_json(traceability))
 
             required = AUTHORITY.required_future_lifecycle_writes(
@@ -203,11 +243,11 @@ class ManagedLifecycleWriteTests(unittest.TestCase):
             manifest = json.loads((program_root / "manifest.json").read_text(encoding="utf-8"))
             traceability_path = program_root / manifest["logical_roles"]["traceability"]
             traceability = json.loads(traceability_path.read_text(encoding="utf-8"))
-            for increment_id in ("ARCHIVE-NEXT-A", "ARCHIVE-NEXT-B"):
-                successor = copy.deepcopy(traceability["atomic_requirements"][0])
-                successor["id"] = f"INTEGRITY-{increment_id}"
-                successor["assigned_increments"] = [increment_id]
-                traceability["atomic_requirements"].append(successor)
+            traceability["atomic_requirements"][0]["assigned_increments"] = [
+                "ARCHIVE-INDEX",
+                "ARCHIVE-NEXT-A",
+                "ARCHIVE-NEXT-B",
+            ]
             traceability_path.write_bytes(canonical_json(traceability))
 
             required = AUTHORITY.required_future_lifecycle_writes(
@@ -232,6 +272,119 @@ def write_json_lines(path: Path, records: list[dict[str, object]]) -> None:
         "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
         encoding="utf-8",
     )
+
+
+class RolloverHistoryAuthorityTests(unittest.TestCase):
+    def test_inherited_path_validation_failure_is_reported(self) -> None:
+        fixture, program_root, observation, prompt = accepted_continuation_program(
+            "accepted-state"
+        )
+        try:
+            ROLLOVER.persist_increment_rollover(program_root, prompt, observation)
+            normalized = ROLLOVER._fresh_observation(program_root, observation)
+
+            with mock.patch(
+                "program_rollover.validated_inherited_paths",
+                side_effect=ValueError("inherited path diagnostics are unavailable"),
+            ):
+                issues = AUTHORITY.validate_state_authority(
+                    program_root, normalized
+                )
+
+            self.assertIn("inherited path diagnostics are unavailable", issues)
+        finally:
+            fixture.close()
+
+    def test_blocked_path_validation_failure_is_reported(self) -> None:
+        fixture, program_root, observation = implementing_program()
+        try:
+            BLOCKED.block_current_program(
+                program_root, block_request(fixture), observation
+            )
+
+            with mock.patch(
+                "blocked_recovery.blocked_workspace_paths",
+                side_effect=ValueError("blocked path diagnostics are unavailable"),
+            ):
+                issues = AUTHORITY.validate_state_authority(
+                    program_root, observation
+                )
+
+            self.assertIn("blocked path diagnostics are unavailable", issues)
+        finally:
+            fixture.close()
+
+    def test_arbitrary_genesis_rollover_row_is_not_state_authority(self) -> None:
+        fixture, program_root, observation = awaiting_diff_program(
+            {"ARCHIVE-VERIFY": ("ARCHIVE-BLOCKER",)}
+        )
+        try:
+            rollover_path = program_root / "state/rollovers.jsonl"
+            write_json_lines(
+                rollover_path,
+                [{"current_increment_id": "ARCHIVE-BLOCKER"}],
+            )
+            before = repository_snapshot(program_root)
+
+            issues = AUTHORITY.validate_state_authority(program_root, observation)
+
+            self.assertIn(
+                "unbound rollover history is not lifecycle authority", issues
+            )
+            self.assertEqual(repository_snapshot(program_root), before)
+        finally:
+            fixture.close()
+
+    def test_arbitrary_bound_rollover_suffix_is_not_state_authority(self) -> None:
+        fixture, program_root, observation, prompt = accepted_continuation_program(
+            "accepted-state"
+        )
+        try:
+            ROLLOVER.persist_increment_rollover(program_root, prompt, observation)
+            rollover_path = program_root / "state/rollovers.jsonl"
+            records = [
+                json.loads(line)
+                for line in rollover_path.read_text(encoding="utf-8").splitlines()
+            ]
+            write_json_lines(
+                rollover_path,
+                [*records, {"current_increment_id": "ARCHIVE-BLOCKER"}],
+            )
+            normalized = ROLLOVER._fresh_observation(program_root, observation)
+            before = repository_snapshot(program_root)
+
+            issues = AUTHORITY.validate_state_authority(program_root, normalized)
+
+            self.assertIn(
+                "unbound rollover history is not lifecycle authority", issues
+            )
+            self.assertEqual(repository_snapshot(program_root), before)
+        finally:
+            fixture.close()
+
+    def test_exact_rollover_record_prefix_remains_state_authority(self) -> None:
+        fixture, program_root, observation, prompt = accepted_continuation_program(
+            "accepted-state"
+        )
+        try:
+            def interrupt(completed_label: str) -> None:
+                if completed_label == "rollover-record":
+                    raise RuntimeError("injected rollover interruption")
+
+            with mock.patch.object(ROLLOVER, "_after_persist", side_effect=interrupt):
+                with self.assertRaisesRegex(RuntimeError, "injected"):
+                    ROLLOVER.persist_increment_rollover(
+                        program_root, prompt, observation
+                    )
+            before = repository_snapshot(program_root)
+
+            self.assertEqual(
+                AUTHORITY.validate_state_authority(program_root, observation),
+                [],
+            )
+            self.assertEqual(repository_snapshot(program_root), before)
+        finally:
+            fixture.close()
 
 
 class DeferredMutationGuardTests(unittest.TestCase):

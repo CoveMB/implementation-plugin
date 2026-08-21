@@ -574,6 +574,8 @@ def _user_work_baselines(
     root: Path,
     observation: RepositoryObservation,
     file_map: ExactFileMap,
+    *,
+    inherited_paths: Sequence[str] = (),
 ) -> list[dict[str, object]]:
     workspace = Path(observation.path).resolve()
     try:
@@ -588,6 +590,8 @@ def _user_work_baselines(
         ("conflicted", observation.conflicted_paths),
     ):
         for relative in paths:
+            if relative in inherited_paths:
+                continue
             if relative == control_prefix or relative.startswith(control_prefix + "/"):
                 continue
             categories.setdefault(relative, set()).add(category)
@@ -627,7 +631,11 @@ def _stable_status_fields(status: dict[str, object]) -> dict[str, object]:
         "activation_binding",
         "current_increment_authority_binding",
     )
-    return {field: status[field] for field in fields}
+    stable = {field: status[field] for field in fields}
+    for field in ("rollover_binding", "inherited_workspace_binding"):
+        if field in status:
+            stable[field] = status[field]
+    return stable
 
 
 def _build_plan_candidate(
@@ -686,8 +694,35 @@ def _build_plan_candidate(
     else:
         raise ValueError("plan-bound status lacks preparation binding")
 
-    user_work_baselines = _user_work_baselines(root, observation, file_map)
+    if isinstance(status.get("rollover_binding"), dict):
+        from program_rollover import validated_inherited_paths
+
+        inherited_paths = validated_inherited_paths(root, status, observation)
+    else:
+        inherited_paths = ()
+    user_work_baselines = _user_work_baselines(
+        root,
+        observation,
+        file_map,
+        inherited_paths=inherited_paths,
+    )
     path_baselines = _path_baselines(root, Path(observation.path), file_map)
+    inherited_set = set(inherited_paths)
+    baseline_observation = replace(
+        observation,
+        staged_paths=tuple(
+            path for path in observation.staged_paths if path not in inherited_set
+        ),
+        modified_paths=tuple(
+            path for path in observation.modified_paths if path not in inherited_set
+        ),
+        untracked_paths=tuple(
+            path for path in observation.untracked_paths if path not in inherited_set
+        ),
+        conflicted_paths=tuple(
+            path for path in observation.conflicted_paths if path not in inherited_set
+        ),
+    )
     baseline = {
         "schema_version": EXECUTION_BASELINE_SCHEMA,
         "program_id": manifest["program_id"],
@@ -697,12 +732,13 @@ def _build_plan_candidate(
         "current_increment_authority_binding": status[
             "current_increment_authority_binding"
         ],
-        "workspace_observation": _observation_value(observation),
+        "workspace_observation": _observation_value(baseline_observation),
         "file_map": asdict(file_map),
         "path_baselines": path_baselines,
         "user_work_baselines": user_work_baselines,
-        "inherited_paths": [],
+        "inherited_paths": list(inherited_paths),
     }
+    execution_baseline_from_value(baseline)
     baseline_bytes = _canonical_json_bytes(baseline)
     baseline_sha256 = _sha256_bytes(baseline_bytes)
     file_map_sha256 = _sha256_bytes(_canonical_json_bytes(asdict(file_map)))
@@ -955,8 +991,17 @@ def _append_or_adopt_record(
             raise ValueError(f"{label}-recovery-required: conflicting record")
         return True
     if identifier_field == "event_id":
+        semantic_fields = (
+            "type",
+            "program_id",
+            "program_revision",
+            "increment_id",
+            "exact_file_plan_sha256",
+        )
         semantic_conflicts = [
-            item for item in records if item.get("type") == record.get("type")
+            item
+            for item in records
+            if all(item.get(field) == record.get(field) for field in semantic_fields)
         ]
     else:
         semantic_fields = (

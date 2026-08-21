@@ -43,6 +43,8 @@ The `approval:pre-approve` and `approval:full-increment` modes omit only the exa
 
 The generic compound-checkpoint persistence API remains a legacy-program compatibility path. It rejects new-model manifests with `new-program-plan-materialization-required`; it cannot restore the former approval → status → action ordering.
 
+Diff acceptance and successor rollover are not a compound routine checkpoint. The exact `accept-continue` prompt authorizes its bound acceptance and immediate rollover transaction; after accepted status is durable, rollover continues without another user question. A later accepted-stop continuation requires the distinct accepted-state prompt. Neither route authorizes a commit or consequential action.
+
 Each file operation is atomic, but the sequence is not a multi-file transaction. Preserve partial records. New-model discovery reconstructs the controlling exact-plan transaction and classifies only byte-identical ordered prefixes as retry-ready. A divergent plan, approval, baseline, action record, or status returns the corresponding recovery-required stop. Never delete, roll back, duplicate, or silently skip a partial write.
 
 ## Preserve Narrow Gates

@@ -72,12 +72,18 @@ def exact_plan_bytes(program_root: Path, observation) -> bytes:
     required = ACTIVATION.required_future_lifecycle_writes(
         program_root, Path(observation.path), status["current_increment_id"]
     )
+    inherited = set(
+        status.get("inherited_workspace_binding", {}).get("inherited_paths", [])
+    )
+    product_paths = {
+        "archive-output.txt",
+        "reviews/architecture.json",
+        "reviews/requirements.json",
+        "reviews/test-evidence.json",
+    }
     create = sorted(
         {
-            "archive-output.txt",
-            "reviews/architecture.json",
-            "reviews/requirements.json",
-            "reviews/test-evidence.json",
+            *(product_paths - inherited),
             *(
                 item.path
                 for item in required
@@ -86,7 +92,10 @@ def exact_plan_bytes(program_root: Path, observation) -> bytes:
         }
     )
     modify = sorted(
-        item.path for item in required if item.disposition == "Modify"
+        {
+            *inherited,
+            *(item.path for item in required if item.disposition == "Modify"),
+        }
     )
     preserve = ["catalog.txt"]
     source = status["source_binding"]
@@ -393,6 +402,39 @@ class ProgramActivationTests(unittest.TestCase):
 
 
 class ExactPlanMaterializationTests(unittest.TestCase):
+    def test_successor_plan_candidate_inherits_only_canonical_rollover_products(self) -> None:
+        from tests.test_program_rollover import ROLLOVER, accepted_continuation_program
+
+        fixture, program_root, observation, prompt = accepted_continuation_program(
+            "accepted-state"
+        )
+        try:
+            ROLLOVER.persist_increment_rollover(program_root, prompt, observation)
+            successor_observation = ACTIVATION._without_owned_program_paths(
+                program_root,
+                ACTIVATION.inspect_repository(
+                    fixture.repository, fixture.head
+                ).observation,
+            )
+            candidate = ACTIVATION._build_plan_candidate(
+                program_root,
+                exact_plan_bytes(program_root, successor_observation),
+                successor_observation,
+            )
+            rollover = json.loads(
+                (program_root / "state/rollovers.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()[-1]
+            )
+            self.assertEqual(
+                candidate.baseline["inherited_paths"],
+                sorted(
+                    item["path"] for item in rollover["accepted_product_delta"]
+                ),
+            )
+        finally:
+            fixture.close()
+
     def discover(self, fixture: BootstrapFixture) -> dict[str, object]:
         completed = subprocess.run(
             [

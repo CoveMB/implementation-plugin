@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Sequence
 
 
@@ -80,14 +80,16 @@ REVIEW_RISK_SCOPES = {
 }
 
 
-def raw_review_report(scope: str) -> dict[str, object]:
+def raw_review_report(
+    scope: str, increment_id: str = "ARCHIVE-INDEX"
+) -> dict[str, object]:
     """Return one deterministic raw first-increment review report fixture."""
     value: dict[str, object] = {
         "schema_version": "implementation-raw-review-report/v1",
         "scope": scope,
         "program_id": "ARCHIVE-PROGRAM",
         "program_revision": 1,
-        "increment_id": "ARCHIVE-INDEX",
+        "increment_id": increment_id,
         "reviewer_role": "controller-self-review",
         "independent": False,
         "reduced_assurance": True,
@@ -178,11 +180,53 @@ def raw_review_report(scope: str) -> dict[str, object]:
     return value
 
 
-def write_raw_review_reports(repository: Path) -> None:
-    reviews = Path(repository) / "reviews"
-    reviews.mkdir(exist_ok=True)
+def write_raw_review_reports(
+    repository: Path,
+    increment_id: str = "ARCHIVE-INDEX",
+    relative_directory: str = "reviews",
+) -> None:
+    reviews = Path(repository) / relative_directory
+    reviews.mkdir(parents=True, exist_ok=True)
     for scope in ("requirements", "architecture", "test-evidence"):
-        (reviews / f"{scope}.json").write_bytes(canonical_json(raw_review_report(scope)))
+        (reviews / f"{scope}.json").write_bytes(
+            canonical_json(raw_review_report(scope, increment_id))
+        )
+
+
+def _rewrite_inherited_review_reports(
+    repository: Path,
+    status: dict[str, object],
+    increment_id: str,
+) -> None:
+    binding = status.get("inherited_workspace_binding", {})
+    inherited_paths = (
+        binding.get("inherited_paths", []) if isinstance(binding, dict) else []
+    )
+    if not isinstance(inherited_paths, list):
+        raise ValueError("inherited review paths must be a list")
+    report_names = {
+        "architecture.json",
+        "requirements.json",
+        "test-evidence.json",
+    }
+    for relative in inherited_paths:
+        if not isinstance(relative, str) or "\\" in relative:
+            raise ValueError("inherited review path must be a relative POSIX path")
+        relative_path = PurePosixPath(relative)
+        if relative_path.is_absolute() or any(
+            part in {"", ".", ".."} for part in relative_path.parts
+        ):
+            raise ValueError("inherited review path must be a relative POSIX path")
+        if relative_path.name not in report_names:
+            continue
+        report_path = Path(repository).joinpath(*relative_path.parts)
+        if not report_path.is_file() or report_path.is_symlink():
+            raise ValueError(f"inherited review report is invalid: {relative}")
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        if not isinstance(report, dict):
+            raise ValueError(f"inherited review report is invalid: {relative}")
+        report["increment_id"] = increment_id
+        report_path.write_bytes(canonical_json(report))
 
 
 class BootstrapFixture:
@@ -219,6 +263,198 @@ class BootstrapFixture:
         path = self.candidate / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(canonical_json(value))
+
+    def configure_successors(
+        self,
+        successors: dict[str, tuple[str, ...]],
+    ) -> None:
+        """Allocate deterministic successor semantics before program activation."""
+        traceability = self.load_json("program/traceability.json")
+        source_units = traceability["source_units"]
+        requirement_unit = next(
+            unit for unit in source_units if unit["classification"] == "requirement"
+        )
+        atomic_requirements = traceability["atomic_requirements"]
+        for successor_index, (successor_id, dependencies) in enumerate(
+            successors.items(), start=1
+        ):
+            requirement_id = f"SUCCESSOR-OUTCOME-{successor_index}"
+            requirement_unit["requirement_ids"].append(requirement_id)
+            atomic_requirements.append(
+                {
+                    "id": requirement_id,
+                    "group_id": "INTEGRITY",
+                    "source_unit_ids": [requirement_unit["id"]],
+                    "source_locator": "Archive Plan, line 3",
+                    "normalized_requirement": f"Complete {successor_id}.",
+                    "acceptance_criteria": [f"{successor_id} is complete."],
+                    "assigned_parts": ["Archive integrity"],
+                    "assigned_tasks": [f"Complete {successor_id}"],
+                    "assigned_increments": ["ARCHIVE-INDEX", successor_id],
+                    "current_disposition": "allocated",
+                    "decision_references": [],
+                    "implementation_evidence": [],
+                    "verification_evidence": [],
+                }
+            )
+            for dependency_index, dependency_id in enumerate(dependencies, start=1):
+                if dependency_id == "ARCHIVE-INDEX":
+                    continue
+                dependency_requirement_id = (
+                    f"SUCCESSOR-DEPENDENCY-{successor_index}-{dependency_index}"
+                )
+                requirement_unit["requirement_ids"].append(
+                    dependency_requirement_id
+                )
+                atomic_requirements.append(
+                    {
+                        "id": dependency_requirement_id,
+                        "group_id": "INTEGRITY",
+                        "source_unit_ids": [requirement_unit["id"]],
+                        "source_locator": "Archive Plan, line 3",
+                        "normalized_requirement": (
+                            f"Complete {dependency_id} before {successor_id}."
+                        ),
+                        "acceptance_criteria": [
+                            f"{dependency_id} precedes {successor_id}."
+                        ],
+                        "assigned_parts": ["Archive integrity"],
+                        "assigned_tasks": [f"Complete {dependency_id}"],
+                        "assigned_increments": [dependency_id, successor_id],
+                        "current_disposition": "allocated",
+                        "decision_references": [],
+                        "implementation_evidence": [],
+                        "verification_evidence": [],
+                    }
+                )
+        semantic_records = [
+            {
+                field: record[field]
+                for field in (
+                    "id",
+                    "group_id",
+                    "source_unit_ids",
+                    "normalized_requirement",
+                    "acceptance_criteria",
+                    "assigned_parts",
+                    "assigned_tasks",
+                    "assigned_increments",
+                )
+            }
+            for record in atomic_requirements
+        ]
+        semantic_sha256 = hashlib.sha256(
+            json.dumps(
+                semantic_records,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        traceability["coverage_assertion"][
+            "semantic_requirements_sha256"
+        ] = semantic_sha256
+        self.write_json("program/traceability.json", traceability)
+        manifest = self.load_json("manifest.json")
+        manifest["program_binding"]["traceability_sha256"] = hashlib.sha256(
+            (self.candidate / "program/traceability.json").read_bytes()
+        ).hexdigest()
+        self.write_json("manifest.json", manifest)
+        status = self.load_json("state/status.json")
+        status["program_binding"][
+            "semantic_requirements_sha256"
+        ] = semantic_sha256
+        self.write_json("state/status.json", status)
+
+    def configure_successor_chain(self, increment_ids: tuple[str, ...]) -> None:
+        """Allocate one deterministic causal increment chain before activation."""
+        if (
+            len(increment_ids) < 2
+            or increment_ids[0] != "ARCHIVE-INDEX"
+            or any(not item for item in increment_ids)
+            or len(increment_ids) != len(set(increment_ids))
+        ):
+            raise ValueError("successor chain must start at ARCHIVE-INDEX and be unique")
+        traceability = self.load_json("program/traceability.json")
+        source_units = traceability["source_units"]
+        requirement_unit = next(
+            unit for unit in source_units if unit["classification"] == "requirement"
+        )
+        requirement_id = "SUCCESSOR-CHAIN"
+        requirement_unit["requirement_ids"].append(requirement_id)
+        atomic_requirements = traceability["atomic_requirements"]
+        atomic_requirements.append(
+            {
+                "id": requirement_id,
+                "group_id": "INTEGRITY",
+                "source_unit_ids": [requirement_unit["id"]],
+                "source_locator": "Archive Plan, line 3",
+                "normalized_requirement": "Complete the archive increment chain.",
+                "acceptance_criteria": [
+                    "Each archive increment follows its allocated predecessor."
+                ],
+                "assigned_parts": ["Archive integrity"],
+                "assigned_tasks": ["Complete the archive increment chain"],
+                "assigned_increments": list(increment_ids),
+                "current_disposition": "allocated",
+                "decision_references": [],
+                "implementation_evidence": [],
+                "verification_evidence": [],
+            }
+        )
+        semantic_records = [
+            {
+                field: record[field]
+                for field in (
+                    "id",
+                    "group_id",
+                    "source_unit_ids",
+                    "normalized_requirement",
+                    "acceptance_criteria",
+                    "assigned_parts",
+                    "assigned_tasks",
+                    "assigned_increments",
+                )
+            }
+            for record in atomic_requirements
+        ]
+        semantic_sha256 = hashlib.sha256(
+            json.dumps(
+                semantic_records,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        traceability["coverage_assertion"][
+            "semantic_requirements_sha256"
+        ] = semantic_sha256
+        self.write_json("program/traceability.json", traceability)
+        manifest = self.load_json("manifest.json")
+        manifest["program_binding"]["traceability_sha256"] = hashlib.sha256(
+            (self.candidate / "program/traceability.json").read_bytes()
+        ).hexdigest()
+        self.write_json("manifest.json", manifest)
+        status = self.load_json("state/status.json")
+        status["program_binding"][
+            "semantic_requirements_sha256"
+        ] = semantic_sha256
+        self.write_json("state/status.json", status)
+
+    def configure_approval_mode(self, approval_mode: str) -> None:
+        """Select one supported Plan A approval mode before publication."""
+        if approval_mode not in {
+            "approval:standard",
+            "approval:pre-approve",
+            "approval:full-increment",
+        }:
+            raise ValueError("unsupported fixture approval mode")
+        manifest = self.load_json("manifest.json")
+        manifest["approval_mode"] = approval_mode
+        self.write_json("manifest.json", manifest)
+        status = self.load_json("state/status.json")
+        status["approval_mode"] = approval_mode
+        self.write_json("state/status.json", status)
 
     def _configure_candidate(self) -> None:
         manifest = self.load_json("manifest.json")
@@ -408,16 +644,35 @@ def _exact_plan_bytes(program_root: Path, observation: object) -> bytes:
     required = required_future_lifecycle_writes(
         program_root, Path(observation.path), status["current_increment_id"]
     )
+    inherited = set(
+        status.get("inherited_workspace_binding", {}).get("inherited_paths", [])
+    )
+    increment_id = str(status["current_increment_id"])
+    review_root = (
+        "reviews"
+        if increment_id == "ARCHIVE-INDEX"
+        else f"reviews/{increment_id}"
+    )
+    raw_review_paths = {
+        scope: f"{review_root}/{scope}.json"
+        for scope in ("architecture", "requirements", "test-evidence")
+    }
+    product_paths = {
+        "archive-output.txt",
+        *raw_review_paths.values(),
+    }
     create = sorted(
         {
-            "archive-output.txt",
-            "reviews/architecture.json",
-            "reviews/requirements.json",
-            "reviews/test-evidence.json",
+            *(product_paths - inherited),
             *(item.path for item in required if item.disposition == "Create"),
         }
     )
-    modify = sorted(item.path for item in required if item.disposition == "Modify")
+    modify = sorted(
+        {
+            *inherited,
+            *(item.path for item in required if item.disposition == "Modify"),
+        }
+    )
     source = status["source_binding"]
     program = status["program_binding"]
     lines = [
@@ -470,9 +725,9 @@ def _exact_plan_bytes(program_root: Path, observation: object) -> bytes:
             "Run `python3 -m unittest tests.test_archive_output`; expected exit 0.",
             "",
             "## Review scopes and specialist predicates",
-            "- requirements: `reviews/requirements.json`",
-            "- architecture: `reviews/architecture.json`",
-            "- test-evidence: `reviews/test-evidence.json`",
+            f"- requirements: `{raw_review_paths['requirements']}`",
+            f"- architecture: `{raw_review_paths['architecture']}`",
+            f"- test-evidence: `{raw_review_paths['test-evidence']}`",
             "",
             "## Commit boundaries",
             "One logical local commit boundary; no commit authority is granted.",
@@ -525,11 +780,14 @@ def run_lifecycle_phase(arguments: argparse.Namespace) -> dict[str, object]:
     sys.path.insert(0, str(script_root))
     try:
         import diff_disposition
+        import blocked_recovery
         import program_activation
         import program_bootstrap
         import program_closure
+        import program_continuation
         import program_launch
         import program_review
+        import program_rollover
 
         repository = Path(arguments.repository).resolve(strict=True)
         program_root = _program_root(repository)
@@ -559,10 +817,30 @@ def run_lifecycle_phase(arguments: argparse.Namespace) -> dict[str, object]:
         if phase == "prepare-plan":
             _install_failure_hook(program_activation, arguments.fail_label)
             observation = _fresh_observation(repository)
+            plan_bytes = (
+                Path(arguments.exact_plan_file).read_bytes()
+                if arguments.exact_plan_file is not None
+                else _exact_plan_bytes(program_root, observation)
+            )
             receipt = program_activation.prepare_exact_plan(
-                program_root, _exact_plan_bytes(program_root, observation), observation
+                program_root, plan_bytes, observation
             )
             return asdict(receipt)
+
+        if phase == "render-exact-plan":
+            observation = _fresh_observation(repository)
+            status = json.loads(
+                (program_root / "state/status.json").read_text(encoding="utf-8")
+            )
+            required = program_activation.required_future_lifecycle_writes(
+                program_root,
+                repository,
+                str(status["current_increment_id"]),
+            )
+            return {
+                "plan": _exact_plan_bytes(program_root, observation).decode("utf-8"),
+                "required_future_paths": [item.path for item in required],
+            }
 
         if phase == "materialize-plan":
             _install_failure_hook(program_activation, arguments.fail_label)
@@ -576,10 +854,33 @@ def run_lifecycle_phase(arguments: argparse.Namespace) -> dict[str, object]:
         if phase in {"implementing", "reviewing"}:
             _install_failure_hook(program_activation, arguments.fail_label)
             if phase == "reviewing":
-                (repository / "archive-output.txt").write_text(
-                    "verified archive output\n", encoding="utf-8"
+                status = json.loads(
+                    (program_root / "state/status.json").read_text(encoding="utf-8")
                 )
-                write_raw_review_reports(repository)
+                increment_id = status["current_increment_id"]
+                output = (
+                    "verified archive output\n"
+                    if increment_id == "ARCHIVE-INDEX"
+                    else f"verified {increment_id.lower()} output\n"
+                )
+                (repository / "archive-output.txt").write_text(
+                    output, encoding="utf-8"
+                )
+                _rewrite_inherited_review_reports(
+                    repository,
+                    status,
+                    str(increment_id),
+                )
+                relative_review_directory = (
+                    "reviews"
+                    if increment_id == "ARCHIVE-INDEX"
+                    else f"reviews/{increment_id}"
+                )
+                write_raw_review_reports(
+                    repository,
+                    str(increment_id),
+                    relative_review_directory,
+                )
             receipt = program_activation.advance_execution_state(
                 program_root, phase, _fresh_observation(repository)
             )
@@ -587,8 +888,11 @@ def run_lifecycle_phase(arguments: argparse.Namespace) -> dict[str, object]:
 
         if phase == "prepare-review":
             _install_failure_hook(program_review, arguments.fail_label)
-            receipt = program_review.persist_review_preparation(
+            observation = program_activation._without_owned_program_paths(
                 program_root, _fresh_observation(repository)
+            )
+            receipt = program_review.persist_review_preparation(
+                program_root, observation
             )
             return {
                 **asdict(receipt),
@@ -600,6 +904,100 @@ def run_lifecycle_phase(arguments: argparse.Namespace) -> dict[str, object]:
         if phase == "accept":
             _install_failure_hook(diff_disposition, arguments.fail_label)
             receipt = diff_disposition.persist_accept_stop(
+                program_root,
+                _load_prompt(arguments.prompt_file),
+                _fresh_observation(repository),
+            )
+            return asdict(receipt)
+
+        if phase == "render-accept-stop":
+            candidate = diff_disposition.build_diff_acceptance_candidate(
+                program_root, _fresh_observation(repository)
+            )
+            return {"prompt": "Accept and stop.\n\n" + candidate.prompt}
+
+        if phase == "render-accept-continue":
+            return {
+                "prompt": program_continuation.render_accept_continue_prompt(
+                    program_root
+                )
+            }
+
+        if phase == "dispose-diff":
+            _install_failure_hook(diff_disposition, arguments.fail_label)
+            _install_failure_hook(program_rollover, arguments.fail_label)
+            receipt = diff_disposition.persist_diff_disposition(
+                program_root,
+                _load_prompt(arguments.prompt_file),
+                _fresh_observation(repository),
+            )
+            return asdict(receipt)
+
+        if phase == "render-later-continuation":
+            return {
+                "prompt": program_continuation.render_accepted_state_continuation_prompt(
+                    program_root
+                )
+            }
+
+        if phase == "rollover":
+            _install_failure_hook(program_rollover, arguments.fail_label)
+            receipt = program_rollover.persist_increment_rollover(
+                program_root,
+                _load_prompt(arguments.prompt_file),
+                _fresh_observation(repository),
+            )
+            return asdict(receipt)
+
+        if phase == "block":
+            _install_failure_hook(blocked_recovery, arguments.fail_label)
+            observation = _fresh_observation(repository)
+            receipt = blocked_recovery.block_current_program(
+                program_root,
+                blocked_recovery.BlockedTransitionRequest(
+                    reason_code="verification-environment-unavailable",
+                    recovery_criteria=(
+                        "The local verification environment is available.",
+                        "The preserved catalog evidence remains unchanged.",
+                    ),
+                    evidence_bindings=(
+                        blocked_recovery.EvidenceBinding(
+                            path="catalog.txt",
+                            sha256=hashlib.sha256(
+                                (repository / "catalog.txt").read_bytes()
+                            ).hexdigest(),
+                        ),
+                    ),
+                ),
+                observation,
+            )
+            return asdict(receipt)
+
+        if phase == "render-block-resolution":
+            status = json.loads(
+                (program_root / "state/status.json").read_text(encoding="utf-8")
+            )
+            context = status["blocked_context"]
+            candidate_value = {
+                "schema_version": blocked_recovery.BLOCK_RESOLUTION_CANDIDATE_SCHEMA,
+                "block_id": context["block_id"],
+                "criterion_results": [
+                    {"criterion": criterion, "satisfied": True}
+                    for criterion in context["recovery_criteria"]
+                ],
+                "evidence_bindings": context["evidence_bindings"],
+            }
+            return {
+                "prompt": blocked_recovery.render_block_resolution_prompt(
+                    program_root,
+                    candidate_value,
+                    _fresh_observation(repository),
+                )
+            }
+
+        if phase == "resolve-block":
+            _install_failure_hook(blocked_recovery, arguments.fail_label)
+            receipt = blocked_recovery.persist_blocked_resolution(
                 program_root,
                 _load_prompt(arguments.prompt_file),
                 _fresh_observation(repository),
@@ -793,11 +1191,20 @@ def build_argument_parser() -> argparse.ArgumentParser:
             "publish",
             "activate",
             "prepare-plan",
+            "render-exact-plan",
             "materialize-plan",
             "implementing",
             "reviewing",
             "prepare-review",
             "accept",
+            "render-accept-stop",
+            "render-accept-continue",
+            "dispose-diff",
+            "render-later-continuation",
+            "rollover",
+            "block",
+            "render-block-resolution",
+            "resolve-block",
             "prepare-closure",
             "activate-to-diff",
             "accept-and-prepare-closure",
@@ -810,6 +1217,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-sha256", required=True)
     parser.add_argument("--prompt-file")
     parser.add_argument("--fail-label")
+    parser.add_argument("--exact-plan-file")
     return parser
 
 

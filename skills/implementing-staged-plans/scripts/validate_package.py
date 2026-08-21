@@ -17,7 +17,7 @@ PLUGIN_MANIFEST = Path(".codex-plugin/plugin.json")
 CLAUDE_MANIFEST = Path(".claude-plugin/plugin.json")
 CLAUDE_MARKETPLACE = Path(".claude-plugin/marketplace.json")
 PACKAGE_CONTENT_ROOT = Path("skills/implementing-staged-plans")
-PACKAGE_VERSION = "0.1.1"
+PACKAGE_VERSION = "0.1.2"
 SKILL_MARKDOWN = Path("skills/implementing-staged-plans/SKILL.md")
 OPENAI_METADATA = Path("skills/implementing-staged-plans/agents/openai.yaml")
 PROGRAM_AUTHORITY_REFERENCE = Path(
@@ -78,6 +78,14 @@ PLAN_A_PRODUCTION_SCRIPTS = tuple(
         "program_review",
         "diff_disposition",
         "program_closure",
+    )
+)
+PLAN_B_PRODUCTION_SCRIPTS = tuple(
+    Path(f"skills/implementing-staged-plans/scripts/{name}.py")
+    for name in (
+        "program_continuation",
+        "program_rollover",
+        "blocked_recovery",
     )
 )
 
@@ -514,6 +522,7 @@ def validate_authority_assets(repository_root: Path) -> list[str]:
         PROGRAM_DISCOVERY_REFERENCE,
         PROGRAM_DISCOVERY_SCRIPT,
         *PLAN_A_PRODUCTION_SCRIPTS,
+        *PLAN_B_PRODUCTION_SCRIPTS,
     ):
         path = repository_root / relative_path
         if not path.is_file() or path.is_symlink():

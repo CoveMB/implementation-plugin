@@ -22,6 +22,12 @@ After accepted work, bind the handoff to the program revision, current increment
 
 The next legal action explains navigation only. It never renews conversational authority or grants a pull request, merge, release, deployment, migration, destructive, provider, or external-state action.
 
+## Return Bounded Continuation Navigation
+
+Return every route as a structured bounded continuation result with the current state, one concrete next legal action, a mandatory-stop boolean, and a destination of `current-task`, `new-task`, or `none`. This result is navigation only: it creates no approval, action authorization, grant, status, or continuation receipt.
+
+Only `new-task` may carry a continuation command, and it must set the mandatory stop. Derive its copy-ready prompt at render time through the shared exact-prompt envelope so `$implementing-staged-plans` is the first line. Store no caller-authored Markdown prompt. A `current-task` or `none` result carries no command and renders no prompt.
+
 ## Assess Conversation Suitability
 
 For automatic continuation, record evidence for each approved suitability predicate: program-part boundary, risk or architecture domain, workspace or base, superseded discussion, evidence or expertise, and lossless summary. A failed or missing predicate requires a durable handoff.
@@ -36,11 +42,15 @@ Build renewed authority from the complete validated `ResumeContext`, the current
 
 Do not use handoff prose to repair a controlling mismatch. Return the first authority boundary and the smallest legal recovery action.
 
-## Defer Rollover to the Continuation Upgrade
+## Apply Prompt-Bound Successor Rollover
 
-Version `0.1.1` does not apply a new-model rollover. The legacy caller-authored rollover surface stops before every write with `legacy-rollover-upgrade-required`. Keep an accepted current increment valid and preserve all existing bytes.
+Version `0.1.2` keeps the Plan A accept-stop bytes unchanged and adds two explicit successor routes. An immediate accept-and-continue prompt first persists the diff-acceptance prefix and then completes rollover without another user checkpoint. A later continuation from accepted-stop uses its own exact accepted-state prompt. Neither route derives authority from a handoff, brief, approval mode, or accepted status alone.
 
-Prompt-bound successor authority, managed rollover records, and retry-safe successor status belong to the separately approved Plan B version `0.1.2` upgrade. Do not infer them from a handoff, brief, approval mode, or accepted status while running Plan A.
+The legacy caller-authored rollover writer remains quarantined at `legacy-rollover-upgrade-required`; accepted legacy automatic modes never grant successor authority. Only the typed prompt-bound routes below can persist new rollover bytes.
+
+Validate the complete prompt, status-current projection, canonical successor, dependencies, workspace, and accepted product bytes before writing. Persist or adopt the `rollover-increment` authorization, distinct successor grant, current handoff, successor brief, and rollover record in that order; replace successor status last. Every durable prefix is discoverable and retryable with the same prompt. Divergent bytes are preserved and require the matching continuation recovery route.
+
+Successor execution baselines use the existing `inherited_paths` field. Each inherited path must come from the canonical rollover chain, match the accepted product bytes, have exactly one baseline, be owned as `Modify` or `Preserve`, and remain separate from user-work baselines. First-increment baselines remain byte-compatible with `inherited_paths: []`.
 
 ## Reconcile a Program
 

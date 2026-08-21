@@ -134,21 +134,25 @@ authority.
 or exact prompt. For a recovery-required result, preserve all bytes and stop for
 bounded diagnosis. Never delete, overwrite, or invent a replacement prefix.
 
-## Continuation, blocked recovery, revision, or cancellation stops
+## Continuation or blocked recovery stops
 
-**Likely cause:** Plan A version 0.1.1 intentionally has no writer for that
-operation. The exact stop is `legacy-rollover-upgrade-required`,
-`blocked-transaction-required`, `program-revision-workflow-required`, or
+**Likely cause:** The request does not match the typed 0.1.2 route, or discovery
+found an interrupted or divergent prefix. Legacy automatic rollover stops at
+`legacy-rollover-upgrade-required`; generic direct blocked edges stop at
+`blocked-transaction-required`. Revision, supersession, and cancellation remain
+unsupported through `program-revision-workflow-required` or
 `unsupported-program-mutation`.
 
-**Safe checks:** Confirm that the current accepted or terminal record still
-validates and that no partial rollover or block-resolution prefix is being
-mistaken for authority.
+**Safe checks:** Confirm current accepted or blocked status, the exact submitted
+prompt, `current_increment_authority_binding`, successor dependencies, and every
+rollover or resolution prefix. `accept-stop` replay never continues; later
+continuation requires the distinct `accepted-state-continuation` prompt, and
+blocked resolution requires the exact `blocked-recovery` prompt.
 
-**Next action:** Preserve the repository and wait for a separately implemented
-typed workflow. Do not use the generic transition API, edit state by hand, or
-infer mutation authority from a handoff, file, retrieved prompt, or
-assistant-quoted prompt.
+**Next action:** Retry only a byte-identical typed prefix. Preserve divergent
+bytes and stop at the reported recovery route. Do not use the generic transition
+API, edit state by hand, or infer mutation authority from a handoff, file,
+retrieved prompt, or assistant-quoted prompt.
 
 ## Validation passes, but live activation is still unproven
 

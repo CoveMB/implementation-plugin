@@ -32,8 +32,15 @@ EXPECTED_SCENARIO_IDS = (
     "non-triggering-request",
     "unsupported-action",
 )
+EXPECTED_CONTINUATION_REPLAY_IDS = (
+    "immediate-continuation",
+    "later-continuation",
+)
 INTEGRATION_EVIDENCE_SCHEMA = "implementation-integration-evidence/v1"
 FRESH_CONTEXT_EVIDENCE_SCHEMA = "fresh-context-evidence/v1"
+CONTINUATION_REPLAY_EVIDENCE_SCHEMA = (
+    "implementation-continuation-replay-evidence/v1"
+)
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 sys.path.insert(0, str(SCRIPT_ROOT))
@@ -53,6 +60,14 @@ finally:
 class FreshContextScenario:
     scenario_id: str
     title: str
+    prompt_path: str
+    result_path: str
+    expected_boundary: str
+
+
+@dataclass(frozen=True)
+class ContinuationReplayScenario:
+    scenario_id: str
     prompt_path: str
     result_path: str
     expected_boundary: str
@@ -138,35 +153,417 @@ def load_scenario_catalog(path: Path) -> tuple[FreshContextScenario, ...]:
     return tuple(scenarios)
 
 
-def _atomic_create_text(path: Path, value: str) -> None:
+def load_continuation_replay(
+    path: Path,
+) -> tuple[ContinuationReplayScenario, ...]:
+    catalog_path = Path(path)
+    if catalog_path.is_symlink() or not catalog_path.is_file():
+        raise ValueError(
+            "continuation replay catalog must be a regular non-symlink file"
+        )
+    value = json.loads(catalog_path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(value, dict)
+        or value.get("schema_version")
+        != "implementation-continuation-replay-catalog/v1"
+        or set(value) != {"schema_version", "scenarios"}
+    ):
+        raise ValueError("unsupported continuation replay catalog schema")
+    raw_scenarios = value.get("scenarios")
+    if not isinstance(raw_scenarios, list):
+        raise ValueError("continuation replay scenarios must be a list")
+    scenarios: list[ContinuationReplayScenario] = []
+    for raw in raw_scenarios:
+        if not isinstance(raw, dict) or set(raw) != {
+            "id",
+            "prompt_path",
+            "result_path",
+            "expected_boundary",
+        }:
+            raise ValueError("continuation replay scenario fields are invalid")
+        if type(raw["expected_boundary"]) is not str:
+            raise ValueError(
+                "continuation replay expected_boundary must be a string"
+            )
+        scenario = ContinuationReplayScenario(
+            scenario_id=str(raw["id"]),
+            prompt_path=str(raw["prompt_path"]),
+            result_path=str(raw["result_path"]),
+            expected_boundary=raw["expected_boundary"],
+        )
+        prompt = PurePosixPath(scenario.prompt_path)
+        result = PurePosixPath(scenario.result_path)
+        if (
+            prompt.is_absolute()
+            or ".." in prompt.parts
+            or prompt.parent
+            != PurePosixPath("tests/pressure/continuation-replay/prompts")
+            or prompt.suffix != ".md"
+        ):
+            raise ValueError(
+                f"continuation replay prompt path is invalid: {scenario.prompt_path}"
+            )
+        if (
+            result.is_absolute()
+            or ".." in result.parts
+            or result.parent
+            != PurePosixPath("tests/pressure/continuation-replay/results")
+            or result.suffix != ".txt"
+        ):
+            raise ValueError(
+                f"continuation replay result path is invalid: {scenario.result_path}"
+            )
+        if (
+            not scenario.expected_boundary
+            or prompt.stem != scenario.scenario_id
+            or result.stem != scenario.scenario_id
+        ):
+            raise ValueError(
+                f"continuation replay scenario binding is invalid: {scenario.scenario_id}"
+            )
+        scenarios.append(scenario)
+    if tuple(item.scenario_id for item in scenarios) != (
+        EXPECTED_CONTINUATION_REPLAY_IDS
+    ):
+        raise ValueError(
+            "continuation replay requires immediate and later scenarios once and in order"
+        )
+    return tuple(scenarios)
+
+
+def _evidence_headers(value: str) -> dict[str, str]:
+    header, separator, _response = value.partition("\n--- response ---\n")
+    if not separator:
+        raise ValueError("continuation replay result lacks a response boundary")
+    fields: dict[str, str] = {}
+    for line in header.splitlines():
+        name, separator, field_value = line.partition(": ")
+        if not separator or not name or name in fields:
+            raise ValueError("continuation replay result headers are invalid")
+        fields[name] = field_value
+    return fields
+
+
+def validate_continuation_replay_evidence(root: Path) -> list[str]:
+    """Validate optional raw replay evidence; absence means not run, not pass."""
+    repository = Path(root)
+    issues: list[str] = []
+    try:
+        scenarios = load_continuation_replay(
+            repository / "tests/pressure/continuation-replay/scenarios.json"
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        return [str(error)]
+    for scenario in scenarios:
+        prompt_path = repository / scenario.prompt_path
+        if prompt_path.is_symlink() or not prompt_path.is_file():
+            issues.append(
+                f"continuation replay prompt is not a regular file: {scenario.prompt_path}"
+            )
+            continue
+        try:
+            first_line = prompt_path.read_text(encoding="utf-8").splitlines()[0]
+        except (IndexError, OSError, UnicodeDecodeError):
+            first_line = ""
+        if first_line != "$implementing-staged-plans":
+            issues.append(
+                f"continuation replay prompt lacks explicit skill invocation: {scenario.scenario_id}"
+            )
+    result_paths = tuple(repository / item.result_path for item in scenarios)
+    present_results_list: list[bool] = []
+    for scenario, path in zip(scenarios, result_paths, strict=True):
+        try:
+            _reject_symlink_components(
+                path, label=scenario.scenario_id, trusted_root=repository
+            )
+        except ValueError as error:
+            issues.append(str(error))
+        is_regular = path.is_file() and not path.is_symlink()
+        if (path.exists() or path.is_symlink()) and not is_regular:
+            issues.append(
+                f"{scenario.scenario_id}: result is not a regular non-symlink file"
+            )
+        present_results_list.append(is_regular)
+    present_results = tuple(present_results_list)
+    verdict_path = repository / "tests/pressure/continuation-replay/verdicts.json"
+    try:
+        _reject_symlink_components(
+            verdict_path,
+            label="continuation replay verdict",
+            trusted_root=repository,
+        )
+    except ValueError as error:
+        issues.append(str(error))
+    verdict_present = verdict_path.is_file() and not verdict_path.is_symlink()
+    if (verdict_path.exists() or verdict_path.is_symlink()) and not verdict_present:
+        issues.append(
+            "continuation replay verdict is not a regular non-symlink file"
+        )
+    if not any(present_results) and not verdict_present:
+        return sorted(set(issues))
+    if not all(present_results):
+        issues.append("continuation replay results must be complete or entirely absent")
+    if not verdict_present:
+        issues.append("continuation replay results require digest-bound human verdicts")
+
+    evidence_prompt_sha256: dict[str, str] = {}
+    for scenario, result_path, present in zip(
+        scenarios, result_paths, present_results, strict=True
+    ):
+        if not present:
+            continue
+        try:
+            headers = _evidence_headers(result_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError) as error:
+            issues.append(f"{scenario.scenario_id}: {error}")
+            continue
+        prompt_sha256 = headers.get("prompt_sha256")
+        if (
+            not isinstance(prompt_sha256, str)
+            or len(prompt_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in prompt_sha256
+            )
+        ):
+            issues.append(
+                f"{scenario.scenario_id}: continuation replay prompt_sha256 mismatch"
+            )
+        else:
+            evidence_prompt_sha256[scenario.scenario_id] = prompt_sha256
+        expected = {
+            "schema_version": CONTINUATION_REPLAY_EVIDENCE_SCHEMA,
+            "scenario_id": scenario.scenario_id,
+            "sandbox": "read-only",
+            "session": "ephemeral",
+            "exit_code": "0",
+            "expected_boundary": scenario.expected_boundary,
+        }
+        for field, expected_value in expected.items():
+            if headers.get(field) != expected_value:
+                issues.append(
+                    f"{scenario.scenario_id}: continuation replay {field} mismatch"
+                )
+        for field in ("evaluator", "client_version"):
+            if not headers.get(field):
+                issues.append(
+                    f"{scenario.scenario_id}: continuation replay {field} is required"
+                )
+
+    if verdict_present:
+        try:
+            verdict_document = json.loads(verdict_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            issues.append(f"continuation replay verdicts are invalid: {error}")
+            verdict_document = None
+        verdicts = (
+            verdict_document.get("verdicts")
+            if isinstance(verdict_document, dict)
+            else None
+        )
+        if (
+            not isinstance(verdict_document, dict)
+            or verdict_document.get("schema_version")
+            != "implementation-continuation-replay-verdicts/v1"
+            or not isinstance(verdicts, list)
+            or len(verdicts) != len(scenarios)
+            or not all(isinstance(item, dict) for item in verdicts)
+            or [item.get("id") for item in verdicts]
+            != list(EXPECTED_CONTINUATION_REPLAY_IDS)
+        ):
+            issues.append("continuation replay verdict document is incomplete")
+        else:
+            for scenario, verdict, result_path in zip(
+                scenarios, verdicts, result_paths, strict=True
+            ):
+                if not isinstance(verdict, dict):
+                    issues.append(
+                        f"{scenario.scenario_id}: continuation replay verdict is invalid"
+                    )
+                    continue
+                if verdict.get("prompt_sha256") != evidence_prompt_sha256.get(
+                    scenario.scenario_id
+                ):
+                    issues.append(
+                        f"{scenario.scenario_id}: prompt digest mismatch"
+                    )
+                if result_path.is_file() and verdict.get(
+                    "result_sha256"
+                ) != sha256_file(result_path):
+                    issues.append(
+                        f"{scenario.scenario_id}: result digest mismatch"
+                    )
+                if verdict.get("outcome") not in {"pass", "fail"}:
+                    issues.append(
+                        f"{scenario.scenario_id}: verdict outcome is invalid"
+                    )
+                for field in ("evidence", "limitations"):
+                    if not isinstance(verdict.get(field), str) or not verdict[field]:
+                        issues.append(
+                            f"{scenario.scenario_id}: verdict {field} is required"
+                        )
+    return sorted(set(issues))
+
+
+def _reject_symlink_components(
+    path: Path, *, label: str, trusted_root: Path
+) -> None:
+    candidate = Path(os.path.abspath(path))
+    trusted = Path(os.path.abspath(trusted_root))
+    try:
+        relative = candidate.relative_to(trusted)
+    except ValueError as error:
+        raise ValueError(f"{label} escapes its trusted root") from error
+    component = trusted
+    descendants: list[Path] = []
+    for part in relative.parts:
+        component /= part
+        descendants.append(component)
+    for component in descendants:
+        if component.is_symlink():
+            raise ValueError(
+                f"{label} has symlinked path component: {component}"
+            )
+
+
+def _supports_result_descriptor_apis() -> bool:
+    dir_fd_names = {
+        getattr(function, "__name__", "") for function in os.supports_dir_fd
+    }
+    follow_symlink_names = {
+        getattr(function, "__name__", "")
+        for function in os.supports_follow_symlinks
+    }
+    return {"open", "link", "unlink"} <= dir_fd_names and (
+        "link" in follow_symlink_names
+    )
+
+
+def _exclusive_create_text(path: Path, value: str) -> tuple[int, int]:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except FileExistsError as error:
+        raise ValueError(f"result target appeared before creation: {path}") from error
+    created_identity = os.fstat(descriptor)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(value)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        try:
+            current_identity = path.stat(follow_symlinks=False)
+            if (
+                current_identity.st_dev,
+                current_identity.st_ino,
+            ) == (created_identity.st_dev, created_identity.st_ino):
+                path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    return (created_identity.st_dev, created_identity.st_ino)
+
+
+def _atomic_create_text(
+    path: Path, value: str, *, trusted_root: Path | None = None
+) -> tuple[int, int]:
     target = Path(path)
+    boundary = target.parent.parent if trusted_root is None else trusted_root
+    _reject_symlink_components(
+        target, label="result target", trusted_root=boundary
+    )
     if target.exists() or target.is_symlink():
         raise ValueError(f"result target already exists: {target}")
     target.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path: Path | None = None
+    _reject_symlink_components(
+        target, label="result target", trusted_root=boundary
+    )
+    if not _supports_result_descriptor_apis():
+        return _exclusive_create_text(target, value)
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+    directory_descriptor = os.open(target.parent, directory_flags)
+    temporary_name: str | None = None
+    created_identity: tuple[int, int] | None = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=target.parent,
-            prefix=f".{target.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temporary:
-            temporary_path = Path(temporary.name)
+        for candidate_index in range(100):
+            name = f".{target.name}.{os.getpid()}.{candidate_index}.tmp"
+            try:
+                temporary_descriptor = os.open(
+                    name,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                    dir_fd=directory_descriptor,
+                )
+            except FileExistsError:
+                continue
+            temporary_name = name
+            break
+        if temporary_name is None:
+            raise ValueError("unable to reserve a temporary result target")
+        with os.fdopen(temporary_descriptor, "w", encoding="utf-8") as temporary:
             temporary.write(value)
             temporary.flush()
             os.fsync(temporary.fileno())
-        if target.exists() or target.is_symlink():
-            raise ValueError(f"result target appeared before creation: {target}")
-        os.replace(temporary_path, target)
-        temporary_path = None
+            temporary_identity = os.fstat(temporary.fileno())
+            created_identity = (
+                temporary_identity.st_dev,
+                temporary_identity.st_ino,
+            )
+        _reject_symlink_components(
+            target, label="result target", trusted_root=boundary
+        )
+        try:
+            os.link(
+                temporary_name,
+                target.name,
+                src_dir_fd=directory_descriptor,
+                dst_dir_fd=directory_descriptor,
+                follow_symlinks=False,
+            )
+        except FileExistsError as error:
+            raise ValueError(
+                f"result target appeared before creation: {target}"
+            ) from error
+        try:
+            os.unlink(temporary_name, dir_fd=directory_descriptor)
+        except OSError:
+            pass
+        else:
+            temporary_name = None
     finally:
-        if temporary_path is not None:
+        if temporary_name is not None:
             try:
-                temporary_path.unlink()
-            except FileNotFoundError:
+                os.unlink(temporary_name, dir_fd=directory_descriptor)
+            except OSError:
                 pass
+        try:
+            os.close(directory_descriptor)
+        except OSError:
+            pass
+    if created_identity is None:
+        raise RuntimeError("result creation completed without a filesystem identity")
+    return created_identity
+
+
+def _remove_created_result(path: Path, expected_identity: tuple[int, int]) -> bool:
+    try:
+        current_identity = path.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    if (current_identity.st_dev, current_identity.st_ino) != expected_identity:
+        return False
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return True
 
 
 def _extract_agent_message(json_lines: str) -> str:
@@ -300,6 +697,134 @@ def evaluate_fresh_contexts(
         )
         _atomic_create_text(result_path, evidence)
         completed_paths.append(result_path)
+    return tuple(completed_paths)
+
+
+def evaluate_continuation_replay(
+    *,
+    catalog_path: Path,
+    output_directory: Path,
+    evaluator: str,
+) -> tuple[Path, ...]:
+    """Run the separately authorized continuation campaign in isolated tasks."""
+    scenarios = load_continuation_replay(catalog_path)
+    output_root = Path(os.path.abspath(output_directory))
+    expected_output_root = Path(
+        os.path.abspath(
+            REPOSITORY_ROOT / "tests/pressure/continuation-replay/results"
+        )
+    )
+    if output_root != expected_output_root:
+        raise ValueError(
+            "continuation replay output directory does not match the approved result root"
+        )
+    _reject_symlink_components(
+        output_root,
+        label="continuation replay output directory",
+        trusted_root=REPOSITORY_ROOT,
+    )
+    result_paths = tuple(REPOSITORY_ROOT / item.result_path for item in scenarios)
+    if any(path.exists() or path.is_symlink() for path in result_paths):
+        raise ValueError(
+            "continuation replay result targets must all be absent before the campaign"
+        )
+    evaluator_version = run_command((evaluator, "--version"), cwd=REPOSITORY_ROOT)
+    client_version = evaluator_version.stdout.strip()
+    if evaluator_version.returncode != 0 or not client_version:
+        raise ValueError("continuation replay evaluator capability preflight failed")
+    pending_results: list[tuple[Path, str]] = []
+    for scenario, result_path in zip(scenarios, result_paths, strict=True):
+        prompt_path = REPOSITORY_ROOT / scenario.prompt_path
+        if prompt_path.is_symlink() or not prompt_path.is_file():
+            raise ValueError(
+                f"continuation replay prompt is not a regular file: {scenario.prompt_path}"
+            )
+        prompt = prompt_path.read_text(encoding="utf-8")
+        if not prompt.startswith("$implementing-staged-plans\n"):
+            raise ValueError(
+                f"continuation replay prompt is invalid: {scenario.scenario_id}"
+            )
+        evaluator_prompt = prompt.strip()
+        prompt_sha256 = hashlib.sha256(
+            evaluator_prompt.encode("utf-8")
+        ).hexdigest()
+        with tempfile.TemporaryDirectory(
+            prefix="continuation-replay-"
+        ) as directory:
+            isolated_root = Path(directory)
+            codex_home = _build_isolated_evaluation_root(isolated_root)
+            completed = run_command(
+                (
+                    evaluator,
+                    "exec",
+                    "--ephemeral",
+                    "--ignore-user-config",
+                    "--sandbox",
+                    "read-only",
+                    "--skip-git-repo-check",
+                    "--json",
+                    "--cd",
+                    str(isolated_root),
+                    evaluator_prompt,
+                ),
+                cwd=isolated_root,
+                timeout=300,
+                environment=build_isolated_evaluator_environment(codex_home),
+            )
+        if completed.returncode != 0:
+            concise_error = (completed.stderr or completed.stdout).strip().splitlines()
+            detail = (
+                " | ".join(concise_error[-40:])
+                if concise_error
+                else "no evaluator error text"
+            )
+            raise ValueError(
+                f"continuation replay evaluator failed for {scenario.scenario_id}: {detail}"
+            )
+        response = _extract_agent_message(completed.stdout).replace(
+            str(REPOSITORY_ROOT), "<repository-root>"
+        )
+        evidence = (
+            f"schema_version: {CONTINUATION_REPLAY_EVIDENCE_SCHEMA}\n"
+            f"scenario_id: {scenario.scenario_id}\n"
+            f"prompt_sha256: {prompt_sha256}\n"
+            f"evaluator: {evaluator}\n"
+            f"client_version: {client_version}\n"
+            "sandbox: read-only\n"
+            "session: ephemeral\n"
+            "exit_code: 0\n"
+            f"expected_boundary: {scenario.expected_boundary}\n"
+            "\n--- response ---\n"
+            f"{response}\n"
+        )
+        pending_results.append((result_path, evidence))
+
+    created_results: list[tuple[Path, tuple[int, int]]] = []
+    try:
+        for result_path, evidence in pending_results:
+            created_identity = _atomic_create_text(
+                result_path, evidence, trusted_root=REPOSITORY_ROOT
+            )
+            created_results.append((result_path, created_identity))
+    except BaseException as publication_error:
+        recovery_failures = tuple(
+            path
+            for path, identity in reversed(created_results)
+            if not _remove_created_result(path, identity)
+        )
+        if recovery_failures:
+            failed_paths = ", ".join(
+                path.relative_to(REPOSITORY_ROOT).as_posix()
+                for path in recovery_failures
+            )
+            add_note = getattr(publication_error, "add_note", None)
+            if callable(add_note):
+                add_note(
+                    "continuation replay publication recovery failed for: "
+                    f"{failed_paths}"
+                )
+        raise
+    completed_paths = [path for path, _identity in created_results]
     return tuple(completed_paths)
 
 
@@ -911,6 +1436,10 @@ def build_argument_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--scenario-catalog", required=True)
     evaluate.add_argument("--output-directory", required=True)
     evaluate.add_argument("--evaluator", required=True)
+    continuation = subparsers.add_parser("evaluate-continuation-replay")
+    continuation.add_argument("--scenario-catalog", required=True)
+    continuation.add_argument("--output-directory", required=True)
+    continuation.add_argument("--evaluator", required=True)
     validate = subparsers.add_parser("validate-evidence")
     validate.add_argument("--evidence", required=True)
     validate.add_argument("--repository", required=True)
@@ -928,6 +1457,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 evaluator=arguments.evaluator,
             )
             print(f"Fresh-context evaluation completed: {len(paths)} results")
+            return 0
+        if arguments.command == "evaluate-continuation-replay":
+            paths = evaluate_continuation_replay(
+                catalog_path=Path(arguments.scenario_catalog),
+                output_directory=Path(arguments.output_directory),
+                evaluator=arguments.evaluator,
+            )
+            print(f"Continuation replay completed: {len(paths)} results")
             return 0
         repository = Path(arguments.repository).resolve(strict=True)
         if repository != REPOSITORY_ROOT:
