@@ -527,15 +527,22 @@ def _atomic_create_text(
             raise ValueError(
                 f"result target appeared before creation: {target}"
             ) from error
-        os.unlink(temporary_name, dir_fd=directory_descriptor)
-        temporary_name = None
+        try:
+            os.unlink(temporary_name, dir_fd=directory_descriptor)
+        except OSError:
+            pass
+        else:
+            temporary_name = None
     finally:
         if temporary_name is not None:
             try:
                 os.unlink(temporary_name, dir_fd=directory_descriptor)
-            except FileNotFoundError:
+            except OSError:
                 pass
-        os.close(directory_descriptor)
+        try:
+            os.close(directory_descriptor)
+        except OSError:
+            pass
     if created_identity is None:
         raise RuntimeError("result creation completed without a filesystem identity")
     return created_identity
@@ -810,10 +817,10 @@ def evaluate_continuation_replay(
                 path.relative_to(REPOSITORY_ROOT).as_posix()
                 for path in recovery_failures
             )
-            raise ValueError(
+            publication_error.add_note(
                 "continuation replay publication recovery failed for: "
                 f"{failed_paths}"
-            ) from publication_error
+            )
         raise
     completed_paths = [path for path, _identity in created_results]
     return tuple(completed_paths)
