@@ -809,6 +809,8 @@ def render_review_packet(packet: ReviewPacket) -> str:
 
 
 def _tuple_fields(value: Mapping[str, object], fields: Sequence[str]) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        raise TypeError
     converted = dict(value)
     for field in fields:
         if isinstance(converted.get(field), list):
@@ -835,7 +837,10 @@ def validate_review_bundle(
             ReviewReport(**_tuple_fields(item, ("finding_ids", "follow_up_for_finding_ids")))
             for item in bundle["reports"]
         )
-        findings = tuple(ReviewFinding(**item) for item in bundle["findings"])
+        findings_value = bundle["findings"]
+        if not isinstance(findings_value, list):
+            raise TypeError
+        findings = tuple(ReviewFinding(**item) for item in findings_value)
         expected_surfaces = tuple(
             (item["surface"], item["surface_kind"])
             for item in bundle["semantic_surfaces"]

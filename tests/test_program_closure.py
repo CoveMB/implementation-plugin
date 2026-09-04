@@ -107,6 +107,69 @@ class ProgramClosureTests(unittest.TestCase):
         finally:
             fixture.close()
 
+    def test_malformed_bound_review_evidence_fails_before_closure_writes(self) -> None:
+        cases = (
+            (
+                "commands",
+                lambda evidence: evidence["final_verification"].update(
+                    commands=[{"command": "incomplete"}]
+                ),
+            ),
+            ("findings", lambda evidence: evidence.update(findings={})),
+            (
+                "report-pair-array",
+                lambda evidence: evidence["reports"].__setitem__(
+                    0, list(evidence["reports"][0].items())
+                ),
+            ),
+            (
+                "command-pair-array",
+                lambda evidence: evidence["final_verification"][
+                    "commands"
+                ].__setitem__(
+                    0,
+                    list(
+                        evidence["final_verification"]["commands"][0].items()
+                    ),
+                ),
+            ),
+        )
+        for label, mutate in cases:
+            with self.subTest(label=label):
+                fixture, program_root, observation = accepted_program()
+                try:
+                    evidence_path = (
+                        program_root
+                        / "increments/ARCHIVE-INDEX/review-evidence.json"
+                    )
+                    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+                    mutate(evidence)
+                    evidence_path.write_bytes(canonical_json(evidence))
+
+                    status_path = program_root / "state/status.json"
+                    status = json.loads(status_path.read_text(encoding="utf-8"))
+                    evidence_sha256 = CLOSURE.sha256_file(evidence_path)
+                    status["review_evidence_binding"]["sha256"] = evidence_sha256
+                    status["diff_disposition_binding"]["review_evidence_sha256"] = (
+                        evidence_sha256
+                    )
+                    status_path.write_bytes(canonical_json(status))
+
+                    before = repository_snapshot(program_root)
+                    try:
+                        CLOSURE.prepare_program_closure(program_root, observation)
+                    except ValueError as error:
+                        self.assertEqual(
+                            str(error), "review bundle is structurally invalid"
+                        )
+                    except TypeError as error:
+                        self.fail(f"uncontrolled TypeError escaped validation: {error}")
+                    else:
+                        self.fail("malformed review evidence was accepted")
+                    self.assertEqual(repository_snapshot(program_root), before)
+                finally:
+                    fixture.close()
+
     def test_every_exact_prefix_is_retry_safe_and_lost_responses_are_idempotent(self) -> None:
         cases = (
             ("reconciliation", "prepare", "closure-preparation-retry-ready"),

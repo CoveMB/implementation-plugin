@@ -670,6 +670,12 @@ class IntegrationTests(unittest.TestCase):
         changed["schema_version"] = "legacy/v0"
         self.assertTrue(REVIEW.validate_review_bundle(changed, FIXTURE_PACKET.read_text()))
         self.assertTrue(REVIEW.validate_review_bundle({}, "# Review Packet\n"))
+        changed = dict(bundle)
+        changed["findings"] = {}
+        self.assertIn(
+            "review bundle is structurally invalid",
+            REVIEW.validate_review_bundle(changed, FIXTURE_PACKET.read_text()),
+        )
         self.assertTrue(
             REVIEW.validate_review_bundle(
                 bundle, FIXTURE_PACKET.read_text(encoding="utf-8") + "drift"
@@ -684,6 +690,32 @@ class IntegrationTests(unittest.TestCase):
                 )
             )
         )
+
+    def test_bundle_rejects_pair_array_report_and_command_records(self) -> None:
+        packet_text = FIXTURE_PACKET.read_text(encoding="utf-8")
+        for label, mutate in (
+            (
+                "report",
+                lambda bundle: bundle["reports"].__setitem__(
+                    0, list(bundle["reports"][0].items())
+                ),
+            ),
+            (
+                "command",
+                lambda bundle: bundle["final_verification"]["commands"].__setitem__(
+                    0,
+                    list(bundle["final_verification"]["commands"][0].items()),
+                ),
+            ),
+        ):
+            with self.subTest(label=label):
+                bundle = json.loads(FIXTURE_EVIDENCE.read_text(encoding="utf-8"))
+                mutate(bundle)
+
+                self.assertEqual(
+                    REVIEW.validate_review_bundle(bundle, packet_text),
+                    ["review bundle is structurally invalid"],
+                )
 
     def test_cli_returns_zero_one_and_two_without_exposing_bundle_contents(self) -> None:
         valid = subprocess.run(
