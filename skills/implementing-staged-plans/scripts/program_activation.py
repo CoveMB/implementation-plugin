@@ -40,7 +40,6 @@ from program_launch import (
 )
 from repository_preparation import (
     REQUIRED_PLAN_SECTIONS,
-    RepositoryInspection,
     _section_body,
     _validate_plan_naming_table,
     execution_baseline_from_value,
@@ -488,16 +487,29 @@ def _activate_legacy_program(
     )
 
 
+def _require_fresh_program_observation(
+    root: Path,
+    supplied: RepositoryObservation,
+    fresh: RepositoryObservation,
+    drift_message: str,
+) -> RepositoryObservation:
+    normalized_supplied = _without_owned_program_paths(root, supplied)
+    normalized_fresh = _without_owned_program_paths(root, fresh)
+    if asdict(normalized_fresh) != asdict(normalized_supplied):
+        raise ValueError(drift_message)
+    return normalized_fresh
+
+
 def _fresh_setup_observation(
     root: Path, supplied: RepositoryObservation
 ) -> RepositoryObservation:
-    normalized_supplied = _without_owned_program_paths(root, supplied)
-    fresh = inspect_repository(
-        Path(normalized_supplied.path), normalized_supplied.base_commit
-    ).observation
-    normalized_fresh = _without_owned_program_paths(root, fresh)
-    if asdict(normalized_fresh) != asdict(normalized_supplied):
-        raise ValueError("workspace observation changed before setup transaction")
+    fresh = inspect_repository(Path(supplied.path), supplied.base_commit).observation
+    normalized_fresh = _require_fresh_program_observation(
+        root,
+        supplied,
+        fresh,
+        "workspace observation changed before setup transaction",
+    )
     if normalized_fresh.conflicted_paths or normalized_fresh.active_git_operation:
         raise ValueError("workspace observation is not stable for setup transaction")
     return normalized_fresh
@@ -989,15 +1001,14 @@ def _observation_value(observation: RepositoryObservation) -> dict[str, object]:
 
 def _fresh_plan_observation(
     root: Path, supplied: RepositoryObservation
-) -> tuple[RepositoryObservation, RepositoryInspection]:
+) -> RepositoryObservation:
     fresh = inspect_repository(Path(supplied.path), supplied.base_commit)
-    normalized_fresh = _without_owned_program_paths(root, fresh.observation)
-    normalized_supplied = _without_owned_program_paths(root, supplied)
-    if _observation_value(normalized_fresh) != _observation_value(
-        normalized_supplied
-    ):
-        raise ValueError("workspace observation changed before exact-plan preparation")
-    return normalized_fresh, fresh
+    return _require_fresh_program_observation(
+        root,
+        supplied,
+        fresh.observation,
+        "workspace observation changed before exact-plan preparation",
+    )
 
 
 def _plan_storage_paths(
@@ -1717,7 +1728,7 @@ def prepare_exact_plan(
 ) -> ExactPlanPreparationReceipt:
     """Persist/adopt a validated exact plan and route its approval mode."""
     root = Path(program_root)
-    normalized, _inspection = _fresh_plan_observation(root, observation)
+    normalized = _fresh_plan_observation(root, observation)
     candidate = _build_plan_candidate(root, exact_plan_bytes, normalized)
     manifest, manifest_issues = load_json_object(root / "manifest.json")
     if manifest is None:
@@ -1855,7 +1866,7 @@ def materialize_exact_plan(
 ) -> ExecutionMaterializationReceipt:
     """Persist/adopt approval when required, baseline, action, and status last."""
     root = Path(program_root)
-    normalized, _inspection = _fresh_plan_observation(root, observation)
+    normalized = _fresh_plan_observation(root, observation)
     manifest, manifest_issues = load_json_object(root / "manifest.json")
     if manifest is None:
         raise ValueError("; ".join(manifest_issues))
@@ -1881,11 +1892,12 @@ def advance_execution_state(
     """Advance authorized execution through implementing and reviewing."""
     root = Path(program_root)
     fresh = inspect_repository(Path(observation.path), observation.base_commit)
-    normalized = _without_owned_program_paths(root, fresh.observation)
-    if _observation_value(normalized) != _observation_value(
-        _without_owned_program_paths(root, observation)
-    ):
-        raise ValueError("workspace observation changed before execution transition")
+    normalized = _require_fresh_program_observation(
+        root,
+        observation,
+        fresh.observation,
+        "workspace observation changed before execution transition",
+    )
     manifest, manifest_issues = load_json_object(root / "manifest.json")
     if manifest is None:
         raise ValueError("; ".join(manifest_issues))

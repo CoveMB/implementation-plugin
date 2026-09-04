@@ -16,6 +16,7 @@ from program_activation import (
     _canonical_json_bytes,
     _canonical_json_line,
     _identifier,
+    _require_fresh_program_observation,
     _replace_or_adopt_status,
     _without_owned_program_paths,
 )
@@ -104,11 +105,12 @@ def _fresh_observation(
     root: Path, supplied: RepositoryObservation
 ) -> RepositoryObservation:
     fresh = inspect_repository(Path(supplied.path), supplied.base_commit).observation
-    normalized_fresh = _without_owned_program_paths(root, fresh)
-    normalized_supplied = _without_owned_program_paths(root, supplied)
-    if asdict(normalized_fresh) != asdict(normalized_supplied):
-        raise ValueError("workspace observation changed before blocked transaction")
-    return normalized_fresh
+    return _require_fresh_program_observation(
+        root,
+        supplied,
+        fresh,
+        "workspace observation changed before blocked transaction",
+    )
 
 
 def _load_manifest_status(
