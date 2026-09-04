@@ -107,6 +107,20 @@ class ProgramLaunchTests(unittest.TestCase):
         )
         self.assertEqual(usage.returncode, 2)
 
+    def test_v3_render_route_returns_readable_setup_recap_not_machine_payload(self) -> None:
+        self.fixture.configure_setup_v3()
+
+        recap = LAUNCH.render_program_launch_prompt(self.fixture.candidate)
+
+        self.assertIn("Approve this program setup?", recap)
+        self.assertIn("ARCHIVE-INDEX", recap)
+        self.assertNotIn("implementation-program-launch-command", recap)
+        with self.assertRaisesRegex(ValueError, "typed setup decision"):
+            LAUNCH.validate_submitted_program_launch_prompt(
+                self.fixture.candidate,
+                recap,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

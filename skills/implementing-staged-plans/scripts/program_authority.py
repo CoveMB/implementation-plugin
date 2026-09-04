@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -21,6 +22,10 @@ VALIDATION_MODES = frozenset({PROPOSAL_VALIDATION_MODE, APPROVED_VALIDATION_MODE
 CLOSURE_STORAGE_SCHEMA = "implementation-closure-storage/v1"
 INCREMENT_STORAGE_SCHEMA = "implementation-increment-storage/v1"
 NEW_PROGRAM_MANIFEST_SCHEMA = "implementation-program-manifest/v2"
+SETUP_PROGRAM_MANIFEST_SCHEMA = "implementation-program-manifest/v3"
+NEW_PROGRAM_MANIFEST_SCHEMAS = frozenset(
+    {NEW_PROGRAM_MANIFEST_SCHEMA, SETUP_PROGRAM_MANIFEST_SCHEMA}
+)
 SUPPORTED_NEW_PROGRAM_APPROVAL_MODES = frozenset(
     {"approval:standard", "approval:pre-approve", "approval:full-increment"}
 )
@@ -46,6 +51,32 @@ NEW_PROGRAM_LEDGER_ROLES = (
     "increment_grants",
     "rollovers",
     "block_resolutions",
+)
+SETUP_PROGRAM_LOGICAL_ROLES = (
+    *NEW_PROGRAM_LOGICAL_ROLES,
+    "setup_activation_decision",
+    "source_gate_decisions",
+)
+SETUP_PROGRAM_LEDGER_ROLES = (*NEW_PROGRAM_LEDGER_ROLES, "source_gate_decisions")
+SETUP_PROGRAM_ONLY_LOGICAL_ROLES = frozenset(
+    {"setup_activation_decision", "source_gate_decisions"}
+)
+SETUP_PROGRAM_ONLY_MANIFEST_FIELDS = frozenset(
+    {
+        "setup_semantics",
+        "setup_semantics_sha256",
+        "source_gate_definitions",
+        "source_gate_definitions_sha256",
+    }
+)
+SETUP_AUTHORITY_RECORD_SCHEMAS = frozenset(
+    {
+        "implementation-approval/v2",
+        "implementation-action-authorization/v2",
+        "implementation-increment-grant/v2",
+        "setup-activation-decision/v1",
+        "source-gate-decision/v1",
+    }
 )
 INCREMENT_STORAGE_FILENAME_FIELDS = (
     "brief_filename",
@@ -726,7 +757,7 @@ def validate_program_approval(
     if matching:
         approval_id = matching[0].get("event_id")
         if (
-            manifest.get("schema_version") != NEW_PROGRAM_MANIFEST_SCHEMA
+            manifest.get("schema_version") not in NEW_PROGRAM_MANIFEST_SCHEMAS
             and coverage.get("approval_event_id") != approval_id
         ):
             issues.append("coverage approval_event_id mismatch")
@@ -739,7 +770,8 @@ def _validate_new_manifest_contract(
     logical_roles: dict[str, Any],
 ) -> list[str]:
     issues: list[str] = []
-    if manifest.get("schema_version") != NEW_PROGRAM_MANIFEST_SCHEMA:
+    manifest_schema = manifest.get("schema_version")
+    if manifest_schema not in NEW_PROGRAM_MANIFEST_SCHEMAS:
         return issues
     if manifest.get("approval_mode") not in SUPPORTED_NEW_PROGRAM_APPROVAL_MODES:
         issues.append("new program approval_mode is unsupported")
@@ -751,9 +783,14 @@ def _validate_new_manifest_contract(
     ):
         issues.append("new manifest must not duplicate closure logical roles")
 
+    logical_role_names = (
+        SETUP_PROGRAM_LOGICAL_ROLES
+        if manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA
+        else NEW_PROGRAM_LOGICAL_ROLES
+    )
     role_values = [
         value
-        for role in NEW_PROGRAM_LOGICAL_ROLES
+        for role in logical_role_names
         if isinstance((value := logical_roles.get(role)), str)
     ]
     if len(role_values) != len(set(role_values)):
@@ -778,6 +815,28 @@ def _validate_new_manifest_contract(
     all_storage_paths = [*increment_paths.values(), *closure_paths.values()]
     if len(all_storage_paths) != len(set(all_storage_paths)):
         issues.append("increment and closure storage resolve duplicate paths")
+    if manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA:
+        try:
+            setup_module = importlib.import_module("program_setup")
+        except ModuleNotFoundError as error:
+            if error.name != "program_setup":
+                issues.append(str(error))
+                setup_module = None
+            else:
+                script_root = str(Path(__file__).resolve().parent)
+                sys.path.insert(0, script_root)
+                try:
+                    setup_module = importlib.import_module("program_setup")
+                except (ImportError, OSError, TypeError, ValueError) as nested_error:
+                    issues.append(str(nested_error))
+                    setup_module = None
+                finally:
+                    sys.path.remove(script_root)
+        except (ImportError, OSError, TypeError, ValueError) as error:
+            issues.append(str(error))
+            setup_module = None
+        if setup_module is not None:
+            issues.extend(setup_module.validate_setup_semantics(root))
     return sorted(set(issues))
 
 
@@ -835,8 +894,13 @@ def _validate_proposal_status(
     status: dict[str, Any],
 ) -> list[str]:
     issues: list[str] = []
+    status_schema = (
+        "implementation-program-status/v3"
+        if manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA
+        else "implementation-program-status/v2"
+    )
     expected_values = {
-        "schema_version": "implementation-program-status/v2",
+        "schema_version": status_schema,
         "program_id": manifest.get("program_id"),
         "program_revision": manifest.get("program_revision"),
         "state_sequence": 0,
@@ -893,23 +957,53 @@ def validate_program_authority(
     if not isinstance(logical_roles, dict):
         return ["manifest logical_roles must be an object"]
 
-    new_manifest = manifest.get("schema_version") == NEW_PROGRAM_MANIFEST_SCHEMA
+    manifest_schema = manifest.get("schema_version")
+    new_manifest = manifest_schema in NEW_PROGRAM_MANIFEST_SCHEMAS
+    if manifest_schema != SETUP_PROGRAM_MANIFEST_SCHEMA:
+        for role in sorted(SETUP_PROGRAM_ONLY_LOGICAL_ROLES & set(logical_roles)):
+            issues.append(f"manifest family rejects v3-only logical role {role}")
+        for field in sorted(SETUP_PROGRAM_ONLY_MANIFEST_FIELDS & set(manifest)):
+            issues.append(f"manifest family rejects v3-only field {field}")
     if validation_mode == PROPOSAL_VALIDATION_MODE and not new_manifest:
-        issues.append("proposal validation requires implementation-program-manifest/v2")
+        issues.append(
+            "proposal validation requires implementation-program-manifest/v2 or v3"
+        )
     if new_manifest:
         issues.extend(_validate_new_manifest_contract(root, manifest, logical_roles))
         if allow_incomplete:
             issues.append("allow_incomplete is a legacy preparation mode")
 
     resolved_roles: dict[str, Path] = {}
-    required_roles = NEW_PROGRAM_LOGICAL_ROLES if new_manifest else REQUIRED_LOGICAL_ROLES
+    required_roles = (
+        SETUP_PROGRAM_LOGICAL_ROLES
+        if manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA
+        else NEW_PROGRAM_LOGICAL_ROLES
+        if new_manifest
+        else REQUIRED_LOGICAL_ROLES
+    )
     for role in required_roles:
+        allocated_setup_record = (
+            manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA
+            and validation_mode == PROPOSAL_VALIDATION_MODE
+            and role == "setup_activation_decision"
+        )
         path, path_issues = resolve_managed_path(
-            root, logical_roles.get(role), role=f"logical role {role}"
+            root,
+            logical_roles.get(role),
+            role=f"logical role {role}",
+            require_file=not allocated_setup_record,
         )
         issues.extend(path_issues)
         if path is not None:
             resolved_roles[role] = path
+            if allocated_setup_record and (path.exists() or path.is_symlink()):
+                issues.append("proposal setup-activation decision must be absent")
+        elif (
+            manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA
+            and validation_mode == APPROVED_VALIDATION_MODE
+            and role == "setup_activation_decision"
+        ):
+            issues.append("setup-activation decision record is required")
     if len(resolved_roles) != len(required_roles):
         return sorted(set(issues))
 
@@ -923,14 +1017,45 @@ def validate_program_authority(
         return sorted(set(issues))
 
     new_ledgers: dict[str, list[dict[str, Any]]] = {"approvals": approvals}
+    ledger_roles = (
+        SETUP_PROGRAM_LEDGER_ROLES
+        if manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA
+        else NEW_PROGRAM_LEDGER_ROLES
+    )
     if new_manifest:
-        for role in NEW_PROGRAM_LEDGER_ROLES:
+        for role in ledger_roles:
             if role == "approvals":
                 continue
             records, load_issues = load_json_lines(resolved_roles[role])
             issues.extend(load_issues)
             if records is not None:
                 new_ledgers[role] = records
+
+    if manifest_schema != SETUP_PROGRAM_MANIFEST_SCHEMA:
+        records_to_check = list(approvals)
+        for records in new_ledgers.values():
+            if records is not approvals:
+                records_to_check.extend(records)
+        if not new_manifest:
+            for role in NEW_PROGRAM_LEDGER_ROLES:
+                if role == "approvals" or role not in logical_roles:
+                    continue
+                path, _ = resolve_managed_path(
+                    root,
+                    logical_roles.get(role),
+                    role=f"logical role {role}",
+                )
+                if path is None:
+                    continue
+                records, _ = load_json_lines(path)
+                if records is not None:
+                    records_to_check.extend(records)
+        for record in records_to_check:
+            schema = record.get("schema_version")
+            if schema in SETUP_AUTHORITY_RECORD_SCHEMAS:
+                issues.append(
+                    f"manifest family rejects foreign authority schema {schema}"
+                )
 
     source_lines, source_issues = validate_source_binding(
         manifest,
@@ -970,9 +1095,17 @@ def validate_program_authority(
         if program_binding.get("machine_complete_traceability") is not True:
             issues.append("manifest must bind machine_complete_traceability true")
     if validation_mode == APPROVED_VALIDATION_MODE and not allow_incomplete:
-        issues.extend(validate_program_approval(manifest, traceability, approvals))
+        if manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA:
+            try:
+                from program_setup import validate_setup_activation_authority
+
+                issues.extend(validate_setup_activation_authority(root))
+            except (ImportError, ValueError) as error:
+                issues.append(str(error))
+        else:
+            issues.extend(validate_program_approval(manifest, traceability, approvals))
     if new_manifest and validation_mode == PROPOSAL_VALIDATION_MODE:
-        for role in NEW_PROGRAM_LEDGER_ROLES:
+        for role in ledger_roles:
             records = new_ledgers.get(role)
             if records is not None and records:
                 issues.append(f"proposal {role} ledger must be empty")
@@ -984,6 +1117,29 @@ def validate_program_authority(
             issues.extend(_validate_proposal_workspace(manifest, workspace))
         if status is not None:
             issues.extend(_validate_proposal_status(manifest, traceability, status))
+    if (
+        manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA
+        and validation_mode == APPROVED_VALIDATION_MODE
+        and "setup_activation_decision" not in resolved_roles
+    ):
+        issues.append("setup-activation decision record is required")
+    if manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA:
+        if any(
+            record.get("schema_version") == "implementation-approval/v1"
+            for record in approvals
+        ):
+            issues.append("manifest v3 rejects v1 approval records")
+        if any(
+            record.get("schema_version") == "implementation-increment-grant/v1"
+            for record in new_ledgers.get("increment_grants", [])
+        ):
+            issues.append("manifest v3 rejects v1 increment grants")
+        if any(
+            record.get("schema_version")
+            == "implementation-action-authorization/v1"
+            for record in new_ledgers.get("action_authorizations", [])
+        ):
+            issues.append("manifest v3 rejects v1 action authorizations")
     issues.extend(_validate_prior_revision(root, traceability))
     return sorted(set(issues))
 

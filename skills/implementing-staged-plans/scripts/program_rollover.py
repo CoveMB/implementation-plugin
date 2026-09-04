@@ -23,11 +23,13 @@ from program_activation import (
 )
 from program_authority import (
     NEW_PROGRAM_MANIFEST_SCHEMA,
+    SETUP_PROGRAM_MANIFEST_SCHEMA,
     load_json_lines,
     load_json_object,
     resolve_managed_path,
     sha256_file,
 )
+from program_setup import source_gate_satisfaction
 from repository_preparation import (
     ExactFileMap,
     execution_baseline_from_value,
@@ -362,8 +364,14 @@ def _build_rollover_candidate(
     manifest, manifest_issues = load_json_object(root / "manifest.json")
     if manifest is None:
         raise ValueError("; ".join(manifest_issues))
-    if manifest.get("schema_version") != NEW_PROGRAM_MANIFEST_SCHEMA:
-        raise ValueError("increment rollover requires a new-model v2 manifest")
+    if manifest.get("schema_version") not in {
+        NEW_PROGRAM_MANIFEST_SCHEMA,
+        SETUP_PROGRAM_MANIFEST_SCHEMA,
+    }:
+        raise ValueError("increment rollover requires a new-model manifest")
+    is_setup_program = (
+        manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA
+    )
     (
         domain,
         status,
@@ -440,8 +448,36 @@ def _build_rollover_candidate(
 
     source = status["source_binding"]
     program = status["program_binding"]
+    action_gate_satisfaction = None
+    increment_gate_satisfaction = None
+    if is_setup_program:
+        action_gate_satisfaction = source_gate_satisfaction(
+            root,
+            "before-action-authorization",
+            f"increment:{current_increment_id}",
+        )
+        try:
+            increment_gate_satisfaction = source_gate_satisfaction(
+                root,
+                "before-increment-start",
+                f"increment:{successor_increment_id}",
+            )
+        except ValueError as error:
+            if "is not durably satisfied" not in str(error):
+                raise
+            increment_gate_satisfaction = None
+        setup_binding = status.get("setup_activation_binding")
+        prior_authority = status.get("current_increment_authority_binding")
+        if not isinstance(setup_binding, dict) or not isinstance(
+            prior_authority, dict
+        ):
+            raise ValueError("v3 rollover authority is incomplete")
     action_record = {
-        "schema_version": ACTION_AUTHORIZATION_SCHEMA,
+        "schema_version": (
+            "implementation-action-authorization/v2"
+            if is_setup_program
+            else ACTION_AUTHORIZATION_SCHEMA
+        ),
         "authorization_id": authorization_id,
         "decision": "authorized",
         "actions": ["rollover-increment"],
@@ -477,14 +513,35 @@ def _build_rollover_candidate(
         "workspace": selected_workspace,
         "submitted_prompt_sha256": prompt_sha256,
     }
+    if is_setup_program:
+        action_record.update(
+            setup_activation_decision_id=setup_binding[
+                "setup_activation_decision_id"
+            ],
+            setup_activation_decision_sha256=setup_binding[
+                "setup_activation_decision_sha256"
+            ],
+            increment_grant_id=prior_authority["grant_id"],
+            increment_grant_sha256=prior_authority["grant_sha256"],
+            source_gate_satisfaction=action_gate_satisfaction,
+        )
     action_bytes = _canonical_json_line(action_record)
     action_sha256 = _sha256_bytes(action_bytes)
     brief_binding = {
         "path": successor_brief_path.relative_to(root).as_posix(),
         "sha256": _sha256_bytes(extension.successor_brief_bytes),
     }
+    if is_setup_program:
+        brief_binding.update(
+            workspace_sha256=sha256_file(workspace_path),
+            head_commit=normalized.head_commit,
+        )
     grant_record = {
-        "schema_version": INCREMENT_GRANT_SCHEMA,
+        "schema_version": (
+            "implementation-increment-grant/v2"
+            if is_setup_program
+            else INCREMENT_GRANT_SCHEMA
+        ),
         "grant_id": grant_id,
         "decision": "granted",
         "program_id": status["program_id"],
@@ -499,6 +556,22 @@ def _build_rollover_candidate(
         "allowed_conditional_actions": allowed_actions,
         "submitted_prompt_sha256": prompt_sha256,
     }
+    if is_setup_program:
+        grant_record.update(
+            grant_kind="successor-rollover",
+            setup_activation_decision_id=setup_binding[
+                "setup_activation_decision_id"
+            ],
+            setup_activation_decision_sha256=setup_binding[
+                "setup_activation_decision_sha256"
+            ],
+            predecessor_increment_authority_binding=prior_authority,
+            predecessor_status_sha256=prior_status_sha256,
+            predecessor_status_sequence=prior_status_sequence,
+            rollover_authorization_sha256=action_sha256,
+        )
+        if increment_gate_satisfaction is not None:
+            grant_record["source_gate_satisfaction"] = increment_gate_satisfaction
     grant_bytes = _canonical_json_line(grant_record)
     grant_sha256 = _sha256_bytes(grant_bytes)
     handoff_bytes = _render_handoff(
@@ -596,11 +669,21 @@ def _build_rollover_candidate(
             "head_commit": normalized.head_commit,
         },
         current_increment_authority_binding={
-            "schema_version": "implementation-current-increment-authority-binding/v1",
+            "schema_version": (
+                "implementation-current-increment-authority-binding/v2"
+                if is_setup_program
+                else "implementation-current-increment-authority-binding/v1"
+            ),
             "kind": "increment-grant",
+            **({"grant_kind": "successor-rollover"} if is_setup_program else {}),
             "increment_id": successor_increment_id,
             "grant_id": grant_id,
             "grant_sha256": grant_sha256,
+            **(
+                {"source_gate_satisfaction": increment_gate_satisfaction}
+                if is_setup_program
+                else {}
+            ),
         },
         rollover_binding={
             "schema_version": ROLLOVER_BINDING_SCHEMA,
@@ -636,6 +719,8 @@ def _build_rollover_candidate(
             "checkpoint_id": checkpoint_id,
         },
     )
+    if increment_gate_satisfaction is not None:
+        successor_status["source_gate_satisfaction"] = increment_gate_satisfaction
     return _RolloverCandidate(
         continuation_domain=domain,
         prior_status_sha256=prior_status_sha256,
@@ -832,6 +917,13 @@ def persist_increment_rollover(
             label="rollover action authorization",
         ),
     )
+    if (
+        manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA
+        and "source_gate_satisfaction" not in candidate.grant_record
+    ):
+        raise ValueError(
+            "source gate before-increment-start is not durably satisfied"
+        )
     record(
         "successor-grant",
         _append_or_adopt_record(
@@ -1160,38 +1252,80 @@ def _validated_completed_rollover_records(
         raise ValueError("; ".join(grant_issues))
     if actions is None:
         raise ValueError("; ".join(action_issues))
-    activation = status.get("activation_binding")
+    is_setup_program = status.get("schema_version") == "implementation-program-status/v3"
+    activation = (
+        status.get("setup_activation_binding")
+        if is_setup_program
+        else status.get("activation_binding")
+    )
     if not isinstance(activation, Mapping):
         raise ValueError("rollover chain activation authority is required")
     genesis_grants = [
         grant
         for grant in grants
-        if grant.get("grant_id") == activation.get("increment_grant_id")
+        if (
+            grant.get("grant_kind") == "first-increment-start"
+            if is_setup_program
+            else grant.get("grant_id") == activation.get("increment_grant_id")
+        )
     ]
     if len(genesis_grants) != 1:
         raise ValueError("rollover chain genesis grant must exist exactly once")
     genesis_grant = genesis_grants[0]
     if (
-        genesis_grant.get("schema_version") != INCREMENT_GRANT_SCHEMA
+        genesis_grant.get("schema_version")
+        != (
+            "implementation-increment-grant/v2"
+            if is_setup_program
+            else INCREMENT_GRANT_SCHEMA
+        )
         or genesis_grant.get("decision") != "granted"
         or genesis_grant.get("program_id") != status.get("program_id")
         or genesis_grant.get("program_revision")
         != status.get("program_revision")
-        or genesis_grant.get("launch_checkpoint_id")
-        != activation.get("launch_checkpoint_id")
-        or genesis_grant.get("program_approval_event_id")
-        != activation.get("program_approval_event_id")
-        or genesis_grant.get("workspace_approval_event_id")
-        != activation.get("workspace_approval_event_id")
+        or (
+            is_setup_program
+            and genesis_grant.get("setup_activation_decision_id")
+            != activation.get("setup_activation_decision_id")
+        )
+        or (
+            not is_setup_program
+            and (
+                genesis_grant.get("launch_checkpoint_id")
+                != activation.get("launch_checkpoint_id")
+                or genesis_grant.get("program_approval_event_id")
+                != activation.get("program_approval_event_id")
+                or genesis_grant.get("workspace_approval_event_id")
+                != activation.get("workspace_approval_event_id")
+            )
+        )
     ):
         raise ValueError("rollover chain genesis grant authority is invalid")
     expected_authority: dict[str, object] = {
-        "schema_version": CURRENT_INCREMENT_AUTHORITY_SCHEMA,
+        "schema_version": (
+            "implementation-current-increment-authority-binding/v2"
+            if is_setup_program
+            else CURRENT_INCREMENT_AUTHORITY_SCHEMA
+        ),
         "kind": "increment-grant",
+        **({"grant_kind": "first-increment-start"} if is_setup_program else {}),
         "increment_id": genesis_grant.get("increment_id"),
         "grant_id": genesis_grant.get("grant_id"),
         "grant_sha256": _sha256_bytes(_canonical_json_line(genesis_grant)),
     }
+    if is_setup_program:
+        start_intent = genesis_grant.get("start_intent")
+        expected_authority.update(
+            start_intent_id=(
+                start_intent.get("intent_id")
+                if isinstance(start_intent, dict)
+                else None
+            ),
+            start_intent_sha256=genesis_grant.get("start_intent_sha256"),
+            source_gate_satisfaction=genesis_grant.get(
+                "source_gate_satisfaction"
+            ),
+        )
     expected_current: str | None = None
     for index, record in enumerate(completed):
         if record.get("schema_version") != ROLLOVER_RECORD_SCHEMA:
@@ -1223,7 +1357,12 @@ def _validated_completed_rollover_records(
             raise ValueError("rollover chain action authority must exist exactly once")
         action = matching_actions[0]
         if (
-            action.get("schema_version") != ACTION_AUTHORIZATION_SCHEMA
+            action.get("schema_version")
+            != (
+                "implementation-action-authorization/v2"
+                if is_setup_program
+                else ACTION_AUTHORIZATION_SCHEMA
+            )
             or action.get("decision") != "authorized"
             or action.get("actions") != ["rollover-increment"]
             or action.get("program_id") != status.get("program_id")
@@ -1244,7 +1383,12 @@ def _validated_completed_rollover_records(
         grant = matching_grants[0]
         grant_sha256 = _sha256_bytes(_canonical_json_line(grant))
         if (
-            grant.get("schema_version") != INCREMENT_GRANT_SCHEMA
+            grant.get("schema_version")
+            != (
+                "implementation-increment-grant/v2"
+                if is_setup_program
+                else INCREMENT_GRANT_SCHEMA
+            )
             or grant.get("decision") != "granted"
             or grant.get("program_id") != status.get("program_id")
             or grant.get("program_revision") != status.get("program_revision")
@@ -1253,12 +1397,21 @@ def _validated_completed_rollover_records(
         ):
             raise ValueError("rollover chain successor grant authority is invalid")
         expected_authority = {
-            "schema_version": CURRENT_INCREMENT_AUTHORITY_SCHEMA,
+            "schema_version": (
+                "implementation-current-increment-authority-binding/v2"
+                if is_setup_program
+                else CURRENT_INCREMENT_AUTHORITY_SCHEMA
+            ),
             "kind": "increment-grant",
+            **({"grant_kind": "successor-rollover"} if is_setup_program else {}),
             "increment_id": successor,
             "grant_id": grant.get("grant_id"),
             "grant_sha256": grant_sha256,
         }
+        if is_setup_program:
+            expected_authority["source_gate_satisfaction"] = grant.get(
+                "source_gate_satisfaction"
+            )
         expected_current = successor
     if (
         expected_current != status.get("current_increment_id")

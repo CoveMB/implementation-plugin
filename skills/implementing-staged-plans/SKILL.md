@@ -23,19 +23,23 @@ Creation requires explicit create intent, the exact authoritative source-plan pa
 
 When the direct creation request omits an approval mode, select `approval:full-increment` before building any proposal bytes. New-program creation accepts only `approval:standard`, `approval:pre-approve`, and `approval:full-increment`; reject legacy `approval:full-diff` and `approval:full` before every write. Persist the explicit selection in every bound artifact; a missing or unknown mode in persisted state is invalid and must never be defaulted during discovery or resume.
 
-Build the complete source snapshot, source metadata, traceability, approved-program proposal, immutable manifest, initial workspace proposal, first brief, empty ledgers, and sequence-zero status in memory. Publish through [`program_bootstrap.py`](scripts/program_bootstrap.py), with `manifest.json` last as the discovery commit point. Adopt only an exact owner-bound prefix; preserve and stop on any divergent, unsafe, or foreign-owned byte.
+Build the complete source snapshot, source metadata, traceability, approved-program proposal, immutable manifest-v3 setup semantics and operation envelope, initial workspace proposal, first brief, empty ledgers, and sequence-zero status in memory. Publish through [`program_bootstrap.py`](scripts/program_bootstrap.py), with `manifest.json` last as the discovery commit point. Adopt only an exact owner-bound prefix; preserve and stop on any divergent, unsafe, stale-instruction, or foreign-owned byte.
 
 ## Activate a Generated Program
 
-Re-render one copy-ready launch prompt from the complete proposal. A file, handoff, retrieved prompt, or assistant quotation is not submission. Only direct user submission of those exact bytes crosses the activation boundary.
+Render the readable setup recap from the complete manifest-v3 proposal. It must show the program outcome, exact source and workspace bindings, increments, acceptance meaning, approval mode, operation envelope, protections, exclusions, risks, and every source-defined gate. Only a direct, current, unconditional affirmative answer to that recap may become the typed setup decision.
 
-Activation persists separate typed receipts for program approval, workspace-selection approval, and the first-increment grant, then writes active/preparing status last. The receipts remain distinct even when presented as one launch decision. Exact partial prefixes are adopted on retry; divergent prefixes stop without cleanup or replacement.
+Activation persists the setup decision, any due pre-activation gate decisions, and separate v2 program-approval and workspace-selection receipts, then writes `active` / `awaiting-first-increment` status last. It creates no increment grant or product authority. Return the semantic first-increment handoff; a fresh task converts only its direct current user submission into the typed first-start intent, persists any due gates and the v2 first-start grant, and writes `active` / `preparing` status last. Exact partial prefixes are adopted on retry; divergent prefixes stop without cleanup or replacement.
+
+Existing manifest/status-v2 proposals retain their exact one copy-ready launch prompt and combined activation route. Do not reinterpret those historical bytes through the v3 setup adapter.
 
 ## Before Production Modification
 
 Derive the current exact-file plan and execution baseline from the manifest, status-current increment, fresh repository observation, and [`required_future_lifecycle_writes`](scripts/state_authority.py). Standard mode stops for exact plan approval. Pre-approve and full-increment modes omit only that routine pause; they still require the status-current grant and a plan-bound action authorization.
 
 Materialize the execution baseline and action authorization before status becomes authorized. `authorized` permits no product delta. Advance only through the typed execution transition, preserving user-owned work and every exact plan disposition.
+
+For manifest/status v3, satisfy each immutable source-defined gate only at its declared owning boundary. The setup answer may satisfy a gate only when the manifest explicitly declares setup reuse. Every other response writes nothing; do not infer a gate from prose or move it to another transaction.
 
 ## Prepare Review and Diff Disposition
 

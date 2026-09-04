@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import os
 import stat
@@ -63,6 +64,92 @@ class ProgramBootstrapTestCase(unittest.TestCase):
 
 
 class PublicationTests(ProgramBootstrapTestCase):
+    def test_v3_publication_uses_v2_owner_and_an_immutable_candidate_snapshot(self) -> None:
+        self.fixture.configure_setup_v3()
+        program_path = self.fixture.candidate / "program/implementation-program.md"
+        original_program_bytes = program_path.read_bytes()
+
+        def mutate_after_capture(label: str) -> None:
+            if label == "owner-receipt":
+                program_path.write_text("changed after immutable capture\n", encoding="utf-8")
+
+        with mock.patch.object(
+            BOOTSTRAP,
+            "_after_persist",
+            side_effect=mutate_after_capture,
+        ):
+            receipt = self.publish()
+
+        owner = json.loads(
+            (self.fixture.program_root / ".publication-owner.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            owner["schema_version"],
+            "implementation-proposal-publication-owner/v2",
+        )
+        self.assertEqual(
+            owner["request_schema_version"],
+            "implementation-program-proposal-request/v2",
+        )
+        self.assertIn("publication_freshness", owner)
+        self.assertEqual(
+            (self.fixture.program_root / "program/implementation-program.md").read_bytes(),
+            original_program_bytes,
+        )
+        self.assertEqual(
+            receipt.setup_recap_sha256,
+            hashlib.sha256(BOOTSTRAP.render_setup_recap(self.fixture.program_root).encode()).hexdigest(),
+        )
+
+    def test_v3_publication_stops_when_bound_instruction_source_changes(self) -> None:
+        instructions = self.fixture.repository / "AGENTS.md"
+        instructions.write_text("Program manifest: implementation-programs/OTHER/manifest.json\n")
+        workspace = self.fixture.load_json("state/workspace.json")
+        workspace["pre_existing_work_at_selection"]["untracked_paths"] = ["AGENTS.md"]
+        self.fixture.write_json("state/workspace.json", workspace)
+        self.fixture.configure_setup_v3()
+        original_inspection = BOOTSTRAP.inspect_repository
+        calls = 0
+
+        def mutate_before_final_root(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                instructions.write_text(
+                    "Program manifest: implementation-programs/CHANGED/manifest.json\n"
+                )
+            return original_inspection(*args, **kwargs)
+
+        with mock.patch.object(
+            BOOTSTRAP,
+            "inspect_repository",
+            side_effect=mutate_before_final_root,
+        ):
+            with self.assertRaisesRegex(ValueError, "publication freshness changed"):
+                BOOTSTRAP.publish_program_proposal(
+                    self.fixture.repository,
+                    self.fixture.source_plan,
+                    self.fixture.candidate,
+                    self.fixture.source_sha256,
+                    instruction_source_paths=(instructions,),
+                    instruction_manifest_paths=(
+                        "implementation-programs/OTHER/manifest.json",
+                    ),
+                )
+        self.assertFalse(self.fixture.program_root.exists())
+
+    def test_v3_completed_publication_is_adopted_with_original_freshness(self) -> None:
+        self.fixture.configure_setup_v3()
+        first = self.publish()
+
+        second = self.publish()
+
+        self.assertEqual(second.manifest_sha256, first.manifest_sha256)
+        self.assertEqual(second.created_paths, ())
+        self.assertIn("manifest.json", second.adopted_paths)
+
     def test_repository_head_timeout_is_bounded_and_translated(self) -> None:
         def timeout_run(*args, timeout=None, **kwargs):
             if timeout is None:
