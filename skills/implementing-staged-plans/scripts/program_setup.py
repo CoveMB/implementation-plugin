@@ -1432,6 +1432,7 @@ def validate_setup_activation_authority(program_root: Path) -> list[str]:
         manifest = _load_manifest(root)
         setup, setup_path = _setup_activation_record(root, manifest)
         approvals, _ = _load_role(root, manifest, "approvals", json_lines=True)
+        status, _ = _load_role(root, manifest, "status")
         gates, _ = _load_role(
             root, manifest, "source_gate_decisions", json_lines=True
         )
@@ -1515,6 +1516,7 @@ def validate_setup_activation_authority(program_root: Path) -> list[str]:
             setup.get("workspace_approval_event_id"),
         ),
     )
+    receipts: dict[str, dict[str, object]] = {}
     for record_type, event_id in expected_types:
         matches = [
             record
@@ -1526,6 +1528,7 @@ def validate_setup_activation_authority(program_root: Path) -> list[str]:
             issues.append(f"v3 {record_type} receipt must exist exactly once")
             continue
         record = matches[0]
+        receipts[record_type] = record
         if (
             record.get("schema_version") != "implementation-approval/v2"
             or record.get("decision") != "approved"
@@ -1539,6 +1542,25 @@ def validate_setup_activation_authority(program_root: Path) -> list[str]:
             or record.get("execution_baseline_sha256") is not None
         ):
             issues.append(f"v3 {record_type} receipt binding mismatch")
+    if expected_satisfaction is not None and len(receipts) == len(expected_types):
+        program_approval = receipts["program-approval"]
+        workspace_approval = receipts["workspace-selection-approval"]
+        expected_status_binding = {
+            "schema_version": "implementation-setup-activation-status-binding/v1",
+            "setup_activation_decision_id": decision_id,
+            "setup_activation_decision_sha256": setup_sha256,
+            "program_approval_event_id": program_approval.get("event_id"),
+            "program_approval_sha256": _bytes_sha256(
+                canonical_identity_bytes(program_approval) + b"\n"
+            ),
+            "workspace_approval_event_id": workspace_approval.get("event_id"),
+            "workspace_approval_sha256": _bytes_sha256(
+                canonical_identity_bytes(workspace_approval) + b"\n"
+            ),
+            "source_gate_satisfaction": expected_satisfaction,
+        }
+        if status.get("setup_activation_binding") != expected_status_binding:
+            issues.append("v3 setup activation status binding mismatch")
     gate_ids = [str(record.get("gate_id")) for record in gates]
     if len(gate_ids) != len(set(gate_ids)):
         issues.append("source-gate decision ledger must contain unique decisions")

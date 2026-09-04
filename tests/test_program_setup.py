@@ -632,6 +632,75 @@ class SetupActivationTests(unittest.TestCase):
             [],
         )
 
+    def test_status_setup_activation_binding_must_match_durable_authority(
+        self,
+    ) -> None:
+        cases = (
+            ("decision-id", "setup_activation_decision_id", "OTHER-DECISION"),
+            ("decision-digest", "setup_activation_decision_sha256", "f" * 64),
+            ("program-event-id", "program_approval_event_id", "OTHER-EVENT"),
+            ("program-digest", "program_approval_sha256", "f" * 64),
+            ("workspace-event-id", "workspace_approval_event_id", "OTHER-EVENT"),
+            ("workspace-digest", "workspace_approval_sha256", "f" * 64),
+            ("source-gates", "source_gate_satisfaction", {}),
+        )
+        for label, field, value in cases:
+            with self.subTest(label=label):
+                self.tearDown()
+                self.setUp()
+                ACTIVATION.activate_program(
+                    self.fixture.program_root,
+                    self.setup_decision(),
+                    self.observation(),
+                )
+                status_path = self.fixture.program_root / "state/status.json"
+                status = json.loads(status_path.read_text(encoding="utf-8"))
+                status["setup_activation_binding"][field] = value
+                status_path.write_bytes(ACTIVATION._canonical_json_bytes(status))
+
+                self.assertIn(
+                    "v3 setup activation status binding mismatch",
+                    STATE.validate_state_authority(
+                        self.fixture.program_root,
+                        self.normalized_observation(),
+                    ),
+                )
+
+    def test_first_start_rejects_corrupt_setup_activation_binding_before_write(
+        self,
+    ) -> None:
+        activation = ACTIVATION.activate_program(
+            self.fixture.program_root,
+            self.setup_decision(),
+            self.observation(),
+        )
+        status_path = self.fixture.program_root / "state/status.json"
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+        status["setup_activation_binding"][
+            "setup_activation_decision_sha256"
+        ] = "f" * 64
+        status_path.write_bytes(ACTIVATION._canonical_json_bytes(status))
+        intent = SETUP.adapt_increment_start_intent(
+            self.fixture.program_root,
+            activation.handoff,
+            role="user",
+            provenance="direct-user-message",
+        )
+        before = repository_snapshot(self.fixture.program_root)
+
+        with self.assertRaisesRegex(ValueError, "setup activation authority"):
+            ACTIVATION.start_first_increment(
+                self.fixture.program_root,
+                intent,
+                self.observation(),
+            )
+
+        self.assertEqual(repository_snapshot(self.fixture.program_root), before)
+        self.assertEqual(
+            (self.fixture.program_root / "state/increment-grants.jsonl").read_bytes(),
+            b"",
+        )
+
     def test_every_setup_activation_prefix_is_retry_safe(self) -> None:
         for label in (
             "setup-activation-decision",
