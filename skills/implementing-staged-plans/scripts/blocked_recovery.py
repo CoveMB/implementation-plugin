@@ -673,13 +673,51 @@ def build_block_resolution_candidate(
     if is_setup_program:
         setup_binding = status.get("setup_activation_binding")
         increment_authority = status.get("current_increment_authority_binding")
+        plan_binding = context.get("exact_file_plan_binding")
         baseline_binding = status.get("execution_baseline_binding")
-        if not all(
-            isinstance(value, dict)
-            for value in (setup_binding, increment_authority, baseline_binding)
+        if (
+            not isinstance(setup_binding, dict)
+            or not isinstance(increment_authority, dict)
+            or not isinstance(plan_binding, dict)
+            or not isinstance(baseline_binding, dict)
+            or not isinstance(
+                setup_binding.get("setup_activation_decision_id"), str
+            )
+            or not setup_binding["setup_activation_decision_id"].strip()
+            or not isinstance(
+                setup_binding.get("setup_activation_decision_sha256"), str
+            )
+            or re.fullmatch(
+                r"[0-9a-f]{64}",
+                setup_binding["setup_activation_decision_sha256"],
+            )
+            is None
+            or not isinstance(increment_authority.get("grant_id"), str)
+            or not increment_authority["grant_id"].strip()
+            or not isinstance(increment_authority.get("grant_sha256"), str)
+            or re.fullmatch(
+                r"[0-9a-f]{64}", increment_authority["grant_sha256"]
+            )
+            is None
+            or not isinstance(plan_binding.get("sha256"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", plan_binding["sha256"])
+            is None
+            or not isinstance(baseline_binding.get("sha256"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", baseline_binding["sha256"])
+            is None
         ):
             raise ValueError("v3 blocked recovery authority is incomplete")
-        from program_setup import source_gate_satisfaction
+        from program_setup import (
+            source_gate_satisfaction,
+            validate_setup_activation_authority,
+        )
+
+        setup_authority_issues = validate_setup_activation_authority(root)
+        if setup_authority_issues:
+            raise ValueError(
+                "v3 blocked recovery setup activation authority is invalid: "
+                + "; ".join(setup_authority_issues)
+            )
 
         action_record.update(
             setup_activation_decision_id=setup_binding[
@@ -690,7 +728,7 @@ def build_block_resolution_candidate(
             ],
             increment_grant_id=increment_authority["grant_id"],
             increment_grant_sha256=increment_authority["grant_sha256"],
-            exact_file_plan_sha256=context["exact_file_plan_binding"]["sha256"],
+            exact_file_plan_sha256=plan_binding["sha256"],
             execution_baseline_sha256=baseline_binding["sha256"],
             source_gate_satisfaction=source_gate_satisfaction(
                 root,

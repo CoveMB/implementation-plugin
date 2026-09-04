@@ -38,7 +38,9 @@ if _WINDOWS:  # pragma: no cover - configured and exercised on Windows
     _kernel32.CloseHandle.restype = _ctypes.c_int
 
 from program_authority import (
+    APPROVED_VALIDATION_MODE,
     NEW_PROGRAM_MANIFEST_SCHEMA,
+    PROPOSAL_VALIDATION_MODE,
     SETUP_PROGRAM_MANIFEST_SCHEMA,
     load_json_lines,
     load_json_object,
@@ -1351,6 +1353,11 @@ def _validate_setup_program_state(
         "accepted",
     }
     if effective_increment_state in executable_states:
+        try:
+            from program_setup import source_gate_satisfaction
+        except ImportError as error:
+            issues.append(str(error))
+            source_gate_satisfaction = None
         baseline_binding = status.get("execution_baseline_binding")
         preparation = status.get("plan_preparation_binding")
         execution_authority = status.get("execution_authorization")
@@ -1394,17 +1401,16 @@ def _validate_setup_program_state(
                         if record.get("authorization_id") == authorization_id
                     ]
                 )
-                try:
-                    from program_setup import source_gate_satisfaction
-
-                    gate_satisfaction = source_gate_satisfaction(
-                        program_root,
-                        "before-action-authorization",
-                        f"increment:{status.get('current_increment_id')}",
-                    )
-                except (ImportError, ValueError) as error:
-                    issues.append(str(error))
-                    gate_satisfaction = None
+                gate_satisfaction = None
+                if source_gate_satisfaction is not None:
+                    try:
+                        gate_satisfaction = source_gate_satisfaction(
+                            program_root,
+                            "before-action-authorization",
+                            f"increment:{status.get('current_increment_id')}",
+                        )
+                    except ValueError as error:
+                        issues.append(str(error))
                 if len(action_matches) != 1:
                     issues.append(
                         "v3 status-current execution authorization must exist exactly once"
@@ -1432,14 +1438,17 @@ def _validate_setup_program_state(
                     "implementing": "before-product-execution",
                     "reviewing": "before-review",
                 }.get(str(effective_increment_state))
-                if status_trigger is not None:
+                if (
+                    status_trigger is not None
+                    and source_gate_satisfaction is not None
+                ):
                     try:
                         expected_status_gate = source_gate_satisfaction(
                             program_root,
                             status_trigger,
                             f"increment:{status.get('current_increment_id')}",
                         )
-                    except (NameError, ValueError) as error:
+                    except ValueError as error:
                         issues.append(str(error))
                     else:
                         if status.get("source_gate_satisfaction") != expected_status_gate:
@@ -1447,17 +1456,16 @@ def _validate_setup_program_state(
         if effective_increment_state == "accepted":
             disposition = status.get("diff_disposition_binding")
             approvals: list[dict[str, Any]] | None = None
-            try:
-                from program_setup import source_gate_satisfaction
-
-                diff_gate = source_gate_satisfaction(
-                    program_root,
-                    "before-diff-disposition",
-                    f"increment:{status.get('current_increment_id')}",
-                )
-            except (ImportError, ValueError) as error:
-                issues.append(str(error))
-                diff_gate = None
+            diff_gate = None
+            if source_gate_satisfaction is not None:
+                try:
+                    diff_gate = source_gate_satisfaction(
+                        program_root,
+                        "before-diff-disposition",
+                        f"increment:{status.get('current_increment_id')}",
+                    )
+                except ValueError as error:
+                    issues.append(str(error))
             if not isinstance(disposition, dict):
                 issues.append("v3 accepted status lacks diff disposition binding")
             else:
@@ -1495,15 +1503,16 @@ def _validate_setup_program_state(
                         issues.append("v3 diff approval authority binding mismatch")
             if effective_program_state == "closed":
                 command = status.get("closure_command_binding")
-                try:
-                    closure_gate = source_gate_satisfaction(
-                        program_root,
-                        "before-program-closure",
-                        f"program:{manifest.get('program_id')}",
-                    )
-                except (NameError, ValueError) as error:
-                    issues.append(str(error))
-                    closure_gate = None
+                closure_gate = None
+                if source_gate_satisfaction is not None:
+                    try:
+                        closure_gate = source_gate_satisfaction(
+                            program_root,
+                            "before-program-closure",
+                            f"program:{manifest.get('program_id')}",
+                        )
+                    except ValueError as error:
+                        issues.append(str(error))
                 closure_matches = (
                     []
                     if not isinstance(command, dict) or approvals is None
@@ -2053,14 +2062,14 @@ def validate_state_authority(
     workspace, workspace_issues = load_json_object(workspace_path)
     issues.extend(status_issues)
     issues.extend(workspace_issues)
-    validation_mode = "approved"
+    validation_mode = APPROVED_VALIDATION_MODE
     if (
         manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA
         and status is not None
         and status.get("schema_version") == STATUS_SCHEMA_V3
         and status.get("state_sequence") == 0
     ):
-        validation_mode = "proposal"
+        validation_mode = PROPOSAL_VALIDATION_MODE
     issues.extend(
         validate_program_authority(root, validation_mode=validation_mode)
     )

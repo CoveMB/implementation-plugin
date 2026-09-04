@@ -712,7 +712,7 @@ class SetupActivationTests(unittest.TestCase):
                 self.tearDown()
                 self.setUp()
 
-                def fail_after(persisted: str) -> None:
+                def fail_after(persisted: str, label: str = label) -> None:
                     if persisted == label:
                         raise RuntimeError(f"injected-after:{label}")
 
@@ -797,7 +797,7 @@ class SetupActivationTests(unittest.TestCase):
                     provenance="direct-user-message",
                 )
 
-                def fail_after(persisted: str) -> None:
+                def fail_after(persisted: str, label: str = label) -> None:
                     if persisted == label:
                         raise RuntimeError(f"injected-after:{label}")
 
@@ -1343,6 +1343,124 @@ class SetupActivationTests(unittest.TestCase):
             ),
             [],
         )
+
+    def test_v3_blocked_resolution_rejects_incomplete_or_false_authority_before_write(
+        self,
+    ) -> None:
+        cases = (
+            ("setup_activation_decision_id", None),
+            ("setup_activation_decision_sha256", None),
+            ("grant_id", None),
+            ("setup_activation_decision_id", "OTHER-DECISION"),
+            ("setup_activation_decision_sha256", "f" * 64),
+        )
+        for field, replacement in cases:
+            with self.subTest(field=field, replacement=replacement):
+                self.tearDown()
+                self.setUp()
+                self.authorize_current_plan()
+                ACTIVATION.advance_execution_state(
+                    self.fixture.program_root, "implementing", self.observation()
+                )
+                observation = self.normalized_observation()
+                BLOCKED.block_current_program(
+                    self.fixture.program_root,
+                    BLOCKED.BlockedTransitionRequest(
+                        reason_code="verification-environment-unavailable",
+                        recovery_criteria=(
+                            "The verification environment is available.",
+                        ),
+                    ),
+                    observation,
+                )
+                status_path = self.fixture.program_root / "state/status.json"
+                status = json.loads(status_path.read_text(encoding="utf-8"))
+                context = status["blocked_context"]
+                if field.startswith("setup_activation"):
+                    if replacement is None:
+                        status["setup_activation_binding"].pop(field)
+                    else:
+                        status["setup_activation_binding"][field] = replacement
+                else:
+                    grants_path = (
+                        self.fixture.program_root / "state/increment-grants.jsonl"
+                    )
+                    grants = [
+                        json.loads(line)
+                        for line in grants_path.read_text(encoding="utf-8").splitlines()
+                    ]
+                    grants[-1].pop("grant_id")
+                    grant_sha256 = ACTIVATION._sha256_bytes(
+                        ACTIVATION._canonical_json_line(grants[-1])
+                    )
+                    grants_path.write_bytes(
+                        b"".join(
+                            ACTIVATION._canonical_json_line(record)
+                            for record in grants
+                        )
+                    )
+                    authority = status["current_increment_authority_binding"]
+                    authority.pop("grant_id")
+                    authority["grant_sha256"] = grant_sha256
+                    context["current_increment_authority_binding"] = copy.deepcopy(
+                        authority
+                    )
+                    baseline_binding = status["execution_baseline_binding"]
+                    baseline_path = (
+                        self.fixture.program_root / baseline_binding["path"]
+                    )
+                    baseline = json.loads(
+                        baseline_path.read_text(encoding="utf-8")
+                    )
+                    baseline["current_increment_authority_binding"] = copy.deepcopy(
+                        authority
+                    )
+                    baseline_path.write_bytes(
+                        ACTIVATION._canonical_json_bytes(baseline)
+                    )
+                    baseline_binding["sha256"] = ACTIVATION.sha256_file(
+                        baseline_path
+                    )
+                    context["execution_baseline_binding"] = copy.deepcopy(
+                        baseline_binding
+                    )
+                    context_seed = {
+                        "schema_domain": BLOCKED.BLOCKED_CONTEXT_SCHEMA,
+                        **{
+                            key: value
+                            for key, value in context.items()
+                            if key not in {"schema_version", "block_id"}
+                        },
+                    }
+                    context["block_id"] = BLOCKED._identifier(
+                        "program-block", context_seed
+                    )
+                    status["transition_authority"]["event_id"] = context["block_id"]
+                status_path.write_bytes(ACTIVATION._canonical_json_bytes(status))
+                candidate = {
+                    "schema_version": BLOCKED.BLOCK_RESOLUTION_CANDIDATE_SCHEMA,
+                    "block_id": context["block_id"],
+                    "criterion_results": [
+                        {"criterion": criterion, "satisfied": True}
+                        for criterion in context["recovery_criteria"]
+                    ],
+                    "evidence_bindings": context["evidence_bindings"],
+                }
+                before = repository_snapshot(self.fixture.program_root)
+
+                expected_error = (
+                    "v3 blocked recovery authority is incomplete"
+                    if replacement is None
+                    else "setup activation authority"
+                )
+                with self.assertRaisesRegex(ValueError, expected_error):
+                    BLOCKED.build_block_resolution_candidate(
+                        self.fixture.program_root, candidate, observation
+                    )
+
+                self.assertEqual(
+                    repository_snapshot(self.fixture.program_root), before
+                )
 
     def test_diff_and_closure_gates_bind_v2_receipts_and_status_last(self) -> None:
         self.tearDown()

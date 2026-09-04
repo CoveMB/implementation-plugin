@@ -969,20 +969,35 @@ class SetupV3AuthorityTests(unittest.TestCase):
         self.assertIn("setup_semantics digest mismatch", issues)
 
     def test_v3_cross_family_ledger_artifact_is_rejected(self) -> None:
-        legacy = {
-            "schema_version": "implementation-approval/v1",
-            "event_id": "LEGACY-APPROVAL",
-            "type": "program-approval",
-        }
-        (self.fixture.candidate / "state/approvals.jsonl").write_text(
-            json.dumps(legacy, separators=(",", ":"), sort_keys=True) + "\n",
-            encoding="utf-8",
+        cases = (
+            (
+                "approvals",
+                {"schema_version": "implementation-approval/v1"},
+                "manifest v3 rejects v1 approval records",
+            ),
+            (
+                "increment_grants",
+                {"schema_version": "implementation-increment-grant/v1"},
+                "manifest v3 rejects v1 increment grants",
+            ),
+            (
+                "action_authorizations",
+                {"schema_version": "implementation-action-authorization/v1"},
+                "manifest v3 rejects v1 action authorizations",
+            ),
         )
-        issues = self.validate(AUTHORITY.PROPOSAL_VALIDATION_MODE)
-        self.assertTrue(
-            any("proposal approvals ledger must be empty" in issue for issue in issues),
-            issues,
-        )
+        for role, legacy, expected_issue in cases:
+            with self.subTest(role=role):
+                self.tearDown()
+                self.setUp()
+                (self.fixture.candidate / f"state/{role.replace('_', '-')}.jsonl").write_text(
+                    json.dumps(legacy, separators=(",", ":"), sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+
+                issues = self.validate(AUTHORITY.PROPOSAL_VALIDATION_MODE)
+
+                self.assertIn(expected_issue, issues)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ import os
 import stat
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -64,6 +65,28 @@ class ProgramBootstrapTestCase(unittest.TestCase):
 
 
 class PublicationTests(ProgramBootstrapTestCase):
+    def test_publication_freshness_uses_relative_invalid_manifest_issues(
+        self,
+    ) -> None:
+        snapshots = []
+        relative = "implementation-programs/OTHER/manifest.json"
+        for _ in range(2):
+            with tempfile.TemporaryDirectory() as directory:
+                repository = Path(directory) / "repository"
+                manifest = repository / relative
+                manifest.parent.mkdir(parents=True)
+                manifest.write_text("{", encoding="utf-8")
+
+                freshness = BOOTSTRAP.publication_freshness(
+                    repository, "ARCHIVE-PROGRAM"
+                )
+
+                issue = freshness["discovery"][0]["issues"][0]
+                self.assertTrue(issue.startswith(f"{relative}:"), issue)
+                self.assertNotIn(str(repository), issue)
+                snapshots.append(freshness)
+        self.assertEqual(snapshots[0], snapshots[1])
+
     def test_v3_publication_uses_v2_owner_and_an_immutable_candidate_snapshot(self) -> None:
         self.fixture.configure_setup_v3()
         program_path = self.fixture.candidate / "program/implementation-program.md"

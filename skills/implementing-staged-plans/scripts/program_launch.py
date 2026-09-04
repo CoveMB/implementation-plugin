@@ -213,6 +213,9 @@ def render_program_launch_prompt(program_root: Path) -> str:
     if manifest is None:
         raise ValueError("; ".join(issues))
     if manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA:
+        status, _ = _load_role(root, manifest, "status")
+        if status.get("schema_version") != "implementation-program-status/v3":
+            raise ValueError("manifest v3 requires status v3")
         from program_setup import render_setup_recap
 
         return render_setup_recap(root)
@@ -228,6 +231,9 @@ def validate_submitted_program_launch_prompt(
     if manifest is None:
         raise ValueError("; ".join(issues))
     if manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA:
+        status, _ = _load_role(root, manifest, "status")
+        if status.get("schema_version") != "implementation-program-status/v3":
+            raise ValueError("manifest v3 requires status v3")
         raise ValueError("v3 activation requires a typed setup decision")
     command = parse_exact_prompt(submitted_prompt, LAUNCH_COMMAND_SCHEMA)
     expected = _launch_command(

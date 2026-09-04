@@ -1336,15 +1336,27 @@ def _load_setup_candidate(
     for field in ("program_id", "program_revision", "approval_mode", "source_binding"):
         if status.get(field) != manifest.get(field):
             issues.append(f"status {field} does not match manifest")
+    revision = manifest.get("program_revision")
+    sequence = status.get("state_sequence")
+    revision_valid = type(revision) is int and revision > 0
+    sequence_valid = type(sequence) is int and sequence >= 0
+    if not revision_valid:
+        issues.append("manifest program_revision is invalid")
+    if not sequence_valid:
+        issues.append("status state_sequence is invalid")
+    if not revision_valid or not sequence_valid:
+        return None, None, tuple(
+            f"{display_path}: {issue}" for issue in sorted(set(issues))
+        )
     candidate = ProgramCandidate(
         manifest_path=display_path,
         program_root=_relative_path(repository, root),
         program_id=str(manifest.get("program_id")),
-        program_revision=int(manifest.get("program_revision", 0)),
+        program_revision=revision,
         program_state=str(status.get("program_state")),
         status_path=_relative_path(repository, status_path),
         status_sha256=sha256_file(status_path),
-        status_sequence=int(status.get("state_sequence", -1)),
+        status_sequence=sequence,
     )
     setup_path, setup_path_issues = resolve_managed_path(
         root,
@@ -1695,7 +1707,8 @@ def _single_bootstrap_prefix_disposition(
             else None
         )
         if (
-            owner.get("request_schema_version")
+            not isinstance(freshness, dict)
+            or owner.get("request_schema_version")
             != "implementation-program-proposal-request/v2"
             or actual_freshness_sha256 != expected_freshness_sha256
         ):

@@ -18,6 +18,8 @@ LAUNCH = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = LAUNCH
 sys.path.insert(0, str(SCRIPT_ROOT))
 try:
+    import program_setup as _PROGRAM_SETUP
+
     SPEC.loader.exec_module(LAUNCH)
 finally:
     sys.path.remove(str(SCRIPT_ROOT))
@@ -120,6 +122,41 @@ class ProgramLaunchTests(unittest.TestCase):
                 self.fixture.candidate,
                 recap,
             )
+
+    def test_launch_requires_matching_manifest_and_status_schema_families(
+        self,
+    ) -> None:
+        cases = (
+            (False, "implementation-program-status/v2", False),
+            (False, "implementation-program-status/v3", True),
+            (True, "implementation-program-status/v2", True),
+            (True, "implementation-program-status/v3", False),
+        )
+        for setup_v3, status_schema, rejected in cases:
+            with self.subTest(
+                setup_v3=setup_v3,
+                status_schema=status_schema,
+            ):
+                self.tearDown()
+                self.setUp()
+                if setup_v3:
+                    self.fixture.configure_setup_v3()
+                status_path = self.fixture.candidate / "state/status.json"
+                status = json.loads(status_path.read_text(encoding="utf-8"))
+                status["schema_version"] = status_schema
+                status_path.write_bytes(canonical_json(status))
+
+                if rejected:
+                    with self.assertRaises(ValueError):
+                        LAUNCH.render_program_launch_prompt(self.fixture.candidate)
+                else:
+                    prompt = LAUNCH.render_program_launch_prompt(
+                        self.fixture.candidate
+                    )
+                    if setup_v3:
+                        self.assertIn("Approve this program setup?", prompt)
+                    else:
+                        self.assertIn(LAUNCH.LAUNCH_COMMAND_SCHEMA, prompt)
 
 
 if __name__ == "__main__":

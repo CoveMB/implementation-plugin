@@ -82,6 +82,48 @@ class SetupV3DiscoveryTests(unittest.TestCase):
         self.assertEqual(result.required_input, "first-increment-start-intent")
         self.assertFalse(result.stop_required)
 
+    def test_malformed_setup_revision_and_sequence_return_invalid_discovery(
+        self,
+    ) -> None:
+        cases = (
+            ("program-revision", "manifest program_revision is invalid"),
+            ("state-sequence", "status state_sequence is invalid"),
+        )
+        for case, expected_issue in cases:
+            with self.subTest(case=case):
+                fixture = BootstrapFixture()
+                try:
+                    fixture.configure_setup_v3()
+                    program_root = (
+                        fixture.repository
+                        / "implementation-programs/ARCHIVE-PROGRAM"
+                    )
+                    program_root.parent.mkdir()
+                    shutil.copytree(fixture.candidate, program_root)
+                    manifest_path = program_root / "manifest.json"
+                    status_path = program_root / "state/status.json"
+                    manifest = json.loads(
+                        manifest_path.read_text(encoding="utf-8")
+                    )
+                    status = json.loads(status_path.read_text(encoding="utf-8"))
+                    if case == "program-revision":
+                        manifest["program_revision"] = "one"
+                        status["program_revision"] = "one"
+                        manifest_path.write_bytes(canonical_json(manifest))
+                    else:
+                        status["state_sequence"] = None
+                    status_path.write_bytes(canonical_json(status))
+
+                    result = DISCOVERY.discover_programs(fixture.repository)
+
+                    self.assertEqual(result.disposition, "invalid")
+                    self.assertTrue(
+                        any(expected_issue in issue for issue in result.issues),
+                        result.issues,
+                    )
+                finally:
+                    fixture.close()
+
 
 def sha256_file(path: Path) -> str:
     return DISCOVERY.sha256_file(path)
@@ -342,6 +384,52 @@ class DiscoveryFixture:
 
 
 class ProgramDiscoveryTests(unittest.TestCase):
+    def test_publication_recovery_rejects_non_object_freshness(self) -> None:
+        for label, freshness in (("missing", ...), ("null", None), ("list", [])):
+            with self.subTest(label=label):
+                with tempfile.TemporaryDirectory() as directory:
+                    repository = Path(directory) / "repository"
+                    repository.mkdir()
+                    owner_token = "0" * 16
+                    staging = repository / (
+                        f".implementation-program-ARCHIVE-PROGRAM-{owner_token}"
+                    )
+                    staging.mkdir()
+                    manifest_path = staging / "manifest.json"
+                    manifest_path.write_bytes(canonical_json({}))
+                    owner = {
+                        "schema_version": "implementation-proposal-publication-owner/v2",
+                        "owner_token": owner_token,
+                        "program_id": "ARCHIVE-PROGRAM",
+                        "request_schema_version": (
+                            "implementation-program-proposal-request/v2"
+                        ),
+                        "target": "implementation-programs/ARCHIVE-PROGRAM",
+                        "inventory": [
+                            {
+                                "path": "manifest.json",
+                                "sha256": sha256_file(manifest_path),
+                            }
+                        ],
+                    }
+                    if freshness is not ...:
+                        owner["publication_freshness"] = freshness
+                    (staging / ".publication-owner.json").write_bytes(
+                        canonical_json(owner)
+                    )
+
+                    disposition, issues = DISCOVERY._single_bootstrap_prefix_disposition(
+                        repository, staging
+                    )
+
+                    self.assertEqual(
+                        disposition, "proposal-publication-recovery-required"
+                    )
+                    self.assertEqual(
+                        issues,
+                        ("proposal-publication freshness binding is invalid",),
+                    )
+
     def test_publication_recovery_uses_manifest_roles_after_activation_started(self) -> None:
         fixture = BootstrapFixture()
         try:

@@ -248,7 +248,10 @@ def publication_freshness(
         entry["manifest_sha256"] = sha256_file(manifest_path)
         if manifest is None:
             entry["disposition"] = "invalid"
-            entry["issues"] = manifest_issues
+            entry["issues"] = [
+                issue.replace(str(manifest_path), relative, 1)
+                for issue in manifest_issues
+            ]
             entry["status"] = None
             discovered.append(entry)
             continue
