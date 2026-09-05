@@ -14,6 +14,7 @@ from diff_disposition import (
     DIFF_DISPOSITION_BINDING_SCHEMA,
     DIFF_DISPOSITION_COMMAND_SCHEMA,
     DiffAcceptanceCandidate,
+    _render_accept_continue_envelope,
 )
 from continuity_closure import select_unique_satisfied_successor
 from program_activation import (
@@ -691,9 +692,8 @@ def _render_accept_continue_prompt(
             )
         )
     candidate = build_accept_continue_candidate(acceptance, extension)
-    return (
-        f"Accept and continue to `{extension.successor_increment_id}`.\n\n"
-        f"{candidate.prompt}"
+    return _render_accept_continue_envelope(
+        extension.successor_increment_id, candidate.prompt
     )
 
 

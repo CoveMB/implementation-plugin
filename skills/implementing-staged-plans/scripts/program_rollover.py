@@ -293,7 +293,10 @@ def _continuation_candidate(
     str,
     str,
 ]:
-    from diff_disposition import build_diff_acceptance_candidate
+    from diff_disposition import (
+        _render_accept_continue_envelope,
+        build_diff_acceptance_candidate,
+    )
     from program_continuation import (
         _build_continuation_extension,
         _validate_submitted_continuation_prompt_for_rollover_retry,
@@ -321,9 +324,8 @@ def _continuation_candidate(
     decision = binding.get("decision")
     if decision == "accept-continue":
         continued = build_accept_continue_candidate(acceptance, extension)
-        expected_prompt = (
-            f"Accept and continue to `{extension.successor_increment_id}`.\n\n"
-            f"{continued.prompt}"
+        expected_prompt = _render_accept_continue_envelope(
+            extension.successor_increment_id, continued.prompt
         )
         if submitted_prompt != expected_prompt:
             raise ValueError("submitted immediate continuation prompt is stale")
