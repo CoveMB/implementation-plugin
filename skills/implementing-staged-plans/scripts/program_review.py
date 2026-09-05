@@ -28,7 +28,6 @@ from repository_preparation import (
     validate_execution_workspace,
 )
 from review_coordination import (
-    PACKET_FIELDS,
     RAW_REVIEW_REPORT_SCHEMA,
     REVIEW_EVIDENCE_SCHEMA,
     REVIEW_PACKET_SCHEMA,
