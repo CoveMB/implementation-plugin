@@ -58,6 +58,31 @@ def run_git(repository: Path, *arguments: str) -> str:
     ).stdout.strip()
 
 
+def run_program_discovery(repository: Path) -> dict[str, object]:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(
+                REPOSITORY_ROOT
+                / "skills/implementing-staged-plans/scripts/program_discovery.py"
+            ),
+            "discover",
+            str(repository),
+        ],
+        cwd=REPOSITORY_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode not in {0, 1}:
+        raise AssertionError(
+            f"program discovery exited with {completed.returncode}: {completed.stderr}"
+        )
+    if not completed.stdout.strip():
+        raise AssertionError(f"program discovery returned no JSON: {completed.stderr}")
+    return json.loads(completed.stdout)
+
+
 def repository_snapshot(root: Path) -> dict[str, tuple[str, str]]:
     snapshot: dict[str, tuple[str, str]] = {}
     for path in sorted(root.rglob("*")):

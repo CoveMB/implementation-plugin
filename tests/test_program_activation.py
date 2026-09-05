@@ -11,6 +11,7 @@ from tests.program_bootstrap_support import (
     BootstrapFixture,
     canonical_json,
     repository_snapshot,
+    run_program_discovery,
 )
 
 
@@ -436,21 +437,7 @@ class ExactPlanMaterializationTests(unittest.TestCase):
             fixture.close()
 
     def discover(self, fixture: BootstrapFixture) -> dict[str, object]:
-        completed = subprocess.run(
-            [
-                sys.executable,
-                str(DISCOVERY_PATH),
-                "discover",
-                str(fixture.repository),
-            ],
-            cwd=REPOSITORY_ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertIn(completed.returncode, {0, 1}, completed.stderr)
-        self.assertTrue(completed.stdout.strip(), completed.stderr)
-        return json.loads(completed.stdout)
+        return run_program_discovery(fixture.repository)
 
     def test_standard_mode_waits_for_exact_prompt_then_materializes_in_order(self) -> None:
         fixture = BootstrapFixture()

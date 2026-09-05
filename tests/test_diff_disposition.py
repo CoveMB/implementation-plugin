@@ -1,6 +1,5 @@
 import importlib.util
 import json
-import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -10,6 +9,7 @@ from tests.program_bootstrap_support import (
     BootstrapFixture,
     canonical_json,
     repository_snapshot,
+    run_program_discovery,
     write_raw_review_reports,
 )
 from tests.test_program_activation import ACTIVATION, activated_program, exact_plan_bytes
@@ -20,7 +20,6 @@ from tests.test_program_review import reviewing_program
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "diff_disposition.py"
-DISCOVERY_PATH = SCRIPT_ROOT / "program_discovery.py"
 
 sys.path.insert(0, str(SCRIPT_ROOT))
 try:
@@ -70,15 +69,7 @@ def awaiting_diff_program(successors: dict[str, tuple[str, ...]] | None = None):
 
 class DiffDispositionTests(unittest.TestCase):
     def discover(self, fixture) -> dict[str, object]:
-        completed = subprocess.run(
-            [sys.executable, str(DISCOVERY_PATH), "discover", str(fixture.repository)],
-            cwd=REPOSITORY_ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertIn(completed.returncode, {0, 1}, completed.stderr)
-        return json.loads(completed.stdout)
+        return run_program_discovery(fixture.repository)
 
     def test_prompt_always_offers_only_accept_and_stop_without_successor_input(self) -> None:
         fixture, program_root, _observation = awaiting_diff_program()
