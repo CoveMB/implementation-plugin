@@ -1,4 +1,3 @@
-import importlib.util
 import hashlib
 import json
 import os
@@ -11,21 +10,13 @@ from pathlib import Path
 from unittest import mock
 
 from tests.program_bootstrap_support import BootstrapFixture, repository_snapshot
+from tests.script_module_support import load_script_module
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "program_bootstrap.py"
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC = importlib.util.spec_from_file_location("program_bootstrap", SCRIPT_PATH)
-    if SPEC is None or SPEC.loader is None:
-        raise RuntimeError(f"Unable to load program bootstrap from {SCRIPT_PATH}")
-    BOOTSTRAP = importlib.util.module_from_spec(SPEC)
-    sys.modules[SPEC.name] = BOOTSTRAP
-    SPEC.loader.exec_module(BOOTSTRAP)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+BOOTSTRAP = load_script_module("program_bootstrap", SCRIPT_PATH)
 
 
 class ProgramBootstrapTestCase(unittest.TestCase):

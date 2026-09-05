@@ -1,4 +1,3 @@
-import importlib.util
 import json
 import subprocess
 import sys
@@ -6,6 +5,8 @@ import tempfile
 import unittest
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
+
+from tests.script_module_support import load_script_module
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -18,16 +19,7 @@ FIXTURE_ROOT = (
 FIXTURE_EVIDENCE = FIXTURE_ROOT / "review-evidence.json"
 FIXTURE_PACKET = FIXTURE_ROOT / "review-packet.md"
 
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC = importlib.util.spec_from_file_location("review_coordination", SCRIPT_PATH)
-    if SPEC is None or SPEC.loader is None:
-        raise RuntimeError(f"Unable to load review coordination from {SCRIPT_PATH}")
-    REVIEW = importlib.util.module_from_spec(SPEC)
-    sys.modules[SPEC.name] = REVIEW
-    SPEC.loader.exec_module(REVIEW)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+REVIEW = load_script_module("review_coordination", SCRIPT_PATH)
 
 
 def risk_predicates(**overrides):
@@ -670,6 +662,12 @@ class IntegrationTests(unittest.TestCase):
         changed["schema_version"] = "legacy/v0"
         self.assertTrue(REVIEW.validate_review_bundle(changed, FIXTURE_PACKET.read_text()))
         self.assertTrue(REVIEW.validate_review_bundle({}, "# Review Packet\n"))
+        changed = dict(bundle)
+        changed["findings"] = {}
+        self.assertIn(
+            "review bundle is structurally invalid",
+            REVIEW.validate_review_bundle(changed, FIXTURE_PACKET.read_text()),
+        )
         self.assertTrue(
             REVIEW.validate_review_bundle(
                 bundle, FIXTURE_PACKET.read_text(encoding="utf-8") + "drift"
@@ -684,6 +682,32 @@ class IntegrationTests(unittest.TestCase):
                 )
             )
         )
+
+    def test_bundle_rejects_pair_array_report_and_command_records(self) -> None:
+        packet_text = FIXTURE_PACKET.read_text(encoding="utf-8")
+        for label, mutate in (
+            (
+                "report",
+                lambda bundle: bundle["reports"].__setitem__(
+                    0, list(bundle["reports"][0].items())
+                ),
+            ),
+            (
+                "command",
+                lambda bundle: bundle["final_verification"]["commands"].__setitem__(
+                    0,
+                    list(bundle["final_verification"]["commands"][0].items()),
+                ),
+            ),
+        ):
+            with self.subTest(label=label):
+                bundle = json.loads(FIXTURE_EVIDENCE.read_text(encoding="utf-8"))
+                mutate(bundle)
+
+                self.assertEqual(
+                    REVIEW.validate_review_bundle(bundle, packet_text),
+                    ["review bundle is structurally invalid"],
+                )
 
     def test_cli_returns_zero_one_and_two_without_exposing_bundle_contents(self) -> None:
         valid = subprocess.run(

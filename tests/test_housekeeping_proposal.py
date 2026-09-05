@@ -1,5 +1,4 @@
 import hashlib
-import importlib.util
 import json
 import os
 import shutil
@@ -8,6 +7,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+from tests.script_module_support import load_script_module
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -22,19 +23,7 @@ PROGRAM_FIXTURE = (
 def load_housekeeping_module():
     if not SCRIPT_PATH.is_file():
         return None
-    sys.path.insert(0, str(SCRIPT_ROOT))
-    try:
-        spec = importlib.util.spec_from_file_location(
-            "housekeeping_proposal", SCRIPT_PATH
-        )
-        if spec is None or spec.loader is None:
-            raise RuntimeError(f"Unable to load housekeeping proposal from {SCRIPT_PATH}")
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = module
-        spec.loader.exec_module(module)
-        return module
-    finally:
-        sys.path.remove(str(SCRIPT_ROOT))
+    return load_script_module("housekeeping_proposal", SCRIPT_PATH)
 
 
 HOUSEKEEPING = load_housekeeping_module()

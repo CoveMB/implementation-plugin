@@ -1,7 +1,4 @@
-import importlib.util
 import json
-import subprocess
-import sys
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -10,26 +7,18 @@ from tests.program_bootstrap_support import (
     BootstrapFixture,
     canonical_json,
     repository_snapshot,
+    run_program_discovery,
     write_raw_review_reports,
 )
+from tests.script_module_support import load_script_module
 from tests.test_program_activation import ACTIVATION, activated_program, exact_plan_bytes
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "program_review.py"
-DISCOVERY_PATH = SCRIPT_ROOT / "program_discovery.py"
 
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC = importlib.util.spec_from_file_location("program_review", SCRIPT_PATH)
-    if SPEC is None or SPEC.loader is None:
-        raise RuntimeError(f"Unable to load program review from {SCRIPT_PATH}")
-    REVIEW = importlib.util.module_from_spec(SPEC)
-    sys.modules[SPEC.name] = REVIEW
-    SPEC.loader.exec_module(REVIEW)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+REVIEW = load_script_module("program_review", SCRIPT_PATH)
 
 
 def implementing_program() -> tuple[BootstrapFixture, Path, object]:
@@ -68,15 +57,7 @@ def reviewing_program(
 
 class ProgramReviewTests(unittest.TestCase):
     def discover(self, fixture: BootstrapFixture) -> dict[str, object]:
-        completed = subprocess.run(
-            [sys.executable, str(DISCOVERY_PATH), "discover", str(fixture.repository)],
-            cwd=REPOSITORY_ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertIn(completed.returncode, {0, 1}, completed.stderr)
-        return json.loads(completed.stdout)
+        return run_program_discovery(fixture.repository)
 
     def test_builder_derives_manifest_owned_valid_review_bundle(self) -> None:
         fixture, program_root, observation = reviewing_program()

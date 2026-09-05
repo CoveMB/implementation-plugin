@@ -1,5 +1,4 @@
 import copy
-import importlib.util
 import json
 import sys
 import unittest
@@ -14,47 +13,28 @@ from tests.program_bootstrap_support import (
     repository_snapshot,
     write_raw_review_reports,
 )
+from tests.script_module_support import load_script_module
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "program_setup.py"
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC = importlib.util.spec_from_file_location("program_setup", SCRIPT_PATH)
-    if SPEC is None or SPEC.loader is None:
-        raise RuntimeError(f"Unable to load program setup from {SCRIPT_PATH}")
-    SETUP = importlib.util.module_from_spec(SPEC)
-    sys.modules[SPEC.name] = SETUP
-    SPEC.loader.exec_module(SETUP)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+SETUP = load_script_module("program_setup", SCRIPT_PATH)
 
 
-def load_script(name: str):
-    path = SCRIPT_ROOT / f"{name}.py"
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Unable to load {name} from {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    sys.path.insert(0, str(SCRIPT_ROOT))
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.path.remove(str(SCRIPT_ROOT))
-    return module
-
-
-BOOTSTRAP = load_script("program_bootstrap")
-ACTIVATION = load_script("program_activation")
+BOOTSTRAP = load_script_module(
+    "program_bootstrap", SCRIPT_ROOT / "program_bootstrap.py"
+)
+ACTIVATION = load_script_module(
+    "program_activation", SCRIPT_ROOT / "program_activation.py"
+)
 STATE = sys.modules["state_authority"]
 AUTHORITY = sys.modules["program_authority"]
-REVIEW = load_script("program_review")
-DIFF = load_script("diff_disposition")
-CLOSURE = load_script("program_closure")
-BLOCKED = load_script("blocked_recovery")
-DISCOVERY = load_script("program_discovery")
+REVIEW = load_script_module("program_review", SCRIPT_ROOT / "program_review.py")
+DIFF = load_script_module("diff_disposition", SCRIPT_ROOT / "diff_disposition.py")
+CLOSURE = load_script_module("program_closure", SCRIPT_ROOT / "program_closure.py")
+BLOCKED = load_script_module("blocked_recovery", SCRIPT_ROOT / "blocked_recovery.py")
+DISCOVERY = load_script_module("program_discovery", SCRIPT_ROOT / "program_discovery.py")
 
 
 def gate_definition(
@@ -815,6 +795,121 @@ class SetupActivationTests(unittest.TestCase):
                 )
                 self.assertTrue(recovered.recovered)
                 self.assertEqual(recovered.increment_state, "preparing")
+
+    def test_increment_start_requires_an_exact_integer_sequence(self) -> None:
+        activation = ACTIVATION.activate_program(
+            self.fixture.program_root,
+            self.setup_decision(),
+            self.observation(),
+        )
+        original = SETUP.adapt_increment_start_intent(
+            self.fixture.program_root,
+            activation.handoff,
+            role="user",
+            provenance="direct-user-message",
+        )
+        before = repository_snapshot(self.fixture.program_root)
+        for value in (True, 1.0, "1", None, -1):
+            with self.subTest(value=value):
+                intent = dict(original)
+                intent["waiting_status_sequence"] = value
+                intent_base = dict(intent)
+                intent_base.pop("intent_id")
+                intent["intent_id"] = SETUP.derive_identifier(
+                    "increment-start-intent", intent_base
+                )
+                self.assertIn(
+                    "increment start intent waiting-status binding mismatch",
+                    SETUP.validate_increment_start_intent(
+                        self.fixture.program_root, intent
+                    ),
+                )
+                self.assertEqual(
+                    repository_snapshot(self.fixture.program_root), before
+                )
+
+        missing = dict(original)
+        missing.pop("waiting_status_sequence")
+        missing_base = dict(missing)
+        missing_base.pop("intent_id")
+        missing["intent_id"] = SETUP.derive_identifier(
+            "increment-start-intent", missing_base
+        )
+        self.assertIn(
+            "increment start intent missing field waiting_status_sequence",
+            SETUP.validate_increment_start_intent(self.fixture.program_root, missing),
+        )
+        self.assertEqual(repository_snapshot(self.fixture.program_root), before)
+
+    def test_source_gate_requires_and_persists_exact_integer_sequences(self) -> None:
+        gate = self.reset_with_gate(
+            "before-program-activation", "program:ARCHIVE-PROGRAM"
+        )
+        decision = self.setup_decision()
+        with self.assertRaisesRegex(ValueError, "not durably satisfied"):
+            ACTIVATION.activate_program(
+                self.fixture.program_root, decision, self.observation()
+            )
+        status_path = self.fixture.program_root / "state/status.json"
+        setup = json.loads(
+            (
+                self.fixture.program_root / "state/setup-activation-decision.json"
+            ).read_text(encoding="utf-8")
+        )
+        adapter = SETUP.adapt_source_gate_decision(
+            self.fixture.program_root,
+            str(gate["gate_id"]),
+            str(gate["protected_subject"]),
+            "Yes",
+            role="user",
+            provenance="direct-user-message",
+        )
+        before = repository_snapshot(self.fixture.program_root)
+        for value in (True, 0.0, "0", None, -1):
+            with self.subTest(submitted=value):
+                with self.assertRaisesRegex(ValueError, "status binding"):
+                    SETUP.persist_source_gate_decision(
+                        self.fixture.program_root,
+                        adapter,
+                        status_sha256=SETUP.sha256_file(status_path),
+                        status_sequence=value,
+                        workspace_observation=setup["workspace_observation"],
+                        boundary_authority={
+                            "setup_adapter_id": decision["adapter_id"]
+                        },
+                    )
+                self.assertEqual(
+                    repository_snapshot(self.fixture.program_root), before
+                )
+
+        SETUP.persist_source_gate_decision(
+            self.fixture.program_root,
+            adapter,
+            status_sha256=SETUP.sha256_file(status_path),
+            status_sequence=0,
+            workspace_observation=setup["workspace_observation"],
+            boundary_authority={"setup_adapter_id": decision["adapter_id"]},
+        )
+        ledger = self.fixture.program_root / "state/source-gate-decisions.jsonl"
+        valid_bytes = ledger.read_bytes()
+        valid_record = json.loads(valid_bytes)
+        for value in (True, 0.0, "0", None):
+            with self.subTest(persisted=value):
+                record = dict(valid_record)
+                record["status_sequence"] = value
+                record_base = dict(record)
+                record_base.pop("decision_id")
+                record["decision_id"] = SETUP.derive_identifier(
+                    "source-gate-decision", record_base
+                )
+                ledger.write_bytes(ACTIVATION._canonical_json_line(record))
+                with self.assertRaisesRegex(ValueError, "binding is invalid"):
+                    SETUP.source_gate_satisfaction(
+                        self.fixture.program_root,
+                        "before-program-activation",
+                        "program:ARCHIVE-PROGRAM",
+                    )
+        ledger.write_bytes(valid_bytes)
 
     def test_non_reused_activation_gate_is_durable_before_approval_receipts(self) -> None:
         self.tearDown()

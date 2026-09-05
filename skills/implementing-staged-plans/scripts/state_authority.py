@@ -6,6 +6,8 @@ import ctypes as _ctypes
 import hashlib
 import json
 import os
+import secrets
+import stat
 import sys
 import tempfile
 from collections.abc import Sequence
@@ -566,6 +568,32 @@ class StateTransitionReceipt:
 class AtomicWriteReceipt:
     prior_sha256: str
     current_sha256: str
+
+
+@dataclass(frozen=True)
+class _AtomicParentHandle:
+    path: Path
+    identity: tuple[int, int]
+    descriptor: int | None = None
+    windows_handle: object | None = None
+
+
+class _WindowsFileInformation(_ctypes.Structure):
+    _fields_ = (
+        ("file_attributes", _ctypes.c_uint32),
+        ("creation_time_low", _ctypes.c_uint32),
+        ("creation_time_high", _ctypes.c_uint32),
+        ("last_access_time_low", _ctypes.c_uint32),
+        ("last_access_time_high", _ctypes.c_uint32),
+        ("last_write_time_low", _ctypes.c_uint32),
+        ("last_write_time_high", _ctypes.c_uint32),
+        ("volume_serial_number", _ctypes.c_uint32),
+        ("file_size_high", _ctypes.c_uint32),
+        ("file_size_low", _ctypes.c_uint32),
+        ("number_of_links", _ctypes.c_uint32),
+        ("file_index_high", _ctypes.c_uint32),
+        ("file_index_low", _ctypes.c_uint32),
+    )
 
 
 @dataclass(frozen=True)
@@ -2860,14 +2888,131 @@ def _validate_atomic_target(path: Path) -> None:
         raise ValueError(f"{path}: parent must be a regular directory")
 
 
-def _fsync_directory(path: Path) -> None:
+def _open_atomic_parent(path: Path) -> _AtomicParentHandle:
+    parent = Path(path)
     if _WINDOWS:
-        return
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        if _kernel32 is None:
+            raise OSError("Windows directory binding is unavailable")
+        create_file = _kernel32.CreateFileW
+        get_information = _kernel32.GetFileInformationByHandle
+        create_file.argtypes = (
+            _ctypes.c_wchar_p,
+            _ctypes.c_ulong,
+            _ctypes.c_ulong,
+            _ctypes.c_void_p,
+            _ctypes.c_ulong,
+            _ctypes.c_ulong,
+            _ctypes.c_void_p,
+        )
+        create_file.restype = _ctypes.c_void_p
+        get_information.argtypes = (
+            _ctypes.c_void_p,
+            _ctypes.POINTER(_WindowsFileInformation),
+        )
+        get_information.restype = _ctypes.c_int
+        file_read_attributes = 0x0080
+        file_share_read_write = 0x0001 | 0x0002
+        open_existing = 3
+        file_flag_backup_semantics = 0x02000000
+        file_flag_open_reparse_point = 0x00200000
+        invalid_handle = _ctypes.c_void_p(-1).value
+        handle = create_file(
+            str(parent),
+            file_read_attributes,
+            file_share_read_write,
+            None,
+            open_existing,
+            file_flag_backup_semantics | file_flag_open_reparse_point,
+            None,
+        )
+        if handle in (None, invalid_handle):
+            raise _windows_api_error("CreateFileW parent binding failed")
+        information = _WindowsFileInformation()
+        try:
+            if not get_information(
+                handle, _ctypes.byref(information)
+            ):
+                raise _windows_api_error(
+                    "GetFileInformationByHandle parent binding failed"
+                )
+            file_attribute_directory = 0x0010
+            file_attribute_reparse_point = 0x0400
+            if (
+                not information.file_attributes & file_attribute_directory
+                or information.file_attributes & file_attribute_reparse_point
+            ):
+                raise ValueError(f"{parent}: parent must be a regular directory")
+            identity = (
+                information.volume_serial_number,
+                (information.file_index_high << 32)
+                | information.file_index_low,
+            )
+            return _AtomicParentHandle(
+                path=parent,
+                identity=identity,
+                windows_handle=handle,
+            )
+        except BaseException:
+            _kernel32.CloseHandle(handle)
+            raise
+
+    required_dir_fd = (os.open, os.stat, os.unlink, os.rename)
+    if (
+        not hasattr(os, "O_NOFOLLOW")
+        or any(function not in os.supports_dir_fd for function in required_dir_fd)
+    ):
+        raise OSError("atomic parent binding is unsupported on this platform")
+    descriptor = os.open(
+        parent,
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | os.O_NOFOLLOW
+        | getattr(os, "O_CLOEXEC", 0),
+    )
     try:
-        os.fsync(descriptor)
-    finally:
+        parent_stat = os.fstat(descriptor)
+        if not stat.S_ISDIR(parent_stat.st_mode):
+            raise ValueError(f"{parent}: parent must be a regular directory")
+        return _AtomicParentHandle(
+            path=parent,
+            identity=(parent_stat.st_dev, parent_stat.st_ino),
+            descriptor=descriptor,
+        )
+    except BaseException:
         os.close(descriptor)
+        raise
+
+
+def _close_atomic_parent(parent: _AtomicParentHandle) -> None:
+    if parent.windows_handle is not None:
+        if _kernel32 is None or not _kernel32.CloseHandle(parent.windows_handle):
+            raise _windows_api_error("CloseHandle parent binding failed")
+    elif parent.descriptor is not None:
+        os.close(parent.descriptor)
+
+
+def _parent_path_matches(parent: _AtomicParentHandle) -> bool:
+    if parent.windows_handle is not None:
+        return parent.path.is_dir() and not parent.path.is_symlink()
+    current = parent.path.stat(follow_symlinks=False)
+    return (current.st_dev, current.st_ino) == parent.identity
+
+
+def _fsync_atomic_parent(parent: _AtomicParentHandle) -> None:
+    if parent.descriptor is not None:
+        os.fsync(parent.descriptor)
+
+
+def _sha256_descriptor(descriptor: int) -> str:
+    offset = os.lseek(descriptor, 0, os.SEEK_CUR)
+    digest = hashlib.sha256()
+    try:
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        for chunk in iter(lambda: os.read(descriptor, 1024 * 1024), b""):
+            digest.update(chunk)
+    finally:
+        os.lseek(descriptor, offset, os.SEEK_SET)
+    return digest.hexdigest()
 
 
 def _windows_mutex_name(path: Path) -> str:
@@ -2881,7 +3026,9 @@ def _windows_api_error(operation: str) -> OSError:
     return OSError(error_code, f"{operation}: {_ctypes.FormatError(error_code)}")
 
 
-def _acquire_advisory_lock(path: Path) -> object:
+def _acquire_advisory_lock(
+    path: Path, parent: _AtomicParentHandle
+) -> object:
     if _WINDOWS:
         if _kernel32 is None:
             raise OSError("Windows file locking is unavailable")
@@ -2895,7 +3042,13 @@ def _acquire_advisory_lock(path: Path) -> object:
         raise OSError(f"WaitForSingleObject failed with result {wait_result}")
     if _fcntl is None:
         raise OSError("POSIX file locking is unavailable")
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    if parent.descriptor is None:
+        raise OSError("POSIX parent directory binding is unavailable")
+    descriptor = os.open(
+        path.name,
+        os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+        dir_fd=parent.descriptor,
+    )
     try:
         _fcntl.flock(descriptor, _fcntl.LOCK_EX)
     except BaseException:
@@ -2930,59 +3083,135 @@ def _atomic_replace_bytes(
     _validate_atomic_target(path)
     if not path.is_file():
         raise ValueError(f"{path}: target must be an existing regular file")
-    advisory_lock = _acquire_advisory_lock(path)
+    parent = _open_atomic_parent(path.parent)
     try:
-        if _WINDOWS:
-            target_descriptor = os.open(
-                path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-            )
-            try:
-                target_stat = os.fstat(target_descriptor)
-            finally:
-                os.close(target_descriptor)
-        else:
-            target_stat = os.fstat(int(advisory_lock))
-        prior_sha256 = sha256_file(path)
-        if prior_sha256 != expected_sha256:
-            raise ValueError(
-                f"{path}: digest changed; expected {expected_sha256}, found {prior_sha256}"
-            )
-        temporary_path: Path | None = None
+        if not _parent_path_matches(parent):
+            raise ValueError(f"{path}: parent changed before atomic replacement")
+        advisory_lock = _acquire_advisory_lock(path, parent)
         try:
-            with tempfile.NamedTemporaryFile(
-                mode="wb",
-                dir=path.parent,
-                prefix=f".{path.name}.",
-                suffix=".tmp",
-                delete=False,
-            ) as temporary:
-                temporary_path = Path(temporary.name)
-                temporary.write(payload)
-                temporary.flush()
-                os.fsync(temporary.fileno())
-            current_stat = path.stat(follow_symlinks=False)
-            current_sha256 = sha256_file(path)
-            if (
-                (current_stat.st_dev, current_stat.st_ino)
-                != (target_stat.st_dev, target_stat.st_ino)
-                or current_sha256 != expected_sha256
-            ):
-                raise ValueError(
-                    f"{path}: digest changed; expected {expected_sha256}, "
-                    f"found {current_sha256}"
+            if _WINDOWS:
+                target_descriptor = os.open(
+                    path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
                 )
-            os.replace(temporary_path, path)
-            temporary_path = None
-            _fsync_directory(path.parent)
-            written_sha256 = hashlib.sha256(payload).hexdigest()
-        finally:
-            if temporary_path is not None:
                 try:
-                    temporary_path.unlink()
-                except FileNotFoundError:
-                    pass
+                    target_stat = os.fstat(target_descriptor)
+                    prior_sha256 = _sha256_descriptor(target_descriptor)
+                finally:
+                    os.close(target_descriptor)
+            else:
+                target_descriptor = int(advisory_lock)
+                target_stat = os.fstat(target_descriptor)
+                prior_sha256 = _sha256_descriptor(target_descriptor)
+            if not stat.S_ISREG(target_stat.st_mode):
+                raise ValueError(f"{path}: target must be an existing regular file")
+            if prior_sha256 != expected_sha256:
+                raise ValueError(
+                    f"{path}: digest changed; expected {expected_sha256}, found {prior_sha256}"
+                )
+            if not _parent_path_matches(parent):
+                raise ValueError(f"{path}: parent changed before temporary creation")
+
+            temporary_name: str | None = None
+            try:
+                if _WINDOWS:
+                    with tempfile.NamedTemporaryFile(
+                        mode="wb",
+                        dir=path.parent,
+                        prefix=f".{path.name}.",
+                        suffix=".tmp",
+                        delete=False,
+                    ) as temporary:
+                        temporary_name = temporary.name
+                        temporary.write(payload)
+                        temporary.flush()
+                        os.fsync(temporary.fileno())
+                else:
+                    if parent.descriptor is None:
+                        raise OSError("POSIX parent directory binding is unavailable")
+                    temporary_descriptor: int | None = None
+                    for _attempt in range(128):
+                        candidate_name = f".{path.name}.{secrets.token_hex(12)}.tmp"
+                        try:
+                            temporary_descriptor = os.open(
+                                candidate_name,
+                                os.O_WRONLY
+                                | os.O_CREAT
+                                | os.O_EXCL
+                                | os.O_NOFOLLOW
+                                | getattr(os, "O_CLOEXEC", 0),
+                                0o600,
+                                dir_fd=parent.descriptor,
+                            )
+                            temporary_name = candidate_name
+                            break
+                        except FileExistsError:
+                            continue
+                    if temporary_descriptor is None or temporary_name is None:
+                        raise FileExistsError(
+                            f"{path}: unable to allocate an exclusive temporary file"
+                        )
+                    try:
+                        remaining = memoryview(payload)
+                        while remaining:
+                            written = os.write(temporary_descriptor, remaining)
+                            if written <= 0:
+                                raise OSError("temporary authority write made no progress")
+                            remaining = remaining[written:]
+                        os.fsync(temporary_descriptor)
+                    finally:
+                        os.close(temporary_descriptor)
+
+                if _WINDOWS:
+                    current_descriptor = os.open(
+                        path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                    )
+                else:
+                    current_descriptor = os.open(
+                        path.name,
+                        os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                        dir_fd=parent.descriptor,
+                    )
+                try:
+                    current_stat = os.fstat(current_descriptor)
+                    current_sha256 = _sha256_descriptor(current_descriptor)
+                finally:
+                    os.close(current_descriptor)
+                if (
+                    (current_stat.st_dev, current_stat.st_ino)
+                    != (target_stat.st_dev, target_stat.st_ino)
+                    or current_sha256 != expected_sha256
+                ):
+                    raise ValueError(
+                        f"{path}: digest changed; expected {expected_sha256}, "
+                        f"found {current_sha256}"
+                    )
+                if not _parent_path_matches(parent):
+                    raise ValueError(f"{path}: parent changed before atomic replacement")
+                if _WINDOWS:
+                    os.replace(temporary_name, path)
+                else:
+                    os.replace(
+                        temporary_name,
+                        path.name,
+                        src_dir_fd=parent.descriptor,
+                        dst_dir_fd=parent.descriptor,
+                    )
+                temporary_name = None
+                _fsync_atomic_parent(parent)
+                written_sha256 = hashlib.sha256(payload).hexdigest()
+            finally:
+                if temporary_name is not None:
+                    try:
+                        if _WINDOWS:
+                            Path(temporary_name).unlink()
+                        elif parent.descriptor is not None:
+                            os.unlink(temporary_name, dir_fd=parent.descriptor)
+                    except FileNotFoundError:
+                        pass
+        finally:
+            _release_advisory_lock(advisory_lock)
     finally:
-        _release_advisory_lock(advisory_lock)
+        _close_atomic_parent(parent)
     return AtomicWriteReceipt(prior_sha256, written_sha256)
 
 

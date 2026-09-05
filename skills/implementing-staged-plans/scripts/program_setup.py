@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from program_authority import (
+    _validate_proposal_status,
     load_json_lines,
     load_json_object,
     resolve_managed_path,
@@ -44,6 +46,54 @@ SUPPORTED_GATE_TRIGGERS = (
     "before-program-closure",
 )
 SUPPORTED_GATE_RESPONSE = "unconditional-affirmative-satisfaction"
+SETUP_ACTIVATION_FIELDS = (
+    "schema_version",
+    "program_id",
+    "program_revision",
+    "source_binding",
+    "program_binding",
+    "semantic_decision_identity",
+    "operation_envelope_sha256",
+    "source_gate_definitions_sha256",
+    "recap_checkpoint",
+    "presented_integrity_identity",
+    "decision",
+    "provenance_class",
+    "setup_adapter_id",
+    "setup_adapter_sha256",
+    "workspace_observation",
+    "integrity_drift_classification",
+    "program_approval_event_id",
+    "workspace_approval_event_id",
+    "proposal_status_sha256",
+    "proposal_status_sequence",
+    "decision_id",
+)
+SOURCE_GATE_DECISION_FIELDS = (
+    "schema_version",
+    "gate_id",
+    "gate_definition_sha256",
+    "program_id",
+    "program_revision",
+    "source_binding",
+    "semantic_decision_identity",
+    "setup_activation_decision_id",
+    "setup_activation_decision_sha256",
+    "status_sha256",
+    "status_sequence",
+    "protected_subject",
+    "trigger",
+    "workspace_observation",
+    "gate_recap_checkpoint",
+    "decision",
+    "provenance_class",
+    "gate_adapter_id",
+    "gate_adapter_sha256",
+    "exact_plan_sha256",
+    "execution_baseline_sha256",
+    "boundary_authority",
+    "decision_id",
+)
 
 
 def canonical_json_bytes(value: object) -> bytes:
@@ -89,6 +139,10 @@ def _is_sha256(value: object) -> bool:
 
 def _is_text(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _is_exact_integer(value: object) -> bool:
+    return type(value) is int
 
 
 def _text_list(value: object, *, nonempty: bool = False) -> bool:
@@ -1058,6 +1112,7 @@ def validate_increment_start_intent(
         expected_waiting_sha256 = None
     if (
         intent.get("waiting_status_sha256") != expected_waiting_sha256
+        or not _is_exact_integer(intent.get("waiting_status_sequence"))
         or intent.get("waiting_status_sequence") != 1
     ):
         issues.append("increment start intent waiting-status binding mismatch")
@@ -1225,7 +1280,7 @@ def persist_source_gate_decision(
     root = Path(program_root)
     manifest = _load_manifest(root)
     definition = _validate_gate_adapter(root, adapter)
-    if not _is_sha256(status_sha256) or not isinstance(status_sequence, int):
+    if not _is_sha256(status_sha256) or not _is_exact_integer(status_sequence):
         raise ValueError("source-gate status binding is invalid")
     setup_record, setup_path = _setup_activation_record(root, manifest)
     status, status_path = _load_role(root, manifest, "status")
@@ -1390,7 +1445,7 @@ def source_gate_satisfaction(
                 or decision.get("provenance_class") != DIRECT_USER_PROVENANCE
                 or not _is_text(decision.get("gate_adapter_id"))
                 or not _is_sha256(decision.get("gate_adapter_sha256"))
-                or not isinstance(decision.get("status_sequence"), int)
+                or not _is_exact_integer(decision.get("status_sequence"))
                 or not _is_sha256(decision.get("status_sha256"))
                 or not isinstance(decision.get("workspace_observation"), dict)
                 or not isinstance(decision.get("boundary_authority"), dict)
@@ -1425,49 +1480,22 @@ def source_gate_satisfaction(
     }
 
 
-def validate_setup_activation_authority(program_root: Path) -> list[str]:
-    """Validate the durable v3 setup decision and its derived activation receipts."""
-    root = Path(program_root)
-    try:
-        manifest = _load_manifest(root)
-        setup, setup_path = _setup_activation_record(root, manifest)
-        approvals, _ = _load_role(root, manifest, "approvals", json_lines=True)
-        status, _ = _load_role(root, manifest, "status")
-        gates, _ = _load_role(
-            root, manifest, "source_gate_decisions", json_lines=True
-        )
-    except ValueError as error:
-        return [str(error)]
-    issues: list[str] = []
-    expected_setup_fields = (
-        "schema_version",
-        "program_id",
-        "program_revision",
-        "source_binding",
-        "program_binding",
-        "semantic_decision_identity",
-        "operation_envelope_sha256",
-        "source_gate_definitions_sha256",
-        "recap_checkpoint",
-        "presented_integrity_identity",
-        "decision",
-        "provenance_class",
-        "setup_adapter_id",
-        "setup_adapter_sha256",
-        "workspace_observation",
-        "integrity_drift_classification",
-        "program_approval_event_id",
-        "workspace_approval_event_id",
-        "proposal_status_sha256",
-        "proposal_status_sequence",
-        "decision_id",
-    )
-    issues.extend(
-        _exact_fields(setup, expected_setup_fields, "setup-activation decision")
+def _setup_activation_record_issues(
+    root: Path,
+    manifest: Mapping[str, object],
+    setup: Mapping[str, object],
+) -> list[str]:
+    issues = _exact_fields(
+        dict(setup), SETUP_ACTIVATION_FIELDS, "setup-activation decision"
     )
     setup_base = dict(setup)
     decision_id = setup_base.pop("decision_id", None)
     semantics = manifest.get("setup_semantics")
+    try:
+        expected_checkpoint = setup_recap_checkpoint(root)
+    except ValueError as error:
+        expected_checkpoint = None
+        issues.append(str(error))
     if (
         setup.get("schema_version") != SETUP_ACTIVATION_SCHEMA
         or setup.get("program_id") != manifest.get("program_id")
@@ -1481,8 +1509,19 @@ def validate_setup_activation_authority(program_root: Path) -> list[str]:
         != value_sha256(semantics.get("operation_envelope"))
         or setup.get("source_gate_definitions_sha256")
         != manifest.get("source_gate_definitions_sha256")
+        or setup.get("recap_checkpoint") != expected_checkpoint
+        or setup.get("presented_integrity_identity")
+        != (
+            expected_checkpoint.get("presented_integrity_identity")
+            if isinstance(expected_checkpoint, dict)
+            else None
+        )
         or setup.get("decision") != "approved"
         or setup.get("provenance_class") != DIRECT_USER_PROVENANCE
+        or setup.get("integrity_drift_classification")
+        != "visible-decision-unchanged"
+        or not isinstance(setup.get("workspace_observation"), dict)
+        or not setup.get("workspace_observation")
         or setup.get("proposal_status_sequence") != 0
         or decision_id != _identifier("setup-activation-decision", setup_base)
     ):
@@ -1497,6 +1536,248 @@ def validate_setup_activation_authority(program_root: Path) -> list[str]:
     for field in ("setup_adapter_sha256", "proposal_status_sha256"):
         if not _is_sha256(setup.get(field)):
             issues.append(f"setup-activation decision {field} is invalid")
+    return sorted(set(issues))
+
+
+def _activation_gate_record_issues(
+    root: Path,
+    manifest: Mapping[str, object],
+    setup: Mapping[str, object],
+    setup_path: Path,
+    definition: Mapping[str, object],
+    record: Mapping[str, object],
+) -> list[str]:
+    gate_id = str(definition.get("gate_id"))
+    issues = _exact_fields(
+        dict(record), SOURCE_GATE_DECISION_FIELDS, f"source gate {gate_id} decision"
+    )
+    try:
+        recap = render_source_gate_recap(
+            root, gate_id, str(definition.get("protected_subject"))
+        )
+        expected_checkpoint = _gate_recap_checkpoint(root, definition, recap)
+    except ValueError as error:
+        expected_checkpoint = None
+        issues.append(str(error))
+    decision_base = dict(record)
+    decision_id = decision_base.pop("decision_id", None)
+    if (
+        record.get("schema_version") != SOURCE_GATE_DECISION_SCHEMA
+        or record.get("gate_id") != definition.get("gate_id")
+        or record.get("gate_definition_sha256") != value_sha256(definition)
+        or record.get("program_id") != manifest.get("program_id")
+        or record.get("program_revision") != manifest.get("program_revision")
+        or record.get("source_binding") != manifest.get("source_binding")
+        or record.get("semantic_decision_identity")
+        != setup_semantic_identity(manifest)
+        or record.get("setup_activation_decision_id") != setup.get("decision_id")
+        or record.get("setup_activation_decision_sha256")
+        != sha256_file(setup_path)
+        or record.get("status_sha256") != setup.get("proposal_status_sha256")
+        or not _is_exact_integer(record.get("status_sequence"))
+        or record.get("status_sequence") != setup.get("proposal_status_sequence")
+        or record.get("protected_subject") != definition.get("protected_subject")
+        or record.get("trigger") != "before-program-activation"
+        or record.get("workspace_observation") != setup.get("workspace_observation")
+        or record.get("gate_recap_checkpoint") != expected_checkpoint
+        or record.get("decision") != "satisfied"
+        or record.get("provenance_class") != DIRECT_USER_PROVENANCE
+        or not _is_text(record.get("gate_adapter_id"))
+        or not _is_sha256(record.get("gate_adapter_sha256"))
+        or record.get("exact_plan_sha256") is not None
+        or record.get("execution_baseline_sha256") is not None
+        or record.get("boundary_authority")
+        != {"setup_adapter_id": setup.get("setup_adapter_id")}
+        or decision_id != _identifier("source-gate-decision", decision_base)
+    ):
+        issues.append(f"source gate {gate_id} decision binding is invalid")
+    return sorted(set(issues))
+
+
+def _activation_approval_prefix_issues(
+    root: Path,
+    manifest: Mapping[str, object],
+    setup: Mapping[str, object],
+    setup_path: Path,
+    approvals: Sequence[Mapping[str, object]],
+    gate_satisfaction: Mapping[str, object],
+    workspace_path: Path,
+) -> list[str]:
+    expected_types = (
+        ("program-approval", setup.get("program_approval_event_id")),
+        ("workspace-selection-approval", setup.get("workspace_approval_event_id")),
+    )
+    actual = tuple(
+        (record.get("type"), record.get("event_id")) for record in approvals
+    )
+    if len(actual) > len(expected_types) or actual != expected_types[: len(actual)]:
+        return ["v3 activation approvals are not an exact ordered prefix"]
+    try:
+        activation_module = importlib.import_module("program_activation")
+        candidate_builder = getattr(
+            activation_module, "_v3_activation_candidates", None
+        )
+        if not callable(candidate_builder):
+            raise ValueError("v3 activation candidate builder is unavailable")
+        expected_program, expected_workspace, _ = candidate_builder(
+            root,
+            dict(manifest),
+            dict(setup),
+            sha256_file(setup_path),
+            dict(gate_satisfaction),
+            workspace_path,
+        )
+    except (AttributeError, ImportError, KeyError, OSError, TypeError, ValueError) as error:
+        return [f"v3 activation approval candidates are unavailable: {error}"]
+    expected_records = (expected_program, expected_workspace)
+    return sorted(
+        {
+            f"v3 {expected_types[index][0]} receipt binding mismatch"
+            for index, record in enumerate(approvals)
+            if canonical_identity_bytes(dict(record))
+            != canonical_identity_bytes(expected_records[index])
+        }
+    )
+
+
+def inspect_sequence_zero_activation_prefix(
+    program_root: Path,
+) -> dict[str, object]:
+    """Classify a read-only, owner-bound v3 activation transaction prefix."""
+    root = Path(program_root)
+    try:
+        manifest = _load_manifest(root)
+        status, status_path = _load_role(root, manifest, "status")
+        traceability, _ = _load_role(root, manifest, "traceability")
+        approvals, _ = _load_role(root, manifest, "approvals", json_lines=True)
+        gates, _ = _load_role(
+            root, manifest, "source_gate_decisions", json_lines=True
+        )
+        grants, _ = _load_role(root, manifest, "increment_grants", json_lines=True)
+        actions, _ = _load_role(
+            root, manifest, "action_authorizations", json_lines=True
+        )
+        _, workspace_path = _load_role(root, manifest, "workspace")
+        setup_path, setup_path_issues = resolve_managed_path(
+            root,
+            manifest.get("logical_roles", {}).get("setup_activation_decision"),
+            role="logical role setup_activation_decision",
+            require_file=False,
+        )
+        if setup_path is None:
+            raise ValueError("; ".join(setup_path_issues))
+    except (AttributeError, ValueError) as error:
+        return {"state": "invalid", "issues": [str(error)]}
+
+    issues = validate_setup_semantics(root)
+    if manifest.get("schema_version") != MANIFEST_SCHEMA_V3:
+        issues.append("activation prefix requires manifest v3")
+    if not isinstance(traceability, dict):
+        issues.append("activation prefix traceability must be an object")
+    else:
+        issues.extend(_validate_proposal_status(manifest, traceability, status))
+    if grants or actions:
+        issues.append("v3 proposal contains authority outside the activation prefix")
+    setup_exists = setup_path.exists() or setup_path.is_symlink()
+    if not setup_exists:
+        if approvals or gates:
+            issues.append("v3 proposal has activation records without its setup decision")
+        return {
+            "state": "invalid" if issues else "pristine",
+            "issues": sorted(set(issues)),
+        }
+
+    setup, setup_issues = load_json_object(setup_path)
+    if setup is None:
+        issues.extend(setup_issues)
+        return {"state": "invalid", "issues": sorted(set(issues))}
+    issues.extend(_setup_activation_record_issues(root, manifest, setup))
+    if setup.get("proposal_status_sha256") != sha256_file(status_path):
+        issues.append("setup-activation proposal status digest mismatch")
+
+    definitions = [
+        definition
+        for definition in _gate_definitions(manifest)
+        if definition.get("trigger") == "before-program-activation"
+        and definition.get("protected_subject")
+        == f"program:{manifest.get('program_id')}"
+        and definition.get("setup_reuse") is False
+    ]
+    actual_ids = [record.get("gate_id") for record in gates]
+    expected_ids = [definition.get("gate_id") for definition in definitions]
+    if len(actual_ids) > len(expected_ids) or actual_ids != expected_ids[: len(actual_ids)]:
+        issues.append("before-program-activation source gates are not an exact prefix")
+    else:
+        for definition, record in zip(
+            definitions[: len(gates)], gates, strict=True
+        ):
+            issues.extend(
+                _activation_gate_record_issues(
+                    root, manifest, setup, setup_path, definition, record
+                )
+            )
+    if len(gates) < len(definitions):
+        if approvals:
+            issues.append("v3 activation approvals precede required source gates")
+        pending = definitions[len(gates)]
+        try:
+            recap = render_source_gate_recap(
+                root,
+                str(pending["gate_id"]),
+                str(pending["protected_subject"]),
+            )
+        except (KeyError, ValueError) as error:
+            issues.append(str(error))
+            recap = None
+        return {
+            "state": "invalid" if issues else "pending-gate",
+            "gate_id": pending.get("gate_id"),
+            "protected_subject": pending.get("protected_subject"),
+            "recap": recap,
+            "issues": sorted(set(issues)),
+        }
+
+    try:
+        satisfaction = source_gate_satisfaction(
+            root,
+            "before-program-activation",
+            f"program:{manifest['program_id']}",
+        )
+    except (KeyError, ValueError) as error:
+        issues.append(str(error))
+        satisfaction = {}
+    issues.extend(
+        _activation_approval_prefix_issues(
+            root,
+            manifest,
+            setup,
+            setup_path,
+            approvals,
+            satisfaction,
+            workspace_path,
+        )
+    )
+    return {
+        "state": "invalid" if issues else "activation-retry-ready",
+        "issues": sorted(set(issues)),
+    }
+
+
+def validate_setup_activation_authority(program_root: Path) -> list[str]:
+    """Validate the durable v3 setup decision and its derived activation receipts."""
+    root = Path(program_root)
+    try:
+        manifest = _load_manifest(root)
+        setup, setup_path = _setup_activation_record(root, manifest)
+        approvals, _ = _load_role(root, manifest, "approvals", json_lines=True)
+        status, _ = _load_role(root, manifest, "status")
+        gates, _ = _load_role(
+            root, manifest, "source_gate_decisions", json_lines=True
+        )
+    except ValueError as error:
+        return [str(error)]
+    issues = _setup_activation_record_issues(root, manifest, setup)
+    decision_id = setup.get("decision_id")
 
     setup_sha256 = sha256_file(setup_path)
     expected_satisfaction: dict[str, object] | None

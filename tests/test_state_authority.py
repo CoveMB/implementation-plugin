@@ -1,10 +1,8 @@
 import copy
 import hashlib
-import importlib.util
 import json
 import os
 import shutil
-import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -17,6 +15,7 @@ from tests.program_bootstrap_support import (
     canonical_json,
     repository_snapshot,
 )
+from tests.script_module_support import load_script_module
 from tests.test_program_activation import activated_program
 
 
@@ -32,16 +31,7 @@ STATE_OVERLAY = (
     / "tests/fixtures/state-authorization/portable-archive-run"
 )
 
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC = importlib.util.spec_from_file_location("state_authority", STATE_AUTHORITY_PATH)
-    if SPEC is None or SPEC.loader is None:
-        raise RuntimeError(f"Unable to load state authority from {STATE_AUTHORITY_PATH}")
-    AUTHORITY = importlib.util.module_from_spec(SPEC)
-    sys.modules[SPEC.name] = AUTHORITY
-    SPEC.loader.exec_module(AUTHORITY)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+AUTHORITY = load_script_module("state_authority", STATE_AUTHORITY_PATH)
 
 from tests.test_diff_disposition import awaiting_diff_program
 from tests.test_blocked_recovery import BLOCKED, block_request, implementing_program
@@ -1064,7 +1054,7 @@ class ActionAuthorizationTests(StateAuthorityTestCase):
         self.assertIn("conflicting action authorization records", decision.issues)
 
 
-class AtomicPersistenceTests(unittest.TestCase):
+class AtomicAuthorityWriterTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
@@ -1155,7 +1145,7 @@ class AtomicPersistenceTests(unittest.TestCase):
         with (
             mock.patch.object(
                 AUTHORITY,
-                "sha256_file",
+                "_sha256_descriptor",
                 side_effect=(old_sha256, "f" * 64),
             ),
             mock.patch.object(AUTHORITY.os, "replace") as replace,
@@ -1189,9 +1179,19 @@ class AtomicPersistenceTests(unittest.TestCase):
         write_json(path, {"schema_version": "record/v1", "value": 1})
         windows_backend = mock.Mock()
         windows_backend.CreateMutexW.return_value = 71
+        windows_backend.CreateFileW.return_value = 72
         windows_backend.WaitForSingleObject.return_value = 0
         windows_backend.ReleaseMutex.return_value = 1
         windows_backend.CloseHandle.return_value = 1
+
+        def describe_parent(_handle: object, information: object) -> int:
+            details = information._obj
+            details.file_attributes = 0x0010
+            details.volume_serial_number = 4
+            details.file_index_low = 9
+            return 1
+
+        windows_backend.GetFileInformationByHandle.side_effect = describe_parent
         file_events: list[str] = []
         real_close = AUTHORITY.os.close
         real_replace = AUTHORITY.os.replace
@@ -1219,10 +1219,71 @@ class AtomicPersistenceTests(unittest.TestCase):
 
         self.assertEqual(receipt.current_sha256, sha256_file(path))
         windows_backend.CreateMutexW.assert_called_once()
+        windows_backend.CreateFileW.assert_called_once()
         windows_backend.WaitForSingleObject.assert_called_once_with(71, 0xFFFFFFFF)
         windows_backend.ReleaseMutex.assert_called_once_with(71)
-        windows_backend.CloseHandle.assert_called_once_with(71)
+        windows_backend.CloseHandle.assert_any_call(71)
+        windows_backend.CloseHandle.assert_any_call(72)
+        self.assertEqual(windows_backend.CloseHandle.call_count, 2)
         self.assertLess(file_events.index("close"), file_events.index("replace"))
+
+    @unittest.skipIf(os.name == "nt", "POSIX directory descriptor regression")
+    def test_parent_namespace_substitution_fails_before_publication(self) -> None:
+        parent = self.root / "authority"
+        parent.mkdir()
+        path = parent / "status.json"
+        write_json(path, {"schema_version": "record/v1", "value": 1})
+        old_bytes = path.read_bytes()
+        moved_parent = self.root / "authority-original"
+        original_check = AUTHORITY._parent_path_matches
+        calls = 0
+
+        def substitute_before_replace(handle: object) -> bool:
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                parent.rename(moved_parent)
+                parent.mkdir()
+                (parent / "status.json").write_bytes(old_bytes)
+            return original_check(handle)
+
+        try:
+            with mock.patch.object(
+                AUTHORITY,
+                "_parent_path_matches",
+                side_effect=substitute_before_replace,
+            ):
+                with self.assertRaisesRegex(ValueError, "parent changed"):
+                    AUTHORITY.atomic_replace_json(
+                        path,
+                        {"schema_version": "record/v1", "value": 2},
+                        sha256_file(path),
+                    )
+
+            self.assertEqual((moved_parent / "status.json").read_bytes(), old_bytes)
+            self.assertEqual((parent / "status.json").read_bytes(), old_bytes)
+            self.assertEqual(list(moved_parent.glob(".status.json.*.tmp")), [])
+        finally:
+            if moved_parent.exists():
+                shutil.rmtree(parent)
+                moved_parent.rename(parent)
+
+    @unittest.skipIf(os.name == "nt", "POSIX capability gate")
+    def test_parent_binding_capability_failure_precedes_temporary_write(self) -> None:
+        path = self.root / "status.json"
+        write_json(path, {"schema_version": "record/v1", "value": 1})
+        old_bytes = path.read_bytes()
+
+        with mock.patch.object(AUTHORITY.os, "supports_dir_fd", set()):
+            with self.assertRaisesRegex(OSError, "parent binding is unsupported"):
+                AUTHORITY.atomic_replace_json(
+                    path,
+                    {"schema_version": "record/v1", "value": 2},
+                    sha256_file(path),
+                )
+
+        self.assertEqual(path.read_bytes(), old_bytes)
+        self.assertEqual(list(self.root.glob(".status.json.*.tmp")), [])
 
     @unittest.skipUnless(os.name == "nt", "requires native Windows rename semantics")
     def test_native_windows_compare_and_swap_replaces_closed_destination(self) -> None:
@@ -1285,6 +1346,90 @@ class ClosureStorageResolutionTests(unittest.TestCase):
                     "packet": root / "closure/closure-packet.md",
                 },
             )
+
+    def test_closure_resolution_rechecks_cross_class_destination_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_json(
+                root / "manifest.json",
+                {
+                    "schema_version": "implementation-program-manifest/v2",
+                    "logical_roles": {
+                        "status": "closure/reconciliation.json",
+                    },
+                    "increment_storage": {
+                        "schema_version": "implementation-increment-storage/v1",
+                        "root": "increments",
+                        "brief_filename": "brief.md",
+                        "exact_file_plan_filename": "exact-file-plan.md",
+                        "execution_baseline_filename": "execution-baseline.json",
+                        "review_evidence_filename": "review-evidence.json",
+                        "review_packet_filename": "review-packet.md",
+                        "handoff_filename": "handoff.md",
+                    },
+                    "closure_storage": {
+                        "schema_version": "implementation-closure-storage/v1",
+                        "root": "closure",
+                        "reconciliation_filename": "reconciliation.json",
+                        "packet_filename": "closure-packet.md",
+                    },
+                },
+            )
+            closure_globals = AUTHORITY.resolve_program_closure_paths.__globals__
+            with mock.patch.dict(
+                closure_globals,
+                {
+                    "_directory_name_semantics": mock.Mock(
+                        return_value=closure_globals["_DirectoryNameSemantics"](
+                            case_sensitive=True,
+                            normalizes_unicode=False,
+                        )
+                    )
+                },
+            ):
+                with self.assertRaisesRegex(ValueError, "duplicate filesystem targets"):
+                    AUTHORITY.resolve_program_closure_paths(root)
+
+    def test_closure_resolution_rechecks_allocated_increment_destinations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_json(
+                root / "program/traceability.json",
+                {
+                    "atomic_requirements": [
+                        {"assigned_increments": ["ARCHIVE-INDEX"]}
+                    ]
+                },
+            )
+            write_json(
+                root / "manifest.json",
+                {
+                    "schema_version": "implementation-program-manifest/v2",
+                    "logical_roles": {
+                        "status": "increments/ARCHIVE-INDEX/review-evidence.json",
+                        "traceability": "program/traceability.json",
+                    },
+                    "increment_storage": {
+                        "schema_version": "implementation-increment-storage/v1",
+                        "root": "increments",
+                        "brief_filename": "brief.md",
+                        "exact_file_plan_filename": "exact-file-plan.md",
+                        "execution_baseline_filename": "execution-baseline.json",
+                        "review_evidence_filename": "review-evidence.json",
+                        "review_packet_filename": "review-packet.md",
+                        "handoff_filename": "handoff.md",
+                    },
+                    "closure_storage": {
+                        "schema_version": "implementation-closure-storage/v1",
+                        "root": "closure",
+                        "reconciliation_filename": "reconciliation.json",
+                        "packet_filename": "closure-packet.md",
+                    },
+                },
+            )
+
+            with self.assertRaisesRegex(ValueError, "duplicate filesystem targets"):
+                AUTHORITY.resolve_program_closure_paths(root)
 
 
 class StateApplicationAndCliTests(StateAuthorityTestCase):

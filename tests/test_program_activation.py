@@ -1,4 +1,3 @@
-import importlib.util
 import json
 import shutil
 import subprocess
@@ -11,23 +10,16 @@ from tests.program_bootstrap_support import (
     BootstrapFixture,
     canonical_json,
     repository_snapshot,
+    run_program_discovery,
 )
+from tests.script_module_support import load_script_module
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills" / "implementing-staged-plans" / "scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "program_activation.py"
 DISCOVERY_PATH = SCRIPT_ROOT / "program_discovery.py"
-SPEC = importlib.util.spec_from_file_location("program_activation", SCRIPT_PATH)
-if SPEC is None or SPEC.loader is None:
-    raise RuntimeError(f"Unable to load program activation from {SCRIPT_PATH}")
-ACTIVATION = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = ACTIVATION
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC.loader.exec_module(ACTIVATION)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+ACTIVATION = load_script_module("program_activation", SCRIPT_PATH)
 
 
 def proposal_observation(fixture: BootstrapFixture):
@@ -436,21 +428,7 @@ class ExactPlanMaterializationTests(unittest.TestCase):
             fixture.close()
 
     def discover(self, fixture: BootstrapFixture) -> dict[str, object]:
-        completed = subprocess.run(
-            [
-                sys.executable,
-                str(DISCOVERY_PATH),
-                "discover",
-                str(fixture.repository),
-            ],
-            cwd=REPOSITORY_ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertIn(completed.returncode, {0, 1}, completed.stderr)
-        self.assertTrue(completed.stdout.strip(), completed.stderr)
-        return json.loads(completed.stdout)
+        return run_program_discovery(fixture.repository)
 
     def test_standard_mode_waits_for_exact_prompt_then_materializes_in_order(self) -> None:
         fixture = BootstrapFixture()

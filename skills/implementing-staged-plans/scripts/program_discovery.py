@@ -34,6 +34,7 @@ from program_launch import (
     render_program_launch_prompt,
     validate_submitted_program_launch_prompt,
 )
+from program_setup import inspect_sequence_zero_activation_prefix
 from program_review import build_review_preparation
 from diff_disposition import build_diff_acceptance_candidate
 from program_closure import (
@@ -52,32 +53,16 @@ from state_authority import (
 
 RESUMABLE_PROGRAM_STATES = frozenset({"active", "blocked"})
 SUPPORTED_PROGRAM_STATES = frozenset({*RESUMABLE_PROGRAM_STATES, "closed"})
-PLAN_A_DISCOVERY_DISPOSITIONS = frozenset(
-    {
-        "new-program-bootstrap-ready",
-        "proposal-publication-retry-ready",
-        "program-activation-ready",
-        "program-activation-retry-ready",
-        "plan-preparation-retry-ready",
-        "plan-materialization-retry-ready",
-        "review-preparation-retry-ready",
-        "increment-acceptance-retry-ready",
-        "accepted-continuation-retry-ready",
-        "closure-preparation-retry-ready",
-        "closure-approval-retry-ready",
-        "resume",
-        "program-setup-ready",
-        "first-increment-start-ready",
-        "accepted-stop",
-        "closure-approval-ready",
-        "terminal-programs",
-    }
-)
 PLAN_A_ROUTE_DETAILS = {
     "program-setup-ready": (
         "program-setup-approval",
         "Present the readable program setup recap and wait for a direct answer.",
         False,
+    ),
+    "source-gate-approval-ready": (
+        "source-gate-approval",
+        "Present the current source-gate recap and wait for a direct answer.",
+        True,
     ),
     "first-increment-start-ready": (
         "first-increment-start-intent",
@@ -252,7 +237,6 @@ NEW_PROGRAM_STATES = frozenset(
     }
 )
 SUPPORTED_PROGRAM_OPERATIONS = frozenset({"create", "activate", "continue"})
-UNSUPPORTED_LIVE_PROGRAM_MUTATIONS = frozenset({"revise", "supersede", "cancel"})
 
 
 @dataclass(frozen=True)
@@ -1396,31 +1380,22 @@ def _load_setup_candidate(
     increment_state = status.get("current_increment_state")
     setup_exists = bool(setup_path and (setup_path.exists() or setup_path.is_symlink()))
     if sequence == 0:
-        if (program_state, increment_state) != (
-            "awaiting-program-approval",
-            "not-started",
-        ) or grants or actions:
-            issues.append("v3 proposal contains authority outside the activation prefix")
-        if not setup_exists:
-            if approvals:
-                issues.append("v3 proposal has approvals without its setup decision")
+        prefix = inspect_sequence_zero_activation_prefix(root)
+        issues.extend(str(issue) for issue in prefix.get("issues", []))
+        prefix_state = prefix.get("state")
+        if prefix_state == "pristine":
             issues.extend(
                 validate_program_authority(
                     root, validation_mode=PROPOSAL_VALIDATION_MODE
                 )
             )
             route = "program-setup-ready"
-        else:
-            setup, setup_issues = load_json_object(setup_path)
-            issues.extend(setup_issues)
-            expected_ids = (
-                setup.get("program_approval_event_id") if setup else None,
-                setup.get("workspace_approval_event_id") if setup else None,
-            )
-            actual = tuple(record.get("event_id") for record in approvals)
-            if len(actual) > 2 or actual != expected_ids[: len(actual)]:
-                issues.append("v3 activation records are not an ordered transaction prefix")
+        elif prefix_state == "pending-gate":
+            route = "source-gate-approval-ready"
+        elif prefix_state == "activation-retry-ready":
             route = "program-activation-retry-ready"
+        else:
+            issues.append("v3 activation prefix is invalid")
         if issues:
             return candidate, None, tuple(
                 f"{display_path}: {issue}" for issue in sorted(set(issues))
@@ -1785,14 +1760,6 @@ def _single_bootstrap_prefix_disposition(
                     "proposal-publication-recovery-required",
                     tuple(status_issues),
                 )
-            activation_started = (
-                isinstance(status, dict)
-                and status.get("current_increment_state") != "not-started"
-            ) or (
-                approvals_path.is_file()
-                and not approvals_path.is_symlink()
-                and bool(approvals_path.read_bytes())
-            )
             target_owner = target / ".publication-owner.json"
             if (
                 target_owner.is_symlink()
@@ -1802,6 +1769,33 @@ def _single_bootstrap_prefix_disposition(
                 return (
                     "proposal-publication-recovery-required",
                     ("publication owner receipt differs",),
+                )
+            if committed_manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA:
+                if (
+                    status.get("state_sequence") == 0
+                    and status.get("program_state") == "awaiting-program-approval"
+                    and status.get("current_increment_state") == "not-started"
+                ):
+                    prefix = inspect_sequence_zero_activation_prefix(target)
+                    prefix_issues = tuple(
+                        str(issue) for issue in prefix.get("issues", [])
+                    )
+                    if prefix.get("state") == "invalid" or prefix_issues:
+                        return (
+                            "proposal-publication-recovery-required",
+                            prefix_issues or ("v3 activation prefix is invalid",),
+                        )
+                    activation_started = prefix.get("state") != "pristine"
+                else:
+                    activation_started = True
+            else:
+                activation_started = (
+                    isinstance(status, dict)
+                    and status.get("current_increment_state") != "not-started"
+                ) or (
+                    approvals_path.is_file()
+                    and not approvals_path.is_symlink()
+                    and bool(approvals_path.read_bytes())
                 )
         if any(target.iterdir()) and not activation_started:
             target_issue = _publication_tree_issue(target, expected, owner_bytes)
@@ -2228,6 +2222,27 @@ def discover_programs(
         if len(candidates) == 1:
             route = routes.get(candidates[0].manifest_path, "resume")
             required_input, next_action, stop_required = PLAN_A_ROUTE_DETAILS[route]
+            if route == "source-gate-approval-ready":
+                prefix = inspect_sequence_zero_activation_prefix(
+                    repository / candidates[0].program_root
+                )
+                recap = prefix.get("recap")
+                if not isinstance(recap, str) or not recap:
+                    return ProgramDiscoveryResult(
+                        disposition="invalid",
+                        required_input=None,
+                        source_plan_path=None,
+                        candidates=tuple(candidates),
+                        closed_programs=tuple(closed),
+                        resume_expectations=None,
+                        issues=("pending source-gate recap is unavailable",),
+                        next_action="Correct the invalid source-gate prefix and rerun discovery.",
+                        stop_required=True,
+                    )
+                next_action = (
+                    "Present this exact source-gate recap and wait for a direct answer:\n\n"
+                    + recap
+                )
             return ProgramDiscoveryResult(
                 disposition=route,
                 required_input=required_input,

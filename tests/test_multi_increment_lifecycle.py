@@ -9,15 +9,12 @@ from tests import program_bootstrap_support as bootstrap_support
 from tests.program_bootstrap_support import (
     BootstrapFixture,
     repository_snapshot,
+    run_program_discovery,
 )
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SUPPORT_PATH = REPOSITORY_ROOT / "tests/program_bootstrap_support.py"
-DISCOVERY_PATH = (
-    REPOSITORY_ROOT
-    / "skills/implementing-staged-plans/scripts/program_discovery.py"
-)
 COMPATIBILITY_FIXTURE = (
     REPOSITORY_ROOT / "tests/fixtures/program-bootstrap/v0.1.1"
 )
@@ -142,20 +139,7 @@ class MultiIncrementLifecycleTests(unittest.TestCase):
         self.fixture.configure_approval_mode(approval_mode)
 
     def discover(self) -> dict[str, object]:
-        completed = subprocess.run(
-            [
-                sys.executable,
-                str(DISCOVERY_PATH),
-                "discover",
-                str(self.fixture.repository),
-            ],
-            cwd=REPOSITORY_ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertIn(completed.returncode, {0, 1}, completed.stderr)
-        return json.loads(completed.stdout)
+        return run_program_discovery(self.fixture.repository)
 
     def load_status(self) -> dict[str, object]:
         return json.loads(

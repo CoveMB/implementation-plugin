@@ -2,6 +2,7 @@
 """Capture immutable sources and validate digest-bound program authority."""
 
 import argparse
+import ctypes
 import hashlib
 import importlib
 import json
@@ -9,6 +10,7 @@ import os
 import re
 import sys
 import tempfile
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
@@ -147,6 +149,12 @@ class SourceCaptureRecord:
     line_count: int
 
 
+@dataclass(frozen=True)
+class _DirectoryNameSemantics:
+    case_sensitive: bool
+    normalizes_unicode: bool
+
+
 class _UsageError(ValueError):
     pass
 
@@ -273,6 +281,257 @@ def resolve_managed_path(
     return candidate, []
 
 
+def _darwin_directory_name_semantics(directory: Path) -> _DirectoryNameSemantics:
+    """Read the mounted volume's filename comparison capabilities."""
+
+    class _AttrList(ctypes.Structure):
+        _fields_ = (
+            ("bitmapcount", ctypes.c_ushort),
+            ("reserved", ctypes.c_ushort),
+            ("commonattr", ctypes.c_uint32),
+            ("volattr", ctypes.c_uint32),
+            ("dirattr", ctypes.c_uint32),
+            ("fileattr", ctypes.c_uint32),
+            ("forkattr", ctypes.c_uint32),
+        )
+
+    class _VolumeCapabilities(ctypes.Structure):
+        _fields_ = (
+            ("capabilities", ctypes.c_uint32 * 4),
+            ("valid", ctypes.c_uint32 * 4),
+        )
+
+    class _CapabilityBuffer(ctypes.Structure):
+        _fields_ = (
+            ("length", ctypes.c_uint32),
+            ("volume", _VolumeCapabilities),
+        )
+
+    attr_vol_info = 0x80000000
+    attr_vol_capabilities = 0x00020000
+    case_sensitive_capability = 0x00000100
+    attributes = _AttrList(
+        bitmapcount=5,
+        reserved=0,
+        commonattr=0,
+        volattr=attr_vol_info | attr_vol_capabilities,
+        dirattr=0,
+        fileattr=0,
+        forkattr=0,
+    )
+    result = _CapabilityBuffer()
+    libc = ctypes.CDLL(None, use_errno=True)
+    getattrlist = libc.getattrlist
+    getattrlist.argtypes = (
+        ctypes.c_char_p,
+        ctypes.POINTER(_AttrList),
+        ctypes.c_void_p,
+        ctypes.c_size_t,
+        ctypes.c_ulong,
+    )
+    getattrlist.restype = ctypes.c_int
+    if getattrlist(
+        os.fsencode(directory),
+        ctypes.byref(attributes),
+        ctypes.byref(result),
+        ctypes.sizeof(result),
+        0,
+    ) != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(
+            error_number,
+            f"could not query filesystem naming semantics for {directory}",
+        )
+    if not result.volume.valid[0] & case_sensitive_capability:
+        raise ValueError(
+            f"filesystem did not attest case semantics for {directory}"
+        )
+    return _DirectoryNameSemantics(
+        case_sensitive=bool(
+            result.volume.capabilities[0] & case_sensitive_capability
+        ),
+        # Darwin filesystems expose canonically equivalent Unicode names as
+        # aliases even when their case comparison is sensitive.
+        normalizes_unicode=True,
+    )
+
+
+def _linux_directory_name_semantics(directory: Path) -> _DirectoryNameSemantics:
+    """Read Linux per-directory case-folding flags without creating entries."""
+    import array
+    import fcntl
+
+    fs_ioc_getflags = (
+        0x80000000
+        | (ctypes.sizeof(ctypes.c_long) << 16)
+        | (ord("f") << 8)
+        | 1
+    )
+    fs_casefold_flag = 0x40000000
+    descriptor = os.open(
+        directory,
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_CLOEXEC", 0),
+    )
+    try:
+        flags = array.array("l", [0])
+        try:
+            fcntl.ioctl(descriptor, fs_ioc_getflags, flags, True)
+        except OSError as error:
+            raise ValueError(
+                f"filesystem naming semantics are unsupported for {directory}: {error}"
+            ) from error
+    finally:
+        os.close(descriptor)
+    casefolded = bool(flags[0] & fs_casefold_flag)
+    return _DirectoryNameSemantics(
+        case_sensitive=not casefolded,
+        normalizes_unicode=casefolded,
+    )
+
+
+def _windows_directory_name_semantics(directory: Path) -> _DirectoryNameSemantics:
+    """Read the Windows per-directory case-sensitive-name flag."""
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = (
+        ctypes.c_wchar_p,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_void_p,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_void_p,
+    )
+    create_file.restype = ctypes.c_void_p
+    get_information = kernel32.GetFileInformationByHandleEx
+    get_information.argtypes = (
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_ulong,
+    )
+    get_information.restype = ctypes.c_int
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (ctypes.c_void_p,)
+    close_handle.restype = ctypes.c_int
+
+    file_read_attributes = 0x0080
+    file_share_all = 0x0001 | 0x0002 | 0x0004
+    open_existing = 3
+    file_flag_backup_semantics = 0x02000000
+    file_flag_open_reparse_point = 0x00200000
+    file_case_sensitive_info = 23
+    file_cs_flag_case_sensitive_dir = 0x00000001
+    invalid_handle_value = ctypes.c_void_p(-1).value
+    handle = create_file(
+        str(directory),
+        file_read_attributes,
+        file_share_all,
+        None,
+        open_existing,
+        file_flag_backup_semantics | file_flag_open_reparse_point,
+        None,
+    )
+    if handle in (None, invalid_handle_value):
+        error_number = ctypes.get_last_error()
+        raise OSError(
+            error_number,
+            f"could not open directory to query naming semantics: {directory}",
+        )
+    flags = ctypes.c_uint32()
+    try:
+        if not get_information(
+            handle,
+            file_case_sensitive_info,
+            ctypes.byref(flags),
+            ctypes.sizeof(flags),
+        ):
+            error_number = ctypes.get_last_error()
+            raise OSError(
+                error_number,
+                f"could not query directory naming semantics: {directory}",
+            )
+    finally:
+        close_handle(handle)
+    return _DirectoryNameSemantics(
+        case_sensitive=bool(flags.value & file_cs_flag_case_sensitive_dir),
+        normalizes_unicode=False,
+    )
+
+
+def _directory_name_semantics(directory: Path) -> _DirectoryNameSemantics:
+    if sys.platform == "darwin":
+        return _darwin_directory_name_semantics(directory)
+    if sys.platform.startswith("linux"):
+        return _linux_directory_name_semantics(directory)
+    if os.name == "nt":
+        return _windows_directory_name_semantics(directory)
+    raise ValueError(
+        f"filesystem naming semantics are unsupported on {sys.platform}"
+    )
+
+
+def _normalized_destination_part(
+    value: str, semantics: _DirectoryNameSemantics
+) -> str:
+    normalized = (
+        unicodedata.normalize("NFD", value)
+        if semantics.normalizes_unicode
+        else value
+    )
+    return normalized if semantics.case_sensitive else normalized.casefold()
+
+
+def _destination_identity(path: Path) -> tuple[object, ...]:
+    """Return filesystem identity for an existing or future managed path."""
+    candidate = Path(path)
+    if candidate.is_symlink():
+        raise ValueError(f"destination must not be a symlink: {candidate}")
+    if candidate.exists():
+        target = candidate.stat(follow_symlinks=False)
+        return ("existing", target.st_dev, target.st_ino)
+
+    missing_parts: list[str] = []
+    parent = candidate
+    while not parent.exists():
+        if parent.is_symlink():
+            raise ValueError(f"destination parent must not be a symlink: {parent}")
+        missing_parts.append(parent.name)
+        parent = parent.parent
+    if parent.is_symlink() or not parent.is_dir():
+        raise ValueError(f"destination parent must be a directory: {parent}")
+
+    before = parent.stat(follow_symlinks=False)
+    semantics = _directory_name_semantics(parent)
+    after = parent.stat(follow_symlinks=False)
+    if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+        raise ValueError(f"destination parent changed during validation: {parent}")
+    normalized_parts = tuple(
+        _normalized_destination_part(part, semantics)
+        for part in reversed(missing_parts)
+    )
+    return ("future", before.st_dev, before.st_ino, normalized_parts)
+
+
+def _destination_collision_issues(
+    paths: Sequence[Path], *, label: str
+) -> list[str]:
+    identities: set[tuple[object, ...]] = set()
+    issues: list[str] = []
+    for path in paths:
+        try:
+            identity = _destination_identity(path)
+        except (OSError, ValueError) as error:
+            issues.append(f"{label}: {error}")
+            continue
+        if identity in identities:
+            issues.append(f"{label} resolve duplicate filesystem targets")
+        identities.add(identity)
+    return sorted(set(issues))
+
+
 def _resolve_storage_descriptor(
     program_root: Path,
     descriptor: object,
@@ -335,8 +594,11 @@ def _resolve_storage_descriptor(
             continue
         paths[field] = candidate
 
-    if len(set(paths.values())) != len(paths):
-        issues.append(f"{label} resolves duplicate paths")
+    issues.extend(
+        _destination_collision_issues(
+            list(paths.values()), label=label
+        )
+    )
     return paths, sorted(set(issues))
 
 
@@ -355,6 +617,60 @@ def resolve_program_closure_paths(program_root: Path) -> dict[str, Path]:
     )
     if path_issues:
         raise ValueError("; ".join(path_issues))
+    logical_roles = manifest.get("logical_roles")
+    if (
+        manifest.get("schema_version") in NEW_PROGRAM_MANIFEST_SCHEMAS
+        and isinstance(logical_roles, dict)
+        and isinstance(manifest.get("increment_storage"), dict)
+    ):
+        increment_paths, increment_issues = _resolve_storage_descriptor(
+            root,
+            manifest.get("increment_storage"),
+            label="increment_storage",
+            schema=INCREMENT_STORAGE_SCHEMA,
+            filename_fields=INCREMENT_STORAGE_FILENAME_FIELDS,
+        )
+        traceability: dict[str, Any] | None = None
+        traceability_value = logical_roles.get("traceability")
+        if _is_non_empty_string(traceability_value):
+            traceability_path, traceability_path_issues = resolve_managed_path(
+                root,
+                traceability_value,
+                role="logical role traceability",
+            )
+            if traceability_path is None:
+                raise ValueError("; ".join(traceability_path_issues))
+            traceability, traceability_issues = load_json_object(traceability_path)
+            if traceability is None:
+                raise ValueError("; ".join(traceability_issues))
+        status: dict[str, Any] | None = None
+        status_value = logical_roles.get("status")
+        if _is_non_empty_string(status_value):
+            status_path, status_path_issues = resolve_managed_path(
+                root,
+                status_value,
+                role="logical role status",
+                require_file=False,
+            )
+            if status_path is None:
+                raise ValueError("; ".join(status_path_issues))
+            if status_path.is_file() and not status_path.is_symlink():
+                status, status_issues = load_json_object(status_path)
+                if status is None:
+                    raise ValueError("; ".join(status_issues))
+        destination_issues = _new_manifest_destination_collision_issues(
+            root,
+            manifest,
+            logical_roles,
+            increment_paths=increment_paths,
+            closure_paths=paths,
+            increment_ids=_manifest_increment_ids(
+                manifest, traceability, status
+            ),
+        )
+        all_issues = sorted(set([*increment_issues, *destination_issues]))
+        if all_issues:
+            raise ValueError("; ".join(all_issues))
     return {
         "reconciliation": paths["reconciliation_filename"],
         "packet": paths["packet_filename"],
@@ -783,19 +1099,6 @@ def _validate_new_manifest_contract(
     ):
         issues.append("new manifest must not duplicate closure logical roles")
 
-    logical_role_names = (
-        SETUP_PROGRAM_LOGICAL_ROLES
-        if manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA
-        else NEW_PROGRAM_LOGICAL_ROLES
-    )
-    role_values = [
-        value
-        for role in logical_role_names
-        if isinstance((value := logical_roles.get(role)), str)
-    ]
-    if len(role_values) != len(set(role_values)):
-        issues.append("new manifest logical roles must resolve to unique paths")
-
     increment_paths, increment_issues = _resolve_storage_descriptor(
         root,
         manifest.get("increment_storage"),
@@ -812,9 +1115,6 @@ def _validate_new_manifest_contract(
     )
     issues.extend(increment_issues)
     issues.extend(closure_issues)
-    all_storage_paths = [*increment_paths.values(), *closure_paths.values()]
-    if len(all_storage_paths) != len(set(all_storage_paths)):
-        issues.append("increment and closure storage resolve duplicate paths")
     if manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA:
         try:
             setup_module = importlib.import_module("program_setup")
@@ -838,6 +1138,124 @@ def _validate_new_manifest_contract(
         if setup_module is not None:
             issues.extend(setup_module.validate_setup_semantics(root))
     return sorted(set(issues))
+
+
+def _new_manifest_destination_collision_issues(
+    root: Path,
+    manifest: dict[str, Any],
+    logical_roles: dict[str, Any],
+    *,
+    increment_paths: dict[str, Path],
+    closure_paths: dict[str, Path],
+    increment_ids: Sequence[object],
+) -> list[str]:
+    logical_role_names = (
+        SETUP_PROGRAM_LOGICAL_ROLES
+        if manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA
+        else NEW_PROGRAM_LOGICAL_ROLES
+    )
+    role_paths: list[Path] = []
+    for role in logical_role_names:
+        path, _ = resolve_managed_path(
+            root,
+            logical_roles.get(role),
+            role=f"logical role {role}",
+            require_file=False,
+        )
+        if path is not None:
+            role_paths.append(path)
+    allocated_increment_paths, allocation_issues = (
+        _allocated_increment_storage_paths(root, increment_ids, increment_paths)
+    )
+    collision_issues = _destination_collision_issues(
+        [*role_paths, *allocated_increment_paths, *closure_paths.values()],
+        label="new manifest destinations",
+    )
+    return sorted(set([*allocation_issues, *collision_issues]))
+
+
+def _allocated_increment_storage_paths(
+    root: Path,
+    allocated_increment_ids: Sequence[object],
+    increment_paths: dict[str, Path],
+) -> tuple[list[Path], list[str]]:
+    increment_ids: set[str] = set()
+    issues: list[str] = []
+    for value in allocated_increment_ids:
+        if not _is_non_empty_string(value):
+            continue
+        increment_id = str(value)
+        pure_increment_id = PurePosixPath(increment_id)
+        if (
+            "\\" in increment_id
+            or pure_increment_id.is_absolute()
+            or len(pure_increment_id.parts) != 1
+            or pure_increment_id.name in ("", ".", "..")
+        ):
+            issues.append(
+                f"increment storage allocation {increment_id!r} must be one safe path segment"
+            )
+            continue
+        increment_ids.add(increment_id)
+
+    paths: list[Path] = []
+    for increment_id in sorted(increment_ids):
+        for field, base_path in sorted(increment_paths.items()):
+            candidate = base_path.parent / increment_id / base_path.name
+            if _contains_symlink(candidate, root):
+                issues.append(
+                    f"increment_storage {field} for {increment_id} must not contain a symlink"
+                )
+                continue
+            if candidate.exists() and (
+                candidate.is_symlink() or not candidate.is_file()
+            ):
+                issues.append(
+                    f"increment_storage {field} for {increment_id} must be a regular file when it exists"
+                )
+                continue
+            paths.append(candidate)
+    return paths, sorted(set(issues))
+
+
+def _manifest_increment_ids(
+    manifest: dict[str, Any],
+    traceability: dict[str, Any] | None,
+    status: dict[str, Any] | None,
+) -> list[object]:
+    increment_ids: list[object] = []
+    if isinstance(status, dict):
+        increment_ids.append(status.get("current_increment_id"))
+    semantics = manifest.get("setup_semantics")
+    increments = semantics.get("increments") if isinstance(semantics, dict) else None
+    if isinstance(increments, list):
+        increment_ids.extend(
+            increment.get("increment_id")
+            for increment in increments
+            if isinstance(increment, dict)
+        )
+    requirements = (
+        traceability.get("atomic_requirements")
+        if isinstance(traceability, dict)
+        else None
+    )
+    if isinstance(requirements, list):
+        for requirement in requirements:
+            assigned = (
+                requirement.get("assigned_increments")
+                if isinstance(requirement, dict)
+                else None
+            )
+            if not isinstance(assigned, list):
+                continue
+            increment_ids.extend(
+                value
+                for value in assigned
+                if _is_non_empty_string(value)
+                and len(PurePosixPath(str(value)).parts) == 1
+                and "\\" not in str(value)
+            )
+    return increment_ids
 
 
 def _validate_proposal_workspace(
@@ -1015,6 +1433,37 @@ def validate_program_authority(
     issues.extend(approval_load_issues)
     if metadata is None or traceability is None or approvals is None:
         return sorted(set(issues))
+    if new_manifest:
+        status_for_destinations, status_destination_issues = load_json_object(
+            resolved_roles["status"]
+        )
+        issues.extend(status_destination_issues)
+        increment_paths, _ = _resolve_storage_descriptor(
+            root,
+            manifest.get("increment_storage"),
+            label="increment_storage",
+            schema=INCREMENT_STORAGE_SCHEMA,
+            filename_fields=INCREMENT_STORAGE_FILENAME_FIELDS,
+        )
+        closure_paths, _ = _resolve_storage_descriptor(
+            root,
+            manifest.get("closure_storage"),
+            label="closure_storage",
+            schema=CLOSURE_STORAGE_SCHEMA,
+            filename_fields=CLOSURE_STORAGE_FILENAME_FIELDS,
+        )
+        issues.extend(
+            _new_manifest_destination_collision_issues(
+                root,
+                manifest,
+                logical_roles,
+                increment_paths=increment_paths,
+                closure_paths=closure_paths,
+                increment_ids=_manifest_increment_ids(
+                    manifest, traceability, status_for_destinations
+                ),
+            )
+        )
 
     new_ledgers: dict[str, list[dict[str, Any]]] = {"approvals": approvals}
     ledger_roles = (
