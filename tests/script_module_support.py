@@ -13,8 +13,17 @@ def load_script_module(module_name: str, script_path: Path) -> ModuleType:
         if spec is None or spec.loader is None:
             raise RuntimeError(f"Unable to load {module_name} from {script_path}")
         module = importlib.util.module_from_spec(spec)
+        had_previous_module = module_name in sys.modules
+        previous_module = sys.modules.get(module_name)
         sys.modules[module_name] = module
-        spec.loader.exec_module(module)
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            if had_previous_module:
+                sys.modules[module_name] = previous_module
+            else:
+                sys.modules.pop(module_name, None)
+            raise
     finally:
         sys.path.remove(script_directory)
     return module
