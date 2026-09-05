@@ -1,4 +1,3 @@
-import importlib.util
 import inspect
 import json
 import re
@@ -6,6 +5,8 @@ import sys
 import unittest
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
+
+from tests.script_module_support import load_script_module
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -20,15 +21,10 @@ sys.path.insert(0, str(SCRIPT_ROOT))
 try:
     import repository_preparation as PREPARATION
     import state_authority as AUTHORITY
-
-    SPEC = importlib.util.spec_from_file_location("execution_discipline", SCRIPT_PATH)
-    if SPEC is None or SPEC.loader is None:
-        raise RuntimeError(f"Unable to load execution discipline from {SCRIPT_PATH}")
-    EXECUTION = importlib.util.module_from_spec(SPEC)
-    sys.modules[SPEC.name] = EXECUTION
-    SPEC.loader.exec_module(EXECUTION)
 finally:
     sys.path.remove(str(SCRIPT_ROOT))
+
+EXECUTION = load_script_module("execution_discipline", SCRIPT_PATH)
 
 
 def test_first_evidence(**overrides):

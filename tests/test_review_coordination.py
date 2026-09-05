@@ -1,4 +1,3 @@
-import importlib.util
 import json
 import subprocess
 import sys
@@ -6,6 +5,8 @@ import tempfile
 import unittest
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
+
+from tests.script_module_support import load_script_module
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -18,16 +19,7 @@ FIXTURE_ROOT = (
 FIXTURE_EVIDENCE = FIXTURE_ROOT / "review-evidence.json"
 FIXTURE_PACKET = FIXTURE_ROOT / "review-packet.md"
 
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC = importlib.util.spec_from_file_location("review_coordination", SCRIPT_PATH)
-    if SPEC is None or SPEC.loader is None:
-        raise RuntimeError(f"Unable to load review coordination from {SCRIPT_PATH}")
-    REVIEW = importlib.util.module_from_spec(SPEC)
-    sys.modules[SPEC.name] = REVIEW
-    SPEC.loader.exec_module(REVIEW)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+REVIEW = load_script_module("review_coordination", SCRIPT_PATH)
 
 
 def risk_predicates(**overrides):

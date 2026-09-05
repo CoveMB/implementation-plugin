@@ -1,7 +1,7 @@
-import importlib.util
-import sys
 import unittest
 from pathlib import Path
+
+from tests.script_module_support import load_script_module
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -12,16 +12,7 @@ SCRIPT_PATH = SCRIPT_ROOT / "task_prompt.py"
 class TaskPromptTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        spec = importlib.util.spec_from_file_location("task_prompt", SCRIPT_PATH)
-        if spec is None or spec.loader is None:
-            raise RuntimeError(f"Unable to load task prompt from {SCRIPT_PATH}")
-        cls.module = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = cls.module
-        sys.path.insert(0, str(SCRIPT_ROOT))
-        try:
-            spec.loader.exec_module(cls.module)
-        finally:
-            sys.path.remove(str(SCRIPT_ROOT))
+        cls.module = load_script_module("task_prompt", SCRIPT_PATH)
 
     def test_render_and_parse_are_byte_exact(self) -> None:
         command = {

@@ -1,4 +1,3 @@
-import importlib.util
 import json
 import sys
 import unittest
@@ -12,6 +11,7 @@ from tests.program_bootstrap_support import (
     run_program_discovery,
     write_raw_review_reports,
 )
+from tests.script_module_support import load_script_module
 from tests.test_program_activation import ACTIVATION, activated_program, exact_plan_bytes
 from tests.test_program_review import REVIEW as PROGRAM_REVIEW
 from tests.test_program_review import reviewing_program
@@ -21,16 +21,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "diff_disposition.py"
 
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC = importlib.util.spec_from_file_location("diff_disposition", SCRIPT_PATH)
-    if SPEC is None or SPEC.loader is None:
-        raise RuntimeError(f"Unable to load diff disposition from {SCRIPT_PATH}")
-    DIFF = importlib.util.module_from_spec(SPEC)
-    sys.modules[SPEC.name] = DIFF
-    SPEC.loader.exec_module(DIFF)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+DIFF = load_script_module("diff_disposition", SCRIPT_PATH)
 
 
 def setUpModule() -> None:

@@ -1,15 +1,14 @@
 import copy
 import hashlib
-import importlib.util
 import json
 import shutil
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from tests.program_bootstrap_support import BootstrapFixture, repository_snapshot
+from tests.script_module_support import load_script_module
 from tests.test_state_authority import StateAuthorityFixture, write_json_lines
 
 
@@ -17,18 +16,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
 CHECKPOINT_PATH = SCRIPT_ROOT / "approval_checkpoint.py"
 
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC = importlib.util.spec_from_file_location(
-        "approval_checkpoint", CHECKPOINT_PATH
-    )
-    if SPEC is None or SPEC.loader is None:
-        raise RuntimeError(f"Unable to load approval checkpoint from {CHECKPOINT_PATH}")
-    CHECKPOINT = importlib.util.module_from_spec(SPEC)
-    sys.modules[SPEC.name] = CHECKPOINT
-    SPEC.loader.exec_module(CHECKPOINT)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+CHECKPOINT = load_script_module("approval_checkpoint", CHECKPOINT_PATH)
 
 
 def sha256_file(path: Path) -> str:

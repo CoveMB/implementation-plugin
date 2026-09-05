@@ -1,5 +1,4 @@
 import copy
-import importlib.util
 import json
 import sys
 import unittest
@@ -14,47 +13,28 @@ from tests.program_bootstrap_support import (
     repository_snapshot,
     write_raw_review_reports,
 )
+from tests.script_module_support import load_script_module
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "program_setup.py"
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC = importlib.util.spec_from_file_location("program_setup", SCRIPT_PATH)
-    if SPEC is None or SPEC.loader is None:
-        raise RuntimeError(f"Unable to load program setup from {SCRIPT_PATH}")
-    SETUP = importlib.util.module_from_spec(SPEC)
-    sys.modules[SPEC.name] = SETUP
-    SPEC.loader.exec_module(SETUP)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+SETUP = load_script_module("program_setup", SCRIPT_PATH)
 
 
-def load_script(name: str):
-    path = SCRIPT_ROOT / f"{name}.py"
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Unable to load {name} from {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    sys.path.insert(0, str(SCRIPT_ROOT))
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.path.remove(str(SCRIPT_ROOT))
-    return module
-
-
-BOOTSTRAP = load_script("program_bootstrap")
-ACTIVATION = load_script("program_activation")
+BOOTSTRAP = load_script_module(
+    "program_bootstrap", SCRIPT_ROOT / "program_bootstrap.py"
+)
+ACTIVATION = load_script_module(
+    "program_activation", SCRIPT_ROOT / "program_activation.py"
+)
 STATE = sys.modules["state_authority"]
 AUTHORITY = sys.modules["program_authority"]
-REVIEW = load_script("program_review")
-DIFF = load_script("diff_disposition")
-CLOSURE = load_script("program_closure")
-BLOCKED = load_script("blocked_recovery")
-DISCOVERY = load_script("program_discovery")
+REVIEW = load_script_module("program_review", SCRIPT_ROOT / "program_review.py")
+DIFF = load_script_module("diff_disposition", SCRIPT_ROOT / "diff_disposition.py")
+CLOSURE = load_script_module("program_closure", SCRIPT_ROOT / "program_closure.py")
+BLOCKED = load_script_module("blocked_recovery", SCRIPT_ROOT / "blocked_recovery.py")
+DISCOVERY = load_script_module("program_discovery", SCRIPT_ROOT / "program_discovery.py")
 
 
 def gate_definition(

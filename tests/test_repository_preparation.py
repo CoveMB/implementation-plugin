@@ -1,4 +1,3 @@
-import importlib.util
 import hashlib
 import json
 import os
@@ -10,6 +9,8 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from unittest import mock
 
+from tests.script_module_support import load_script_module
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
@@ -19,16 +20,7 @@ FIXTURE_ROOT = (
     / "tests/fixtures/repository-preparation/portable-archive-workspace"
 )
 
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC = importlib.util.spec_from_file_location("repository_preparation", SCRIPT_PATH)
-    if SPEC is None or SPEC.loader is None:
-        raise RuntimeError(f"Unable to load repository preparation from {SCRIPT_PATH}")
-    PREPARATION = importlib.util.module_from_spec(SPEC)
-    sys.modules[SPEC.name] = PREPARATION
-    SPEC.loader.exec_module(PREPARATION)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+PREPARATION = load_script_module("repository_preparation", SCRIPT_PATH)
 
 
 def run_git(repository: Path, *arguments: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:

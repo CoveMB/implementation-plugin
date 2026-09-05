@@ -1,4 +1,3 @@
-import importlib.util
 import json
 import subprocess
 import sys
@@ -8,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.program_bootstrap_support import repository_snapshot, run_program_discovery
+from tests.script_module_support import load_script_module
 from tests.test_diff_disposition import DIFF, awaiting_diff_program
 from tests.test_program_continuation import CONTINUATION
 
@@ -16,16 +16,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "program_rollover.py"
 
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC = importlib.util.spec_from_file_location("program_rollover", SCRIPT_PATH)
-    if SPEC is None or SPEC.loader is None:
-        raise RuntimeError(f"Unable to load program rollover from {SCRIPT_PATH}")
-    ROLLOVER = importlib.util.module_from_spec(SPEC)
-    sys.modules[SPEC.name] = ROLLOVER
-    SPEC.loader.exec_module(ROLLOVER)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+ROLLOVER = load_script_module("program_rollover", SCRIPT_PATH)
 
 
 def accepted_continuation_program(domain: str):
