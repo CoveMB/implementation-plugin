@@ -19,6 +19,8 @@ from program_activation import (
 )
 from program_authority import load_json_object, resolve_managed_path, sha256_file
 from repository_preparation import (
+    ExecutionWorkspaceAssessment,
+    RepositoryInspection,
     _section_body,
     execution_baseline_from_value,
     inspect_repository,
@@ -445,6 +447,43 @@ def _build_report_bundle(
     return bundle, packet
 
 
+def _review_workspace_context(
+    root: Path,
+    manifest: dict[str, object],
+    status: dict[str, object],
+    inspection: RepositoryInspection,
+    assessment_state: str | None,
+) -> tuple[dict[str, Path], dict[str, str], ExecutionWorkspaceAssessment]:
+    paths = _resolve_increment_paths(
+        root, manifest, str(status["current_increment_id"])
+    )
+    plan_markdown = paths["plan"].read_text(encoding="utf-8")
+    file_map = parse_exact_file_map(plan_markdown)
+    workspace = Path(inspection.observation.path).resolve()
+    review_outputs = tuple(
+        paths[key].resolve(strict=False).relative_to(workspace).as_posix()
+        for key in ("evidence", "packet")
+    )
+    if any(path not in file_map.create for path in review_outputs):
+        raise ValueError("review evidence and packet require exact-plan Create allocation")
+    raw_paths = _raw_report_paths(plan_markdown)
+    undeclared = sorted(set(raw_paths.values()).difference(file_map.create))
+    if undeclared:
+        raise ValueError("raw review report is not declared by the exact plan: " + ", ".join(undeclared))
+    baseline_value, baseline_issues = load_json_object(paths["baseline"])
+    if baseline_value is None:
+        raise ValueError("; ".join(baseline_issues))
+    baseline = execution_baseline_from_value(baseline_value)
+    increment_state = assessment_state or str(status["current_increment_state"])
+    assessment = validate_execution_workspace(
+        root, baseline, inspection,
+        increment_state=increment_state,
+    )
+    if not assessment.valid:
+        raise ValueError("; ".join(assessment.issues))
+    return paths, raw_paths, assessment
+
+
 def _review_transaction_context(
     program_root: Path,
     observation: RepositoryObservation,
@@ -481,41 +520,10 @@ def _review_transaction_context(
     status, status_issues = load_json_object(status_path)
     if status is None:
         raise ValueError("; ".join(status_issues))
-    increment_id = str(status["current_increment_id"])
-    paths = _resolve_increment_paths(root, manifest, increment_id)
-    plan_markdown = paths["plan"].read_text(encoding="utf-8")
-    file_map = parse_exact_file_map(plan_markdown)
-    workspace = Path(normalized.path)
-    evidence_relative = paths["evidence"].resolve(strict=False).relative_to(
-        workspace.resolve()
-    ).as_posix()
-    packet_relative = paths["packet"].resolve(strict=False).relative_to(
-        workspace.resolve()
-    ).as_posix()
-    if evidence_relative not in file_map.create or packet_relative not in file_map.create:
-        raise ValueError("review evidence and packet require exact-plan Create allocation")
-    raw_paths = _raw_report_paths(plan_markdown)
-    undeclared = sorted(set(raw_paths.values()).difference(file_map.create))
-    if undeclared:
-        raise ValueError(
-            "raw review report is not declared by the exact plan: "
-            + ", ".join(undeclared)
-        )
-    baseline_value, baseline_issues = load_json_object(paths["baseline"])
-    if baseline_value is None:
-        raise ValueError("; ".join(baseline_issues))
-    baseline = execution_baseline_from_value(baseline_value)
-    effective_assessment_state = assessment_state or str(
-        status["current_increment_state"]
+    paths, raw_paths, assessment = _review_workspace_context(
+        root, manifest, status, replace(fresh, observation=normalized),
+        assessment_state,
     )
-    assessment = validate_execution_workspace(
-        root,
-        baseline,
-        replace(fresh, observation=normalized),
-        increment_state=effective_assessment_state,
-    )
-    if not assessment.valid:
-        raise ValueError("; ".join(assessment.issues))
     return (
         normalized,
         manifest,
@@ -858,35 +866,10 @@ def build_review_preparation(
     if state_issues:
         raise ValueError("; ".join(state_issues))
     increment_id = str(status["current_increment_id"])
-    paths = _resolve_increment_paths(root, manifest, increment_id)
-    plan_markdown = paths["plan"].read_text(encoding="utf-8")
-    file_map = parse_exact_file_map(plan_markdown)
-    workspace = Path(normalized.path)
-    evidence_relative = paths["evidence"].resolve(strict=False).relative_to(
-        workspace.resolve()
-    ).as_posix()
-    packet_relative = paths["packet"].resolve(strict=False).relative_to(
-        workspace.resolve()
-    ).as_posix()
-    if evidence_relative not in file_map.create or packet_relative not in file_map.create:
-        raise ValueError("review evidence and packet require exact-plan Create allocation")
-    raw_paths = _raw_report_paths(plan_markdown)
-    undeclared = sorted(set(raw_paths.values()).difference(file_map.create))
-    if undeclared:
-        raise ValueError("raw review report is not declared by the exact plan: " + ", ".join(undeclared))
-
-    baseline_value, baseline_issues = load_json_object(paths["baseline"])
-    if baseline_value is None:
-        raise ValueError("; ".join(baseline_issues))
-    baseline = execution_baseline_from_value(baseline_value)
-    assessment = validate_execution_workspace(
-        root,
-        baseline,
-        replace(fresh, observation=normalized),
-        increment_state="reviewing",
+    paths, raw_paths, assessment = _review_workspace_context(
+        root, manifest, status, replace(fresh, observation=normalized), "reviewing"
     )
-    if not assessment.valid:
-        raise ValueError("; ".join(assessment.issues))
+    workspace = Path(normalized.path)
     transition = status.get("execution_transition_binding")
     if (
         not isinstance(transition, dict)
