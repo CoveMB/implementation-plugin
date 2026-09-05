@@ -7,14 +7,17 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from unittest import mock
 
-from tests.program_bootstrap_support import BootstrapFixture, repository_snapshot
+from tests.program_bootstrap_support import (
+    BootstrapFixture,
+    repository_snapshot,
+    run_program_discovery,
+)
 from tests.test_program_activation import ACTIVATION, activated_program, exact_plan_bytes
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "blocked_recovery.py"
-DISCOVERY_PATH = SCRIPT_ROOT / "program_discovery.py"
 LIFECYCLE_SUPPORT_PATH = REPOSITORY_ROOT / "tests/program_bootstrap_support.py"
 
 sys.path.insert(0, str(SCRIPT_ROOT))
@@ -80,15 +83,7 @@ def resolution_candidate(program_root: Path) -> dict[str, object]:
 
 class BlockedRecoveryTests(unittest.TestCase):
     def discover(self, fixture: BootstrapFixture) -> dict[str, object]:
-        completed = subprocess.run(
-            [sys.executable, str(DISCOVERY_PATH), "discover", str(fixture.repository)],
-            cwd=REPOSITORY_ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertIn(completed.returncode, {0, 1}, completed.stderr)
-        return json.loads(completed.stdout)
+        return run_program_discovery(fixture.repository)
 
     def test_production_block_fresh_discovery_and_exact_resume(self) -> None:
         fixture, program_root, observation = implementing_program()

@@ -1,19 +1,21 @@
 import importlib.util
 import json
-import subprocess
 import sys
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from tests.program_bootstrap_support import canonical_json, repository_snapshot
+from tests.program_bootstrap_support import (
+    canonical_json,
+    repository_snapshot,
+    run_program_discovery,
+)
 from tests.test_diff_disposition import DIFF, awaiting_diff_program
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "program_closure.py"
-DISCOVERY_PATH = SCRIPT_ROOT / "program_discovery.py"
 
 sys.path.insert(0, str(SCRIPT_ROOT))
 try:
@@ -36,15 +38,7 @@ def accepted_program():
 
 class ProgramClosureTests(unittest.TestCase):
     def discover(self, fixture) -> dict[str, object]:
-        completed = subprocess.run(
-            [sys.executable, str(DISCOVERY_PATH), "discover", str(fixture.repository)],
-            cwd=REPOSITORY_ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertIn(completed.returncode, {0, 1}, completed.stderr)
-        return json.loads(completed.stdout)
+        return run_program_discovery(fixture.repository)
 
     def test_preparation_derives_only_manifest_owned_closure_files(self) -> None:
         fixture, program_root, observation = accepted_program()

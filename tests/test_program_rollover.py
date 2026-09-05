@@ -7,7 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
-from tests.program_bootstrap_support import repository_snapshot
+from tests.program_bootstrap_support import repository_snapshot, run_program_discovery
 from tests.test_diff_disposition import DIFF, awaiting_diff_program
 from tests.test_program_continuation import CONTINUATION
 
@@ -15,7 +15,6 @@ from tests.test_program_continuation import CONTINUATION
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "program_rollover.py"
-DISCOVERY_PATH = SCRIPT_ROOT / "program_discovery.py"
 
 sys.path.insert(0, str(SCRIPT_ROOT))
 try:
@@ -49,15 +48,7 @@ def accepted_continuation_program(domain: str):
 
 class ProgramRolloverTests(unittest.TestCase):
     def discover(self, fixture) -> dict[str, object]:
-        completed = subprocess.run(
-            [sys.executable, str(DISCOVERY_PATH), "discover", str(fixture.repository)],
-            cwd=REPOSITORY_ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertIn(completed.returncode, {0, 1}, completed.stderr)
-        return json.loads(completed.stdout)
+        return run_program_discovery(fixture.repository)
 
     def test_required_rollover_writes_compose_with_plan_a_allocations(self) -> None:
         fixture, program_root, _observation, _prompt = accepted_continuation_program(

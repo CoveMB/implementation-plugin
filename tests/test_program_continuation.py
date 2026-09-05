@@ -6,14 +6,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tests.program_bootstrap_support import repository_snapshot
+from tests.program_bootstrap_support import repository_snapshot, run_program_discovery
 from tests.test_diff_disposition import DIFF, awaiting_diff_program
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "program_continuation.py"
-DISCOVERY_PATH = SCRIPT_ROOT / "program_discovery.py"
 
 sys.path.insert(0, str(SCRIPT_ROOT))
 try:
@@ -29,15 +28,7 @@ finally:
 
 class ProgramContinuationTests(unittest.TestCase):
     def discover(self, fixture) -> dict[str, object]:
-        completed = subprocess.run(
-            [sys.executable, str(DISCOVERY_PATH), "discover", str(fixture.repository)],
-            cwd=REPOSITORY_ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertIn(completed.returncode, {0, 1}, completed.stderr)
-        return json.loads(completed.stdout)
+        return run_program_discovery(fixture.repository)
 
     def test_extension_binds_exact_pre_record_projection_and_live_delta(self) -> None:
         fixture, program_root, observation = awaiting_diff_program(
