@@ -12,6 +12,8 @@ from contextlib import redirect_stdout
 from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
+from tests.program_bootstrap_support import BootstrapFixture
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = (
@@ -930,6 +932,72 @@ class CurrentProgramTraceabilityTests(unittest.TestCase):
                     "requirement",
                     f"line {line_number}: {line}",
                 )
+
+
+class SetupV3AuthorityTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fixture = BootstrapFixture()
+        self.fixture.configure_setup_v3()
+
+    def tearDown(self) -> None:
+        self.fixture.close()
+
+    def validate(self, mode: str) -> list[str]:
+        return AUTHORITY.validate_program_authority(
+            self.fixture.candidate,
+            validation_mode=mode,
+        )
+
+    def test_v3_proposal_allocates_absent_setup_record_and_empty_gate_ledger(self) -> None:
+        self.assertFalse(
+            (self.fixture.candidate / "state/setup-activation-decision.json").exists()
+        )
+        self.assertEqual(
+            self.validate(AUTHORITY.PROPOSAL_VALIDATION_MODE),
+            [],
+        )
+        self.assertIn(
+            "setup-activation decision record is required",
+            self.validate(AUTHORITY.APPROVED_VALIDATION_MODE),
+        )
+
+    def test_v3_semantic_digest_mutation_is_rejected(self) -> None:
+        manifest = self.fixture.load_json("manifest.json")
+        manifest["setup_semantics"]["material_risks"].append("Unapproved risk")
+        self.fixture.write_json("manifest.json", manifest)
+        issues = self.validate(AUTHORITY.PROPOSAL_VALIDATION_MODE)
+        self.assertIn("setup_semantics digest mismatch", issues)
+
+    def test_v3_cross_family_ledger_artifact_is_rejected(self) -> None:
+        cases = (
+            (
+                "approvals",
+                {"schema_version": "implementation-approval/v1"},
+                "manifest v3 rejects v1 approval records",
+            ),
+            (
+                "increment_grants",
+                {"schema_version": "implementation-increment-grant/v1"},
+                "manifest v3 rejects v1 increment grants",
+            ),
+            (
+                "action_authorizations",
+                {"schema_version": "implementation-action-authorization/v1"},
+                "manifest v3 rejects v1 action authorizations",
+            ),
+        )
+        for role, legacy, expected_issue in cases:
+            with self.subTest(role=role):
+                self.tearDown()
+                self.setUp()
+                (self.fixture.candidate / f"state/{role.replace('_', '-')}.jsonl").write_text(
+                    json.dumps(legacy, separators=(",", ":"), sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+
+                issues = self.validate(AUTHORITY.PROPOSAL_VALIDATION_MODE)
+
+                self.assertIn(expected_issue, issues)
 
 
 if __name__ == "__main__":

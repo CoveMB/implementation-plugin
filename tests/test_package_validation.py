@@ -73,6 +73,7 @@ PLAN_A_SCRIPTS = tuple(
         "program_bootstrap",
         "program_launch",
         "program_activation",
+        "program_setup",
         "task_prompt",
         "program_review",
         "diff_disposition",

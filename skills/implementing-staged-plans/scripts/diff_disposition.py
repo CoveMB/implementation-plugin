@@ -15,7 +15,14 @@ from program_activation import (
     _replace_or_adopt_status,
     _without_owned_program_paths,
 )
-from program_authority import load_json_lines, load_json_object, resolve_managed_path, sha256_file
+from program_authority import (
+    SETUP_PROGRAM_MANIFEST_SCHEMA,
+    load_json_lines,
+    load_json_object,
+    resolve_managed_path,
+    sha256_file,
+)
+from program_setup import source_gate_satisfaction
 from repository_preparation import inspect_repository
 from state_authority import (
     APPROVAL_SCHEMA,
@@ -101,6 +108,9 @@ def build_diff_acceptance_candidate(
     manifest, manifest_issues = load_json_object(root / "manifest.json")
     if manifest is None:
         raise ValueError("; ".join(manifest_issues))
+    is_setup_program = (
+        manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA
+    )
     roles = manifest.get("logical_roles")
     if not isinstance(roles, dict):
         raise ValueError("manifest logical_roles must be an object")
@@ -198,6 +208,14 @@ def build_diff_acceptance_candidate(
         },
         diff_disposition_binding=disposition_binding,
     )
+    gate_satisfaction = None
+    if is_setup_program:
+        gate_satisfaction = source_gate_satisfaction(
+            root,
+            "before-diff-disposition",
+            f"increment:{status['current_increment_id']}",
+        )
+        accepted_status["source_gate_satisfaction"] = gate_satisfaction
     accepted_status_bytes = _canonical_json_bytes(accepted_status)
     command = {
         "schema_version": DIFF_DISPOSITION_COMMAND_SCHEMA,
@@ -213,7 +231,9 @@ def build_diff_acceptance_candidate(
     program = status["program_binding"]
     brief = status["brief_binding"]
     approval_record = {
-        "schema_version": APPROVAL_SCHEMA,
+        "schema_version": (
+            "implementation-approval/v2" if is_setup_program else APPROVAL_SCHEMA
+        ),
         "event_id": approval_event_id,
         "type": "increment-diff-approval",
         "decision": "approved",
@@ -244,6 +264,24 @@ def build_diff_acceptance_candidate(
         "execution_baseline_sha256": baseline_binding["sha256"],
         "accepted_product_delta_sha256": accepted_product_delta_sha256,
     }
+    if is_setup_program:
+        setup_binding = status.get("setup_activation_binding")
+        increment_authority = status.get("current_increment_authority_binding")
+        if not isinstance(setup_binding, dict) or not isinstance(
+            increment_authority, dict
+        ):
+            raise ValueError("v3 diff disposition authority is incomplete")
+        approval_record.update(
+            setup_activation_decision_id=setup_binding[
+                "setup_activation_decision_id"
+            ],
+            setup_activation_decision_sha256=setup_binding[
+                "setup_activation_decision_sha256"
+            ],
+            increment_grant_id=increment_authority["grant_id"],
+            increment_grant_sha256=increment_authority["grant_sha256"],
+            source_gate_satisfaction=gate_satisfaction,
+        )
     approval_bytes = _canonical_json_line(approval_record)
     return DiffAcceptanceCandidate(
         base_seed_sha256=base_seed_sha256,

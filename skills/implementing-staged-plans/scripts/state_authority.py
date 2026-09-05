@@ -38,7 +38,10 @@ if _WINDOWS:  # pragma: no cover - configured and exercised on Windows
     _kernel32.CloseHandle.restype = _ctypes.c_int
 
 from program_authority import (
+    APPROVED_VALIDATION_MODE,
     NEW_PROGRAM_MANIFEST_SCHEMA,
+    PROPOSAL_VALIDATION_MODE,
+    SETUP_PROGRAM_MANIFEST_SCHEMA,
     load_json_lines,
     load_json_object,
     resolve_managed_path,
@@ -50,12 +53,34 @@ from program_authority import (
 
 STATUS_SCHEMA = "implementation-program-status/v1"
 STATUS_SCHEMA_V2 = "implementation-program-status/v2"
-STATUS_SCHEMAS = frozenset({STATUS_SCHEMA, STATUS_SCHEMA_V2})
+STATUS_SCHEMA_V3 = "implementation-program-status/v3"
+STATUS_SCHEMAS = frozenset({STATUS_SCHEMA, STATUS_SCHEMA_V2, STATUS_SCHEMA_V3})
 WORKSPACE_SCHEMA = "implementation-workspace/v1"
 WORKSPACE_SCHEMA_V2 = "implementation-workspace/v2"
 WORKSPACE_SCHEMAS = frozenset({WORKSPACE_SCHEMA, WORKSPACE_SCHEMA_V2})
 APPROVAL_SCHEMA = "implementation-approval/v1"
 ACTION_AUTHORIZATION_SCHEMA = "implementation-action-authorization/v1"
+SETUP_ONLY_STATUS_SCHEMAS = frozenset(
+    {
+        STATUS_SCHEMA_V3,
+        "implementation-approval/v2",
+        "implementation-action-authorization/v2",
+        "implementation-current-increment-authority-binding/v2",
+        "implementation-increment-grant/v2",
+        "implementation-setup-activation-status-binding/v1",
+        "setup-activation-decision/v1",
+        "source-gate-decision/v1",
+        "source-gate-satisfaction/v1",
+    }
+)
+LEGACY_ONLY_STATUS_SCHEMAS = frozenset(
+    {
+        STATUS_SCHEMA,
+        STATUS_SCHEMA_V2,
+        "implementation-program-activation-binding/v1",
+        "implementation-current-increment-authority-binding/v1",
+    }
+)
 
 _INSPECTING_UNBOUND_ROLLOVER_SUFFIX = ContextVar(
     "inspecting_unbound_rollover_suffix",
@@ -217,6 +242,20 @@ def _workspace_relative_path(workspace_root: Path, path: Path) -> str:
         raise ValueError(f"managed lifecycle path escapes workspace: {path}") from error
 
 
+def _nested_schema_versions(value: object) -> set[str]:
+    schemas: set[str] = set()
+    if isinstance(value, dict):
+        schema = value.get("schema_version")
+        if isinstance(schema, str):
+            schemas.add(schema)
+        for nested in value.values():
+            schemas.update(_nested_schema_versions(nested))
+    elif isinstance(value, list):
+        for nested in value:
+            schemas.update(_nested_schema_versions(nested))
+    return schemas
+
+
 def _traceability_successor(
     traceability: dict[str, object], increment_id: str
 ) -> str | None:
@@ -296,6 +335,21 @@ def required_future_lifecycle_writes(
                 _workspace_relative_path(workspace_root, path), "Modify"
             )
         )
+    if manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA:
+        for role, disposition in (
+            ("setup_activation_decision", "Preserve"),
+            ("source_gate_decisions", "Modify"),
+        ):
+            path, path_issues = resolve_managed_path(
+                root, logical_roles.get(role), role=f"logical role {role}"
+            )
+            if path is None:
+                raise ValueError("; ".join(path_issues))
+            requirements.append(
+                ManagedWriteRequirement(
+                    _workspace_relative_path(workspace_root, path), disposition
+                )
+            )
 
     increment_root = increment_storage.get("root")
     if not isinstance(increment_root, str):
@@ -1137,6 +1191,366 @@ def _validate_new_program_state(
     return sorted(set(issues))
 
 
+def _validate_setup_program_state(
+    program_root: Path,
+    manifest: dict[str, object],
+    status: dict[str, object],
+) -> list[str]:
+    """Validate the two v3 bootstrap states and their exact authority family."""
+    issues: list[str] = []
+    sequence = status.get("state_sequence")
+    program_state = status.get("program_state")
+    increment_state = status.get("current_increment_state")
+    blocked_context = status.get("blocked_context")
+    is_blocked = (
+        program_state == "blocked"
+        and increment_state == "blocked"
+        and isinstance(blocked_context, dict)
+    )
+    effective_program_state = (
+        blocked_context.get("prior_program_state") if is_blocked else program_state
+    )
+    effective_increment_state = (
+        blocked_context.get("prior_increment_state") if is_blocked else increment_state
+    )
+    logical_roles = manifest.get("logical_roles")
+    if not isinstance(logical_roles, dict):
+        return ["manifest logical_roles must be an object"]
+    if sequence == 0:
+        if (program_state, increment_state) != (
+            "awaiting-program-approval",
+            "not-started",
+        ):
+            issues.append("v3 sequence-zero status is not the setup proposal")
+        return issues
+    if sequence == 1:
+        if (program_state, increment_state) != (
+            "active",
+            "awaiting-first-increment",
+        ):
+            issues.append("v3 sequence-one status is not awaiting first increment")
+        setup_binding = status.get("setup_activation_binding")
+        if (
+            not isinstance(setup_binding, dict)
+            or setup_binding.get("schema_version")
+            != "implementation-setup-activation-status-binding/v1"
+        ):
+            issues.append("v3 setup activation status binding is invalid")
+        return issues
+    if not isinstance(sequence, int) or sequence < 2:
+        return ["v3 state sequence is invalid"]
+    if effective_program_state != "active" and not (
+        effective_increment_state == "accepted"
+        and effective_program_state in {"awaiting-closure-approval", "closed"}
+    ):
+        issues.append("v3 executable bootstrap state must be active")
+    authority = status.get("current_increment_authority_binding")
+    if (
+        not isinstance(authority, dict)
+        or authority.get("schema_version")
+        != "implementation-current-increment-authority-binding/v2"
+        or authority.get("kind") != "increment-grant"
+        or authority.get("grant_kind")
+        not in {"first-increment-start", "successor-rollover"}
+        or authority.get("increment_id") != status.get("current_increment_id")
+    ):
+        issues.append("v3 current increment authority binding is invalid")
+        return issues
+    grants_path, path_issues = resolve_managed_path(
+        program_root,
+        logical_roles.get("increment_grants"),
+        role="logical role increment_grants",
+    )
+    issues.extend(path_issues)
+    if grants_path is None:
+        return issues
+    grants, grant_issues = load_json_lines(grants_path)
+    issues.extend(grant_issues)
+    matches = (
+        []
+        if grants is None
+        else [
+            record
+            for record in grants
+            if record.get("grant_id") == authority.get("grant_id")
+        ]
+    )
+    if len(matches) != 1:
+        issues.append("status-current increment grant must exist exactly once")
+    else:
+        grant = matches[0]
+        if (
+            grant.get("schema_version") != "implementation-increment-grant/v2"
+            or grant.get("grant_kind") != authority.get("grant_kind")
+            or grant.get("program_id") != manifest.get("program_id")
+            or grant.get("program_revision") != manifest.get("program_revision")
+            or grant.get("increment_id") != status.get("current_increment_id")
+            or _canonical_json_line_sha256(grant) != authority.get("grant_sha256")
+        ):
+            issues.append("v3 status-current increment grant binding mismatch")
+        else:
+            grant_brief = grant.get("brief_binding")
+            status_brief = status.get("brief_binding")
+            try:
+                from program_setup import _increment_brief_binding
+
+                expected_brief = _increment_brief_binding(
+                    program_root, manifest, status
+                )
+            except (ImportError, ValueError) as error:
+                issues.append(str(error))
+                expected_brief = None
+            if grant_brief != expected_brief or status_brief != expected_brief:
+                issues.append("v3 status-current increment grant brief binding mismatch")
+    if authority.get("grant_kind") == "successor-rollover" and not isinstance(
+        status.get("rollover_binding"), dict
+    ):
+        issues.append("v3 successor grant requires rollover binding")
+    approved_plan = status.get("approved_exact_file_plan_sha256")
+    pending_plan = status.get("pending_exact_file_plan_sha256")
+    if status.get("approval_mode") == "approval:standard" and isinstance(
+        approved_plan, str
+    ):
+        approvals_path, approval_path_issues = resolve_managed_path(
+            program_root,
+            logical_roles.get("approvals"),
+            role="logical role approvals",
+        )
+        issues.extend(approval_path_issues)
+        if approvals_path is not None:
+            approvals, approval_issues = load_json_lines(approvals_path)
+            issues.extend(approval_issues)
+            preparation = status.get("plan_preparation_binding")
+            approval_id = (
+                preparation.get("plan_approval_event_id")
+                if isinstance(preparation, dict)
+                else None
+            )
+            approval_matches = (
+                []
+                if approvals is None
+                else [
+                    record
+                    for record in approvals
+                    if record.get("schema_version")
+                    == "implementation-approval/v2"
+                    and record.get("type") == "exact-file-plan-approval"
+                    and record.get("event_id") == approval_id
+                    and record.get("exact_file_plan_sha256") == approved_plan
+                    and record.get("increment_grant_id")
+                    == authority.get("grant_id")
+                ]
+            )
+            if len(approval_matches) != 1:
+                issues.append("v3 approved plan requires one exact v2 plan approval")
+    executable_states = {
+        "authorized",
+        "implementing",
+        "reviewing",
+        "remediating",
+        "verified",
+        "awaiting-diff-approval",
+        "accepted",
+    }
+    if effective_increment_state in executable_states:
+        try:
+            from program_setup import source_gate_satisfaction
+        except ImportError as error:
+            issues.append(str(error))
+            source_gate_satisfaction = None
+        baseline_binding = status.get("execution_baseline_binding")
+        preparation = status.get("plan_preparation_binding")
+        execution_authority = status.get("execution_authorization")
+        if not all(
+            isinstance(value, dict)
+            for value in (baseline_binding, preparation, execution_authority)
+        ):
+            issues.append("v3 executable state requires plan and baseline authority")
+        else:
+            baseline_path, baseline_path_issues = resolve_managed_path(
+                program_root,
+                baseline_binding.get("path"),
+                role="status execution baseline binding",
+            )
+            issues.extend(baseline_path_issues)
+            if baseline_path is not None:
+                if baseline_binding.get("sha256") != sha256_file(baseline_path):
+                    issues.append("execution baseline digest mismatch")
+                baseline, baseline_issues = load_json_object(baseline_path)
+                issues.extend(baseline_issues)
+                if baseline is not None and baseline.get(
+                    "current_increment_authority_binding"
+                ) != authority:
+                    issues.append("execution baseline grant binding mismatch")
+            action_path, action_path_issues = resolve_managed_path(
+                program_root,
+                logical_roles.get("action_authorizations"),
+                role="logical role action_authorizations",
+            )
+            issues.extend(action_path_issues)
+            if action_path is not None:
+                actions, action_issues = load_json_lines(action_path)
+                issues.extend(action_issues)
+                authorization_id = execution_authority.get("authorization_id")
+                action_matches = (
+                    []
+                    if actions is None
+                    else [
+                        record
+                        for record in actions
+                        if record.get("authorization_id") == authorization_id
+                    ]
+                )
+                gate_satisfaction = None
+                if source_gate_satisfaction is not None:
+                    try:
+                        gate_satisfaction = source_gate_satisfaction(
+                            program_root,
+                            "before-action-authorization",
+                            f"increment:{status.get('current_increment_id')}",
+                        )
+                    except ValueError as error:
+                        issues.append(str(error))
+                if len(action_matches) != 1:
+                    issues.append(
+                        "v3 status-current execution authorization must exist exactly once"
+                    )
+                else:
+                    action = action_matches[0]
+                    if (
+                        action.get("schema_version")
+                        != "implementation-action-authorization/v2"
+                        or action.get("exact_file_plan_sha256") != approved_plan
+                        or action.get("execution_baseline_sha256")
+                        != baseline_binding.get("sha256")
+                        or action.get("increment_grant_id")
+                        != authority.get("grant_id")
+                        or action.get("source_gate_satisfaction")
+                        != gate_satisfaction
+                        or _canonical_json_line_sha256(action)
+                        != execution_authority.get("authorization_sha256")
+                    ):
+                        issues.append(
+                            "v3 status-current execution authorization binding mismatch"
+                        )
+                status_trigger = {
+                    "authorized": "before-action-authorization",
+                    "implementing": "before-product-execution",
+                    "reviewing": "before-review",
+                }.get(str(effective_increment_state))
+                if (
+                    status_trigger is not None
+                    and source_gate_satisfaction is not None
+                ):
+                    try:
+                        expected_status_gate = source_gate_satisfaction(
+                            program_root,
+                            status_trigger,
+                            f"increment:{status.get('current_increment_id')}",
+                        )
+                    except ValueError as error:
+                        issues.append(str(error))
+                    else:
+                        if status.get("source_gate_satisfaction") != expected_status_gate:
+                            issues.append("v3 status source-gate satisfaction mismatch")
+        if effective_increment_state == "accepted":
+            disposition = status.get("diff_disposition_binding")
+            approvals: list[dict[str, Any]] | None = None
+            diff_gate = None
+            if source_gate_satisfaction is not None:
+                try:
+                    diff_gate = source_gate_satisfaction(
+                        program_root,
+                        "before-diff-disposition",
+                        f"increment:{status.get('current_increment_id')}",
+                    )
+                except ValueError as error:
+                    issues.append(str(error))
+            if not isinstance(disposition, dict):
+                issues.append("v3 accepted status lacks diff disposition binding")
+            else:
+                approvals_path, approval_path_issues = resolve_managed_path(
+                    program_root,
+                    logical_roles.get("approvals"),
+                    role="logical role approvals",
+                )
+                issues.extend(approval_path_issues)
+                if approvals_path is not None:
+                    approvals, approval_issues = load_json_lines(approvals_path)
+                    issues.extend(approval_issues)
+                    diff_matches = (
+                        []
+                        if approvals is None
+                        else [
+                            record
+                            for record in approvals
+                            if record.get("event_id")
+                            == disposition.get("approval_event_id")
+                            and record.get("type") == "increment-diff-approval"
+                        ]
+                    )
+                    if len(diff_matches) != 1 or (
+                        diff_matches
+                        and (
+                            diff_matches[0].get("schema_version")
+                            != "implementation-approval/v2"
+                            or diff_matches[0].get("source_gate_satisfaction")
+                            != diff_gate
+                            or diff_matches[0].get("increment_grant_id")
+                            != authority.get("grant_id")
+                        )
+                    ):
+                        issues.append("v3 diff approval authority binding mismatch")
+            if effective_program_state == "closed":
+                command = status.get("closure_command_binding")
+                closure_gate = None
+                if source_gate_satisfaction is not None:
+                    try:
+                        closure_gate = source_gate_satisfaction(
+                            program_root,
+                            "before-program-closure",
+                            f"program:{manifest.get('program_id')}",
+                        )
+                    except ValueError as error:
+                        issues.append(str(error))
+                closure_matches = (
+                    []
+                    if not isinstance(command, dict) or approvals is None
+                    else [
+                        record
+                        for record in approvals
+                        if record.get("event_id") == command.get("approval_event_id")
+                        and record.get("type") == "program-closure-approval"
+                    ]
+                )
+                if len(closure_matches) != 1 or (
+                    closure_matches
+                    and (
+                        closure_matches[0].get("schema_version")
+                        != "implementation-approval/v2"
+                        or closure_matches[0].get("source_gate_satisfaction")
+                        != closure_gate
+                        or status.get("source_gate_satisfaction") != closure_gate
+                    )
+                ):
+                    issues.append("v3 closure approval authority binding mismatch")
+    elif approved_plan is not None or (
+        effective_increment_state != "awaiting-plan-approval"
+        and pending_plan is not None
+    ):
+        issues.append("v3 pre-authorization plan binding is inconsistent")
+    previous = status.get("previous_state")
+    if (
+        not isinstance(previous, dict)
+        or previous.get("schema_version") != STATUS_SCHEMA_V3
+        or previous.get("state_sequence") != sequence - 1
+        or not isinstance(previous.get("status_sha256"), str)
+        or len(previous.get("status_sha256", "")) != 64
+    ):
+        issues.append("v3 previous state binding is invalid")
+    return sorted(set(issues))
+
+
 def validate_state(
     program_root: Path,
     manifest: dict[str, object],
@@ -1147,6 +1561,26 @@ def validate_state(
     issues: list[str] = []
     if status.get("schema_version") not in STATUS_SCHEMAS:
         issues.append("unsupported status schema")
+    manifest_schema = manifest.get("schema_version")
+    status_schema = status.get("schema_version")
+    foreign_schemas = (
+        LEGACY_ONLY_STATUS_SCHEMAS
+        if manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA
+        else SETUP_ONLY_STATUS_SCHEMAS
+    )
+    for schema in sorted(_nested_schema_versions(status) & foreign_schemas):
+        issues.append(
+            f"manifest family rejects foreign authority schema {schema}"
+        )
+    if manifest_schema == NEW_PROGRAM_MANIFEST_SCHEMA and status_schema != STATUS_SCHEMA_V2:
+        issues.append("manifest v2 requires status v2")
+    if manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA and status_schema != STATUS_SCHEMA_V3:
+        issues.append("manifest v3 requires status v3")
+    if manifest_schema not in {
+        NEW_PROGRAM_MANIFEST_SCHEMA,
+        SETUP_PROGRAM_MANIFEST_SCHEMA,
+    } and status_schema == STATUS_SCHEMA_V3:
+        issues.append("pre-v2 manifest rejects status v3")
     sequence = status.get("state_sequence")
     if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
         issues.append("state sequence must be a non-negative integer")
@@ -1156,7 +1590,10 @@ def validate_state(
         issues.append("status program_revision mismatch")
     if status.get("program_state") not in PROGRAM_TRANSITIONS:
         issues.append("unknown program state")
-    if status.get("current_increment_state") not in INCREMENT_TRANSITIONS:
+    if status.get("current_increment_state") not in INCREMENT_TRANSITIONS and not (
+        manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA
+        and status.get("current_increment_state") == "awaiting-first-increment"
+    ):
         issues.append("unknown increment state")
     try:
         approval_mode_policy(status.get("approval_mode"))
@@ -1265,6 +1702,31 @@ def validate_state(
     logical_roles = manifest.get("logical_roles")
     if not isinstance(logical_roles, dict):
         return sorted(set([*issues, "manifest logical_roles must be an object"]))
+    if manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA:
+        if status.get("program_state") == "blocked" or status.get(
+            "current_increment_state"
+        ) == "blocked":
+            try:
+                from blocked_recovery import validate_blocked_context
+
+                issues.extend(
+                    validate_blocked_context(program_root, status, observation)
+                )
+            except ImportError as error:
+                issues.append(str(error))
+        if status.get("block_resolution_binding") is not None:
+            try:
+                from blocked_recovery import validate_block_resolution_history
+
+                issues.extend(
+                    validate_block_resolution_history(
+                        program_root, status, observation
+                    )
+                )
+            except ImportError as error:
+                issues.append(str(error))
+        issues.extend(_validate_setup_program_state(program_root, manifest, status))
+        return sorted(set(issues))
     if manifest.get("schema_version") == NEW_PROGRAM_MANIFEST_SCHEMA:
         if status.get("program_state") == "blocked" or status.get(
             "current_increment_state"
@@ -1578,7 +2040,7 @@ def validate_state_authority(
 ) -> list[str]:
     """Validate program authority plus selected workspace and lifecycle state."""
     root = Path(program_root)
-    issues = list(validate_program_authority(root))
+    issues: list[str] = []
     manifest, manifest_issues = load_json_object(root / "manifest.json")
     issues.extend(manifest_issues)
     if manifest is None:
@@ -1600,6 +2062,17 @@ def validate_state_authority(
     workspace, workspace_issues = load_json_object(workspace_path)
     issues.extend(status_issues)
     issues.extend(workspace_issues)
+    validation_mode = APPROVED_VALIDATION_MODE
+    if (
+        manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA
+        and status is not None
+        and status.get("schema_version") == STATUS_SCHEMA_V3
+        and status.get("state_sequence") == 0
+    ):
+        validation_mode = PROPOSAL_VALIDATION_MODE
+    issues.extend(
+        validate_program_authority(root, validation_mode=validation_mode)
+    )
     execution_workspace_validated = False
     if status is not None:
         issues.extend(validate_state(root, manifest, status, observation))
@@ -1644,8 +2117,14 @@ def validate_state_authority(
             "accepted",
         }
         if (
-            status.get("schema_version") == STATUS_SCHEMA_V2
-            and manifest.get("schema_version") == NEW_PROGRAM_MANIFEST_SCHEMA
+            (
+                status.get("schema_version"),
+                manifest.get("schema_version"),
+            )
+            in {
+                (STATUS_SCHEMA_V2, NEW_PROGRAM_MANIFEST_SCHEMA),
+                (STATUS_SCHEMA_V3, SETUP_PROGRAM_MANIFEST_SCHEMA),
+            }
             and status.get("current_increment_state") in baseline_states
         ):
             baseline_binding = status.get("execution_baseline_binding")
@@ -1978,7 +2457,11 @@ def validate_state_authority(
                         )
                     elif (
                         _canonical_json_line_sha256(matches[0])
-                        != preparation.get("action_authorization_sha256")
+                        != (
+                            execution_authorization.get("authorization_sha256")
+                            if status.get("schema_version") == STATUS_SCHEMA_V3
+                            else preparation.get("action_authorization_sha256")
+                        )
                         or matches[0].get("exact_file_plan_sha256")
                         != status.get("approved_exact_file_plan_sha256")
                         or matches[0].get("execution_baseline_sha256")
@@ -2227,7 +2710,8 @@ def validate_state_authority(
         if workspace.get("program_revision") != manifest.get("program_revision"):
             issues.append("workspace program_revision mismatch")
         if (
-            manifest.get("schema_version") == NEW_PROGRAM_MANIFEST_SCHEMA
+            manifest.get("schema_version")
+            in {NEW_PROGRAM_MANIFEST_SCHEMA, SETUP_PROGRAM_MANIFEST_SCHEMA}
             and workspace.get("schema_version")
             == "implementation-workspace-proposal/v1"
         ):
@@ -2525,6 +3009,7 @@ def atomic_append_json_line(
         "grant_id",
         "rollover_id",
         "resolution_id",
+        "decision_id",
     )
 
     def record_identifier(record: dict[str, object]) -> object:
@@ -2761,6 +3246,10 @@ def apply_state_transition(
     if manifest is None:
         raise ValueError("; ".join(manifest_issues))
     status, status_path = _load_role(root, manifest, "status")
+    if manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA:
+        raise ValueError(
+            "typed-v3-lifecycle-transition-required: use the owning v3 transaction"
+        )
     if manifest.get("schema_version") == NEW_PROGRAM_MANIFEST_SCHEMA:
         current_program = status.get("program_state")
         current_increment = status.get("current_increment_state")

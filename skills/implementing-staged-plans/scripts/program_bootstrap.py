@@ -17,17 +17,21 @@ from typing import Any
 
 from program_authority import (
     PROPOSAL_VALIDATION_MODE,
+    SETUP_PROGRAM_MANIFEST_SCHEMA,
     SUPPORTED_NEW_PROGRAM_APPROVAL_MODES,
     load_json_object,
     resolve_managed_path,
     sha256_file,
     validate_program_authority,
 )
+from program_setup import render_setup_recap
 from repository_preparation import inspect_repository, validate_repository_stability
 
 
 PROPOSAL_REQUEST_SCHEMA = "implementation-program-proposal-request/v1"
 PUBLICATION_OWNER_SCHEMA = "implementation-proposal-publication-owner/v1"
+PROPOSAL_REQUEST_SCHEMA_V2 = "implementation-program-proposal-request/v2"
+PUBLICATION_OWNER_SCHEMA_V2 = "implementation-proposal-publication-owner/v2"
 
 
 @dataclass(frozen=True)
@@ -39,6 +43,7 @@ class ProposalPublication:
     created_paths: tuple[str, ...]
     adopted_paths: tuple[str, ...]
     recovered: bool
+    setup_recap_sha256: str | None = None
 
 
 class _UsageError(ValueError):
@@ -113,6 +118,177 @@ def _candidate_file_digests(
     return {
         relative: sha256_file(candidate_root.joinpath(*_safe_relative_path(relative).parts))
         for relative in inventory
+    }
+
+
+def _capture_candidate(
+    candidate_root: Path, inventory: Sequence[str]
+) -> dict[str, bytes]:
+    """Capture the validated candidate once for every later publication write."""
+    captured: dict[str, bytes] = {}
+    for relative in inventory:
+        path = candidate_root.joinpath(*_safe_relative_path(relative).parts)
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"candidate file is unsafe: {relative}")
+        captured[relative] = path.read_bytes()
+    if _candidate_inventory(candidate_root) != tuple(inventory):
+        raise ValueError("candidate inventory changed during immutable capture")
+    return captured
+
+
+def _captured_digests(captured: dict[str, bytes]) -> dict[str, str]:
+    return {path: _sha256_bytes(payload) for path, payload in captured.items()}
+
+
+def _validate_captured_tree(
+    root: Path,
+    captured: dict[str, bytes],
+    *,
+    allow_owner: bool,
+) -> None:
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError("proposal-publication-recovery-required: unsafe staging root")
+    present = {
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file() or path.is_symlink()
+    }
+    expected = set(captured)
+    if allow_owner:
+        expected.add(".publication-owner.json")
+    if present != expected:
+        raise ValueError(
+            "proposal-publication-recovery-required: staging inventory differs"
+        )
+    for relative, payload in captured.items():
+        path = root.joinpath(*_safe_relative_path(relative).parts)
+        if path.is_symlink() or not path.is_file() or path.read_bytes() != payload:
+            raise ValueError(
+                f"proposal-publication-recovery-required: staging bytes differ: {relative}"
+            )
+
+
+def _repository_relative_regular_file(repository: Path, raw_path: str | Path) -> Path:
+    candidate = Path(raw_path)
+    if not candidate.is_absolute():
+        candidate = repository / candidate
+    candidate = candidate.resolve(strict=False)
+    try:
+        relative = candidate.relative_to(repository)
+    except ValueError as error:
+        raise ValueError("publication instruction source escapes repository") from error
+    current = repository
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError("publication instruction source contains a symlink")
+    if not candidate.is_file():
+        raise ValueError("publication instruction source must be a regular file")
+    return candidate
+
+
+def publication_freshness(
+    repository_root: Path,
+    current_program_id: str,
+    *,
+    instruction_source_paths: Sequence[str | Path] = (),
+    instruction_manifest_paths: Sequence[str | Path] = (),
+) -> dict[str, object]:
+    """Capture instruction bindings and the exact manifest discovery surface."""
+    repository = Path(repository_root).resolve(strict=True)
+    sources = []
+    for raw_path in instruction_source_paths:
+        path = _repository_relative_regular_file(repository, raw_path)
+        sources.append(
+            {
+                "path": path.relative_to(repository).as_posix(),
+                "sha256": sha256_file(path),
+                "regular_non_symlink": True,
+            }
+        )
+    source_paths = [item["path"] for item in sources]
+    if len(source_paths) != len(set(source_paths)):
+        raise ValueError("publication instruction sources must be unique")
+    sources.sort(key=lambda item: str(item["path"]))
+
+    declared: list[str] = []
+    for raw_path in instruction_manifest_paths:
+        path = Path(raw_path)
+        if path.is_absolute():
+            try:
+                path = path.relative_to(repository)
+            except ValueError as error:
+                raise ValueError("instruction-declared manifest escapes repository") from error
+        relative = _safe_relative_path(path.as_posix()).as_posix()
+        declared.append(relative)
+    if len(declared) != len(set(declared)):
+        raise ValueError("instruction-declared manifest paths must be unique")
+    declared.sort()
+
+    conventional_root = repository / "implementation-programs"
+    if conventional_root.is_symlink():
+        raise ValueError("implementation-programs must not be a symlink")
+    conventional = (
+        [path.relative_to(repository).as_posix() for path in conventional_root.glob("*/manifest.json")]
+        if conventional_root.is_dir()
+        else []
+    )
+    manifest_paths = sorted(set([*declared, *conventional]))
+    discovered: list[dict[str, object]] = []
+    for relative in manifest_paths:
+        manifest_path = repository.joinpath(*_safe_relative_path(relative).parts)
+        entry: dict[str, object] = {"path": relative}
+        if manifest_path.is_symlink() or not manifest_path.is_file():
+            entry["disposition"] = "missing"
+            entry["manifest_sha256"] = None
+            entry["status"] = None
+            discovered.append(entry)
+            continue
+        manifest, manifest_issues = load_json_object(manifest_path)
+        entry["manifest_sha256"] = sha256_file(manifest_path)
+        if manifest is None:
+            entry["disposition"] = "invalid"
+            entry["issues"] = [
+                issue.replace(str(manifest_path), relative, 1)
+                for issue in manifest_issues
+            ]
+            entry["status"] = None
+            discovered.append(entry)
+            continue
+        if manifest.get("program_id") == current_program_id:
+            continue
+        entry["program_id"] = manifest.get("program_id")
+        logical_roles = manifest.get("logical_roles")
+        status_value: dict[str, object] | None = None
+        status_sha256: str | None = None
+        if isinstance(logical_roles, dict):
+            status_path, _ = resolve_managed_path(
+                manifest_path.parent,
+                logical_roles.get("status"),
+                role="logical role status",
+            )
+            if status_path is not None:
+                status_value, _ = load_json_object(status_path)
+                status_sha256 = sha256_file(status_path)
+        entry["status"] = (
+            {
+                "schema_version": status_value.get("schema_version"),
+                "program_state": status_value.get("program_state"),
+                "current_increment_state": status_value.get("current_increment_state"),
+                "state_sequence": status_value.get("state_sequence"),
+                "sha256": status_sha256,
+            }
+            if status_value is not None
+            else None
+        )
+        entry["disposition"] = "valid" if status_value is not None else "invalid"
+        discovered.append(entry)
+    return {
+        "schema_version": "implementation-publication-freshness/v1",
+        "instruction_sources": sources,
+        "instruction_manifest_paths": declared,
+        "discovery": discovered,
+        "controlling_programs": _controlling_programs(repository, current_program_id),
     }
 
 
@@ -373,12 +549,16 @@ def publish_program_proposal(
     source_plan: Path,
     candidate_root: Path,
     expected_source_sha256: str,
+    *,
+    instruction_source_paths: Sequence[str | Path] = (),
+    instruction_manifest_paths: Sequence[str | Path] = (),
 ) -> ProposalPublication:
     """Publish or recover one proposal without overwriting any divergent byte."""
     repository = Path(repository_root).resolve(strict=True)
     source = Path(source_plan).resolve(strict=False)
     candidate = Path(candidate_root).resolve(strict=False)
     inventory = _candidate_inventory(candidate)
+    captured = _capture_candidate(candidate, inventory)
     manifest = _load_candidate_manifest(candidate)
     approval_mode = manifest.get("approval_mode")
     if approval_mode not in SUPPORTED_NEW_PROGRAM_APPROVAL_MODES:
@@ -400,9 +580,22 @@ def publish_program_proposal(
         raise ValueError("candidate program_id is not a safe directory name")
 
     target = repository / "implementation-programs" / program_id
-    digests = _candidate_file_digests(candidate, inventory)
+    digests = _captured_digests(captured)
+    is_setup_v3 = manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA
+    initial_freshness = (
+        publication_freshness(
+            repository,
+            str(program_id),
+            instruction_source_paths=instruction_source_paths,
+            instruction_manifest_paths=instruction_manifest_paths,
+        )
+        if is_setup_v3
+        else None
+    )
     request = {
-        "schema_version": PROPOSAL_REQUEST_SCHEMA,
+        "schema_version": (
+            PROPOSAL_REQUEST_SCHEMA_V2 if is_setup_v3 else PROPOSAL_REQUEST_SCHEMA
+        ),
         "program_id": program_id,
         "program_revision": revision,
         "source_sha256": expected_source_sha256,
@@ -410,12 +603,18 @@ def publish_program_proposal(
         "candidate_inventory_sha256": _sha256_bytes(_canonical_json(digests)),
         "target": target.relative_to(repository).as_posix(),
     }
+    if initial_freshness is not None:
+        request["publication_freshness_sha256"] = _sha256_bytes(
+            _canonical_json(initial_freshness)
+        )
     request_bytes = _canonical_json(request)
     request_sha256 = _sha256_bytes(request_bytes)
     owner_token = request_sha256[:16]
     staging = repository / f".implementation-program-{program_id}-{owner_token}"
     owner = {
-        "schema_version": PUBLICATION_OWNER_SCHEMA,
+        "schema_version": (
+            PUBLICATION_OWNER_SCHEMA_V2 if is_setup_v3 else PUBLICATION_OWNER_SCHEMA
+        ),
         "owner_token": owner_token,
         "program_id": program_id,
         "program_revision": revision,
@@ -425,6 +624,14 @@ def publish_program_proposal(
             {"path": path, "sha256": digests[path]} for path in inventory
         ],
     }
+    if initial_freshness is not None:
+        owner.update(
+            request_schema_version=PROPOSAL_REQUEST_SCHEMA_V2,
+            publication_freshness=initial_freshness,
+            publication_freshness_sha256=request[
+                "publication_freshness_sha256"
+            ],
+        )
     owner_bytes = _canonical_json(owner)
 
     if target.exists() or target.is_symlink():
@@ -484,10 +691,11 @@ def publish_program_proposal(
     )
     _after_persist("owner-receipt")
     for relative in inventory:
-        source_path = candidate.joinpath(*_safe_relative_path(relative).parts)
         destination = staging.joinpath(*_safe_relative_path(relative).parts)
-        _create_or_adopt(destination, source_path.read_bytes())
+        _create_or_adopt(destination, captured[relative])
         _after_persist(f"staging:{relative}")
+
+    _validate_captured_tree(staging, captured, allow_owner=True)
 
     owned_prefixes = (
         staging.relative_to(repository).as_posix(),
@@ -502,6 +710,13 @@ def publish_program_proposal(
     if _controlling_programs(repository, program_id):
         raise ValueError("multiple controlling programs appeared during publication")
     _validate_source(source, expected_source_sha256, candidate, manifest)
+    if initial_freshness is not None and publication_freshness(
+        repository,
+        str(program_id),
+        instruction_source_paths=instruction_source_paths,
+        instruction_manifest_paths=instruction_manifest_paths,
+    ) != initial_freshness:
+        raise ValueError("publication freshness changed before final-root adoption")
 
     target_preexisted = _validate_existing_target(target, owner_bytes, set(inventory))
     if not target_preexisted:
@@ -521,9 +736,8 @@ def publish_program_proposal(
     for relative in inventory:
         if relative == "manifest.json":
             continue
-        payload = staging.joinpath(*_safe_relative_path(relative).parts).read_bytes()
         was_created = _create_or_adopt(
-            target.joinpath(*_safe_relative_path(relative).parts), payload
+            target.joinpath(*_safe_relative_path(relative).parts), captured[relative]
         )
         (created if was_created else adopted).append(relative)
         _after_persist(f"final:{relative}")
@@ -537,8 +751,16 @@ def publish_program_proposal(
     if _controlling_programs(repository, program_id):
         raise ValueError("multiple controlling programs appeared before manifest publication")
     _validate_source(source, expected_source_sha256, candidate, manifest)
+    _validate_captured_tree(staging, captured, allow_owner=True)
+    if initial_freshness is not None and publication_freshness(
+        repository,
+        str(program_id),
+        instruction_source_paths=instruction_source_paths,
+        instruction_manifest_paths=instruction_manifest_paths,
+    ) != initial_freshness:
+        raise ValueError("publication freshness changed before manifest publication")
 
-    manifest_payload = staging.joinpath("manifest.json").read_bytes()
+    manifest_payload = captured["manifest.json"]
     manifest_created = _create_or_adopt(target / "manifest.json", manifest_payload)
     (created if manifest_created else adopted).append("manifest.json")
     _after_persist("final:manifest.json")
@@ -557,6 +779,11 @@ def publish_program_proposal(
     )
     if status_path is None:
         raise ValueError("; ".join(status_issues))
+    setup_recap_sha256 = (
+        _sha256_bytes(render_setup_recap(target).encode("utf-8"))
+        if is_setup_v3
+        else None
+    )
     return ProposalPublication(
         program_root=str(target),
         manifest_sha256=sha256_file(target / "manifest.json"),
@@ -570,6 +797,7 @@ def publish_program_proposal(
             or not owner_created
             or bool(adopted)
         ),
+        setup_recap_sha256=setup_recap_sha256,
     )
 
 
@@ -581,6 +809,8 @@ def _build_parser() -> _ArgumentParser:
     publish.add_argument("--source-plan", required=True)
     publish.add_argument("--candidate-root", required=True)
     publish.add_argument("--expected-source-sha256", required=True)
+    publish.add_argument("--instruction-source", action="append", default=[])
+    publish.add_argument("--instruction-manifest", action="append", default=[])
     return parser
 
 
@@ -598,6 +828,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             Path(arguments.source_plan),
             Path(arguments.candidate_root),
             arguments.expected_source_sha256,
+            instruction_source_paths=arguments.instruction_source,
+            instruction_manifest_paths=arguments.instruction_manifest,
         )
     except (OSError, TypeError, ValueError) as error:
         print(str(error))

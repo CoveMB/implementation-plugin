@@ -22,12 +22,14 @@ from program_authority import (
     APPROVED_VALIDATION_MODE,
     NEW_PROGRAM_MANIFEST_SCHEMA,
     PROPOSAL_VALIDATION_MODE,
+    SETUP_PROGRAM_MANIFEST_SCHEMA,
     load_json_lines,
     load_json_object,
     resolve_managed_path,
     sha256_file,
     validate_program_authority,
 )
+from program_bootstrap import publication_freshness
 from program_launch import (
     render_program_launch_prompt,
     validate_submitted_program_launch_prompt,
@@ -64,12 +66,24 @@ PLAN_A_DISCOVERY_DISPOSITIONS = frozenset(
         "closure-preparation-retry-ready",
         "closure-approval-retry-ready",
         "resume",
+        "program-setup-ready",
+        "first-increment-start-ready",
         "accepted-stop",
         "closure-approval-ready",
         "terminal-programs",
     }
 )
 PLAN_A_ROUTE_DETAILS = {
+    "program-setup-ready": (
+        "program-setup-approval",
+        "Present the readable program setup recap and wait for a direct answer.",
+        False,
+    ),
+    "first-increment-start-ready": (
+        "first-increment-start-intent",
+        "Use the semantic handoff in a fresh task to start the first increment.",
+        False,
+    ),
     "proposal-publication-retry-ready": (
         None,
         "Resubmit the same proposal-publication request to adopt the valid prefix.",
@@ -1291,6 +1305,201 @@ def _load_new_candidate(
     )
 
 
+def _load_setup_candidate(
+    repository: Path,
+    manifest_path: Path,
+) -> tuple[ProgramCandidate | None, str | None, tuple[str, ...]]:
+    """Inspect the v3 setup and first-start boundaries before generic lifecycle routing."""
+    display_path = _display_path(repository, manifest_path)
+    root = manifest_path.parent
+    manifest, manifest_issues = load_json_object(manifest_path)
+    if manifest is None:
+        return None, None, tuple(
+            f"{display_path}: {issue}" for issue in manifest_issues
+        )
+    roles = manifest.get("logical_roles")
+    if not isinstance(roles, dict):
+        return None, None, (f"{display_path}: manifest logical_roles must be an object",)
+    status_path, status_path_issues = resolve_managed_path(
+        root, roles.get("status"), role="logical role status"
+    )
+    if status_path is None:
+        return None, None, tuple(
+            f"{display_path}: {issue}" for issue in status_path_issues
+        )
+    status, status_issues = load_json_object(status_path)
+    if status is None:
+        return None, None, tuple(f"{display_path}: {issue}" for issue in status_issues)
+    issues: list[str] = []
+    if status.get("schema_version") != "implementation-program-status/v3":
+        issues.append("manifest v3 requires status v3")
+    for field in ("program_id", "program_revision", "approval_mode", "source_binding"):
+        if status.get(field) != manifest.get(field):
+            issues.append(f"status {field} does not match manifest")
+    revision = manifest.get("program_revision")
+    sequence = status.get("state_sequence")
+    revision_valid = type(revision) is int and revision > 0
+    sequence_valid = type(sequence) is int and sequence >= 0
+    if not revision_valid:
+        issues.append("manifest program_revision is invalid")
+    if not sequence_valid:
+        issues.append("status state_sequence is invalid")
+    if not revision_valid or not sequence_valid:
+        return None, None, tuple(
+            f"{display_path}: {issue}" for issue in sorted(set(issues))
+        )
+    candidate = ProgramCandidate(
+        manifest_path=display_path,
+        program_root=_relative_path(repository, root),
+        program_id=str(manifest.get("program_id")),
+        program_revision=revision,
+        program_state=str(status.get("program_state")),
+        status_path=_relative_path(repository, status_path),
+        status_sha256=sha256_file(status_path),
+        status_sequence=sequence,
+    )
+    setup_path, setup_path_issues = resolve_managed_path(
+        root,
+        roles.get("setup_activation_decision"),
+        role="logical role setup_activation_decision",
+        require_file=False,
+    )
+    issues.extend(setup_path_issues)
+    approvals_path, approval_path_issues = resolve_managed_path(
+        root, roles.get("approvals"), role="logical role approvals"
+    )
+    issues.extend(approval_path_issues)
+    grants_path, grant_path_issues = resolve_managed_path(
+        root, roles.get("increment_grants"), role="logical role increment_grants"
+    )
+    issues.extend(grant_path_issues)
+    actions_path, action_path_issues = resolve_managed_path(
+        root,
+        roles.get("action_authorizations"),
+        role="logical role action_authorizations",
+    )
+    issues.extend(action_path_issues)
+    if issues:
+        return candidate, None, tuple(
+            f"{display_path}: {issue}" for issue in sorted(set(issues))
+        )
+    approvals, approval_issues = load_json_lines(approvals_path)
+    grants, grant_issues = load_json_lines(grants_path)
+    actions, action_issues = load_json_lines(actions_path)
+    issues.extend([*approval_issues, *grant_issues, *action_issues])
+    if approvals is None or grants is None or actions is None:
+        return candidate, None, tuple(
+            f"{display_path}: {issue}" for issue in sorted(set(issues))
+        )
+    sequence = status.get("state_sequence")
+    program_state = status.get("program_state")
+    increment_state = status.get("current_increment_state")
+    setup_exists = bool(setup_path and (setup_path.exists() or setup_path.is_symlink()))
+    if sequence == 0:
+        if (program_state, increment_state) != (
+            "awaiting-program-approval",
+            "not-started",
+        ) or grants or actions:
+            issues.append("v3 proposal contains authority outside the activation prefix")
+        if not setup_exists:
+            if approvals:
+                issues.append("v3 proposal has approvals without its setup decision")
+            issues.extend(
+                validate_program_authority(
+                    root, validation_mode=PROPOSAL_VALIDATION_MODE
+                )
+            )
+            route = "program-setup-ready"
+        else:
+            setup, setup_issues = load_json_object(setup_path)
+            issues.extend(setup_issues)
+            expected_ids = (
+                setup.get("program_approval_event_id") if setup else None,
+                setup.get("workspace_approval_event_id") if setup else None,
+            )
+            actual = tuple(record.get("event_id") for record in approvals)
+            if len(actual) > 2 or actual != expected_ids[: len(actual)]:
+                issues.append("v3 activation records are not an ordered transaction prefix")
+            route = "program-activation-retry-ready"
+        if issues:
+            return candidate, None, tuple(
+                f"{display_path}: {issue}" for issue in sorted(set(issues))
+            )
+        return candidate, route, ()
+    if isinstance(sequence, int) and sequence >= 1:
+        try:
+            workspace_path, workspace_issues = resolve_managed_path(
+                root, roles.get("workspace"), role="logical role workspace"
+            )
+            if workspace_path is None or workspace_issues:
+                raise ValueError("workspace binding is unavailable")
+            workspace, workspace_load_issues = load_json_object(workspace_path)
+            if workspace is None or workspace_load_issues:
+                raise ValueError("workspace binding is invalid")
+            selected = workspace["implementation_workspace"]
+            observation = _without_owned_program_paths(
+                root,
+                inspect_repository(
+                    Path(selected["path"]), selected["base_commit"]
+                ).observation,
+            )
+            issues.extend(validate_state_authority(root, observation))
+        except (KeyError, OSError, TypeError, ValueError) as error:
+            issues.append(str(error))
+        if issues:
+            return candidate, None, tuple(
+                f"{display_path}: {issue}" for issue in sorted(set(issues))
+            )
+        if program_state == "blocked" or increment_state == "blocked":
+            try:
+                from blocked_recovery import inspect_blocked_recovery
+
+                blocked = inspect_blocked_recovery(root, observation)
+            except (ImportError, KeyError, OSError, TypeError, ValueError):
+                return candidate, "blocked-recovery-required", ()
+            candidate = replace(
+                candidate,
+                resume_program_state=blocked.prior_program_state,
+                resume_increment_state=blocked.prior_increment_state,
+            )
+            return candidate, (
+                blocked.disposition or "blocked-recovery-required"
+            ), ()
+        if sequence == 1 and increment_state == "awaiting-first-increment":
+            return candidate, "first-increment-start-ready", ()
+        if program_state == "awaiting-closure-approval":
+            return candidate, "closure-approval-ready", ()
+        if program_state in {"closed", "superseded"}:
+            return candidate, "terminal-programs", ()
+        if increment_state in {
+            "preparing",
+            "awaiting-plan-approval",
+            "authorized",
+            "implementing",
+            "reviewing",
+            "change-requested",
+            "remediating",
+        }:
+            return candidate, "resume", ()
+        if increment_state == "verified":
+            return candidate, "review-preparation-retry-ready", ()
+        if increment_state == "awaiting-diff-approval":
+            return candidate, "increment-acceptance-retry-ready", ()
+        if increment_state == "accepted":
+            binding = status.get("diff_disposition_binding")
+            if (
+                isinstance(binding, dict)
+                and binding.get("decision") == "accept-stop"
+                and program_state == "active"
+            ):
+                return candidate, "accepted-stop", ()
+            return candidate, "increment-acceptance-retry-ready", ()
+        return candidate, None, (
+            f"{display_path}: unsupported v3 lifecycle state combination",
+        )
+    return candidate, None, (f"{display_path}: v3 state sequence is invalid",)
+
+
 def validate_resume_evidence(
     observed: ResumeExpectations,
     expected: ResumeExpectations,
@@ -1381,12 +1590,25 @@ def _bootstrap_prefix_disposition(repository: Path) -> tuple[str | None, tuple[s
     )
     if not staging_roots:
         return None, ()
-    if len(staging_roots) != 1:
+    incomplete: list[tuple[str, tuple[str, ...]]] = []
+    for staging in staging_roots:
+        disposition, issues = _single_bootstrap_prefix_disposition(repository, staging)
+        if disposition is None:
+            continue
+        if disposition != "proposal-publication-retry-ready":
+            return disposition, issues
+        incomplete.append((disposition, issues))
+    if len(incomplete) > 1:
         return (
             "proposal-publication-recovery-required",
-            ("multiple proposal-publication staging roots require recovery",),
+            ("multiple incomplete proposal-publication staging roots require recovery",),
         )
-    staging = staging_roots[0]
+    return incomplete[0] if incomplete else (None, ())
+
+
+def _single_bootstrap_prefix_disposition(
+    repository: Path, staging: Path
+) -> tuple[str | None, tuple[str, ...]]:
     owner_path = staging / ".publication-owner.json"
     owner, owner_issues = load_json_object(owner_path)
     if owner is None:
@@ -1403,9 +1625,13 @@ def _bootstrap_prefix_disposition(repository: Path) -> tuple[str | None, tuple[s
     program_id = owner.get("program_id")
     target_value = owner.get("target")
     inventory_value = owner.get("inventory")
+    owner_schema = owner.get("schema_version")
     if (
-        owner.get("schema_version")
-        != "implementation-proposal-publication-owner/v1"
+        owner_schema
+        not in {
+            "implementation-proposal-publication-owner/v1",
+            "implementation-proposal-publication-owner/v2",
+        }
         or not isinstance(owner_token, str)
         or len(owner_token) != 16
         or not isinstance(program_id, str)
@@ -1462,6 +1688,61 @@ def _bootstrap_prefix_disposition(repository: Path) -> tuple[str | None, tuple[s
             for relative in expected
         )
     )
+    if owner_schema == "implementation-proposal-publication-owner/v2":
+        freshness = owner.get("publication_freshness")
+        expected_freshness_sha256 = owner.get("publication_freshness_sha256")
+        actual_freshness_sha256 = (
+            hashlib.sha256(
+                (
+                    json.dumps(
+                        freshness,
+                        ensure_ascii=False,
+                        indent=2,
+                        sort_keys=True,
+                    )
+                    + "\n"
+                ).encode("utf-8")
+            ).hexdigest()
+            if isinstance(freshness, dict)
+            else None
+        )
+        if (
+            not isinstance(freshness, dict)
+            or owner.get("request_schema_version")
+            != "implementation-program-proposal-request/v2"
+            or actual_freshness_sha256 != expected_freshness_sha256
+        ):
+            return (
+                "proposal-publication-recovery-required",
+                ("proposal-publication freshness binding is invalid",),
+            )
+        if not manifest_committed:
+            instruction_sources = freshness.get("instruction_sources", [])
+            declared = freshness.get("instruction_manifest_paths", [])
+            if not isinstance(instruction_sources, list) or not isinstance(declared, list):
+                return (
+                    "proposal-publication-recovery-required",
+                    ("proposal-publication freshness value is invalid",),
+                )
+            source_paths = [
+                item.get("path")
+                for item in instruction_sources
+                if isinstance(item, dict)
+            ]
+            try:
+                current_freshness = publication_freshness(
+                    repository,
+                    str(program_id),
+                    instruction_source_paths=source_paths,
+                    instruction_manifest_paths=declared,
+                )
+            except (OSError, TypeError, ValueError) as error:
+                return "proposal-publication-recovery-required", (str(error),)
+            if current_freshness != freshness:
+                return (
+                    "proposal-publication-recovery-required",
+                    ("proposal-publication freshness changed",),
+                )
     if target.exists() or target.is_symlink():
         if target.is_symlink() or not target.is_dir():
             return (
@@ -1893,10 +2174,14 @@ def discover_programs(
             manifest, _manifest_issues = load_json_object(manifest_path)
             if (
                 manifest is not None
-                and manifest.get("schema_version") == NEW_PROGRAM_MANIFEST_SCHEMA
+                and manifest.get("schema_version")
+                in {NEW_PROGRAM_MANIFEST_SCHEMA, SETUP_PROGRAM_MANIFEST_SCHEMA}
             ):
-                candidate, route, candidate_issues = _load_new_candidate(
-                    repository, manifest_path
+                candidate, route, candidate_issues = (
+                    _load_setup_candidate(repository, manifest_path)
+                    if manifest.get("schema_version")
+                    == SETUP_PROGRAM_MANIFEST_SCHEMA
+                    else _load_new_candidate(repository, manifest_path)
                 )
                 resume = None
             else:
@@ -1916,7 +2201,8 @@ def discover_programs(
                 continue
             if route == "terminal-programs" or (
                 manifest is not None
-                and manifest.get("schema_version") != NEW_PROGRAM_MANIFEST_SCHEMA
+                and manifest.get("schema_version")
+                not in {NEW_PROGRAM_MANIFEST_SCHEMA, SETUP_PROGRAM_MANIFEST_SCHEMA}
                 and candidate.program_state == "closed"
             ):
                 closed.append(candidate)

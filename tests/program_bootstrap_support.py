@@ -32,6 +32,17 @@ def canonical_json(value: object) -> bytes:
     ).encode("utf-8")
 
 
+def canonical_compact_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def run_git(repository: Path, *arguments: str) -> str:
     return subprocess.run(
         ["git", *arguments],
@@ -456,6 +467,229 @@ class BootstrapFixture:
         status["approval_mode"] = approval_mode
         self.write_json("state/status.json", status)
 
+    def configure_setup_v3(
+        self,
+        *,
+        source_gate_definitions: Sequence[dict[str, object]] = (),
+    ) -> None:
+        """Upgrade the candidate fixture to the closed setup/activation family."""
+        manifest = self.load_json("manifest.json")
+        workspace = self.load_json("state/workspace.json")
+        traceability = self.load_json("program/traceability.json")
+        definitions = sorted(
+            (dict(item) for item in source_gate_definitions),
+            key=lambda item: str(item.get("gate_id", "")),
+        )
+        manifest["schema_version"] = "implementation-program-manifest/v3"
+        manifest["logical_roles"].update(
+            setup_activation_decision="state/setup-activation-decision.json",
+            source_gate_decisions="state/source-gate-decisions.jsonl",
+        )
+        gate_ledger = self.candidate / "state/source-gate-decisions.jsonl"
+        gate_ledger.parent.mkdir(parents=True, exist_ok=True)
+        gate_ledger.write_bytes(b"")
+        manifest["source_gate_definitions"] = definitions
+        manifest["source_gate_definitions_sha256"] = canonical_compact_sha256(
+            definitions
+        )
+        atomic_requirements = traceability["atomic_requirements"]
+        increment_ids: list[str] = []
+        for atomic_requirement in atomic_requirements:
+            for increment_id in atomic_requirement["assigned_increments"]:
+                if increment_id not in increment_ids:
+                    increment_ids.append(increment_id)
+        increments = []
+        for increment_index, increment_id in enumerate(increment_ids):
+            assigned = [
+                atomic_requirement
+                for atomic_requirement in atomic_requirements
+                if increment_id in atomic_requirement["assigned_increments"]
+            ]
+            increments.append(
+                {
+                    "increment_id": increment_id,
+                    "depends_on": (
+                        [increment_ids[increment_index - 1]]
+                        if increment_index
+                        else []
+                    ),
+                    "requirement_ids": [item["id"] for item in assigned],
+                    "acceptance_meaning": [
+                        criterion
+                        for item in assigned
+                        for criterion in item["acceptance_criteria"]
+                    ],
+                    "intended_outcome": " ".join(
+                        item["normalized_requirement"] for item in assigned
+                    ),
+                    "expected_checks": [
+                        "python3 -m unittest tests.test_archive_output"
+                    ],
+                }
+            )
+        setup_semantics = {
+            "schema_version": "implementation-program-setup-semantics/v1",
+            "program": {
+                "name": "Archive integrity program",
+                "program_id": manifest["program_id"],
+                "program_revision": manifest["program_revision"],
+                "intended_outcome": "Verify stored archive checksums.",
+            },
+            "bindings": {
+                "source": dict(manifest["source_binding"]),
+                "program": {
+                    **dict(manifest["program_binding"]),
+                    "semantic_requirements_sha256": traceability[
+                        "coverage_assertion"
+                    ]["semantic_requirements_sha256"],
+                },
+                "workspace_sha256": hashlib.sha256(
+                    canonical_json(workspace)
+                ).hexdigest(),
+                "source_gate_definitions_sha256": manifest[
+                    "source_gate_definitions_sha256"
+                ],
+            },
+            "sources": [
+                {
+                    "source_id": manifest["source_binding"]["source_id"],
+                    "title": "Archive Plan",
+                    "location": "source/implementation-plan.md",
+                    "sha256": manifest["source_binding"]["sha256"],
+                }
+            ],
+            "workspace": {
+                "repository": workspace["repository"]["identity"],
+                "path": workspace["implementation_workspace"]["path"],
+                "branch": workspace["implementation_workspace"]["branch"],
+                "base_commit": workspace["implementation_workspace"]["base_commit"],
+                "head_commit": workspace["implementation_workspace"][
+                    "head_commit_at_selection"
+                ],
+                "protected_work": dict(workspace["pre_existing_work_at_selection"]),
+            },
+            "increments": increments,
+            "approval": {
+                "mode": manifest["approval_mode"],
+                "routine_exact_plan_question": manifest["approval_mode"]
+                == "approval:standard",
+                "remaining_boundaries": [
+                    "source-defined gates",
+                    "diff disposition",
+                    "continuation",
+                    "consequential actions",
+                ],
+            },
+            "operation_envelope": {
+                "schema_version": "implementation-operation-envelope/v1",
+                "supported_operations": ["Create", "Modify", "Preserve"],
+                "allocations": [
+                    {
+                        "kind": "exact-path",
+                        "path": "archive-output.txt",
+                        "operation": "Create",
+                        "increment_ids": increment_ids,
+                        "inclusions": ["archive checksum output"],
+                        "exclusions": [],
+                        "ownership": "program",
+                        "protected": False,
+                        "user_work": False,
+                        "file_kind": "absent",
+                        "link_kind": "none",
+                        "mode": None,
+                        "collision": "none",
+                    },
+                    {
+                        "kind": "exact-path",
+                        "path": "catalog.txt",
+                        "operation": "Preserve",
+                        "increment_ids": increment_ids,
+                        "inclusions": ["existing archive catalog"],
+                        "exclusions": [],
+                        "ownership": "user",
+                        "protected": True,
+                        "user_work": False,
+                        "file_kind": "regular-file",
+                        "link_kind": "none",
+                        "mode": "100644",
+                        "collision": "existing",
+                    },
+                    {
+                        "kind": "bounded-path-class",
+                        "path": "reviews",
+                        "operation": "Create",
+                        "increment_ids": increment_ids,
+                        "inclusions": ["required review scope reports"],
+                        "exclusions": [],
+                        "ownership": "program",
+                        "protected": False,
+                        "user_work": False,
+                        "file_kind": "absent",
+                        "link_kind": "none",
+                        "mode": None,
+                        "collision": "none",
+                    },
+                ],
+            },
+            "protections": ["Preserve catalog.txt byte-for-byte."],
+            "exclusions": ["No external publication."],
+            "external_boundaries": ["Git and provider actions require separate approval."],
+            "material_risks": ["Repository drift invalidates the setup checkpoint."],
+            "first_increment_id": "ARCHIVE-INDEX",
+        }
+        if len(increment_ids) > 1:
+            setup_semantics["operation_envelope"]["allocations"].extend(
+                [
+                    {
+                        "kind": "exact-path",
+                        "path": "archive-output.txt",
+                        "operation": "Modify",
+                        "increment_ids": increment_ids[1:],
+                        "inclusions": ["accepted archive checksum output"],
+                        "exclusions": [],
+                        "ownership": "program",
+                        "protected": False,
+                        "user_work": False,
+                        "file_kind": "regular-file",
+                        "link_kind": "none",
+                        "mode": "100644",
+                        "collision": "accepted-predecessor",
+                    },
+                    {
+                        "kind": "bounded-path-class",
+                        "path": "reviews",
+                        "operation": "Modify",
+                        "increment_ids": increment_ids[1:],
+                        "inclusions": ["accepted predecessor review reports"],
+                        "exclusions": [],
+                        "ownership": "program",
+                        "protected": False,
+                        "user_work": False,
+                        "file_kind": "regular-file",
+                        "link_kind": "none",
+                        "mode": "100644",
+                        "collision": "accepted-predecessor",
+                    },
+                ]
+            )
+        manifest["setup_semantics"] = setup_semantics
+        manifest["setup_semantics_sha256"] = canonical_compact_sha256(setup_semantics)
+        self.write_json("manifest.json", manifest)
+        first_brief = (
+            self.candidate
+            / manifest["increment_storage"]["root"]
+            / setup_semantics["first_increment_id"]
+            / manifest["increment_storage"]["brief_filename"]
+        )
+        first_brief.parent.mkdir(parents=True, exist_ok=True)
+        first_brief.write_text(
+            "# Archive integrity\n\nVerify every stored checksum.\n",
+            encoding="utf-8",
+        )
+        status = self.load_json("state/status.json")
+        status["schema_version"] = "implementation-program-status/v3"
+        self.write_json("state/status.json", status)
+
     def _configure_candidate(self) -> None:
         manifest = self.load_json("manifest.json")
         source_bytes = self.source_plan.read_bytes()
@@ -673,6 +907,12 @@ def _exact_plan_bytes(program_root: Path, observation: object) -> bytes:
             *(item.path for item in required if item.disposition == "Modify"),
         }
     )
+    preserve = sorted(
+        {
+            "catalog.txt",
+            *(item.path for item in required if item.disposition == "Preserve"),
+        }
+    )
     source = status["source_binding"]
     program = status["program_binding"]
     lines = [
@@ -699,7 +939,7 @@ def _exact_plan_bytes(program_root: Path, observation: object) -> bytes:
     for disposition, paths in (
         ("Create", create),
         ("Modify", modify),
-        ("Preserve", ["catalog.txt"]),
+        ("Preserve", preserve),
     ):
         lines.extend(
             [

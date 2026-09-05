@@ -21,6 +21,7 @@ from program_activation import (
 )
 from program_authority import (
     NEW_PROGRAM_MANIFEST_SCHEMA,
+    SETUP_PROGRAM_MANIFEST_SCHEMA,
     load_json_lines,
     load_json_object,
     resolve_managed_path,
@@ -116,8 +117,11 @@ def _load_manifest_status(
     manifest, manifest_issues = load_json_object(root / "manifest.json")
     if manifest is None:
         raise ValueError("; ".join(manifest_issues))
-    if manifest.get("schema_version") != NEW_PROGRAM_MANIFEST_SCHEMA:
-        raise ValueError("blocked recovery requires a new-model v2 manifest")
+    if manifest.get("schema_version") not in {
+        NEW_PROGRAM_MANIFEST_SCHEMA,
+        SETUP_PROGRAM_MANIFEST_SCHEMA,
+    }:
+        raise ValueError("blocked recovery requires a new-model manifest")
     roles = manifest.get("logical_roles")
     if not isinstance(roles, dict):
         raise ValueError("manifest logical_roles must be an object")
@@ -624,8 +628,15 @@ def build_block_resolution_candidate(
     prompt_sha256 = _sha256_bytes(prompt.encode("utf-8"))
     source = status["source_binding"]
     program = status["program_binding"]
+    is_setup_program = (
+        _manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA
+    )
     action_record = {
-        "schema_version": ACTION_AUTHORIZATION_SCHEMA,
+        "schema_version": (
+            "implementation-action-authorization/v2"
+            if is_setup_program
+            else ACTION_AUTHORIZATION_SCHEMA
+        ),
         "authorization_id": authorization_id,
         "decision": "authorized",
         "actions": ["resume-blocked-program"],
@@ -659,6 +670,72 @@ def build_block_resolution_candidate(
         "evidence_bindings": value["evidence_bindings"],
         "submitted_prompt_sha256": prompt_sha256,
     }
+    if is_setup_program:
+        setup_binding = status.get("setup_activation_binding")
+        increment_authority = status.get("current_increment_authority_binding")
+        plan_binding = context.get("exact_file_plan_binding")
+        baseline_binding = status.get("execution_baseline_binding")
+        if (
+            not isinstance(setup_binding, dict)
+            or not isinstance(increment_authority, dict)
+            or not isinstance(plan_binding, dict)
+            or not isinstance(baseline_binding, dict)
+            or not isinstance(
+                setup_binding.get("setup_activation_decision_id"), str
+            )
+            or not setup_binding["setup_activation_decision_id"].strip()
+            or not isinstance(
+                setup_binding.get("setup_activation_decision_sha256"), str
+            )
+            or re.fullmatch(
+                r"[0-9a-f]{64}",
+                setup_binding["setup_activation_decision_sha256"],
+            )
+            is None
+            or not isinstance(increment_authority.get("grant_id"), str)
+            or not increment_authority["grant_id"].strip()
+            or not isinstance(increment_authority.get("grant_sha256"), str)
+            or re.fullmatch(
+                r"[0-9a-f]{64}", increment_authority["grant_sha256"]
+            )
+            is None
+            or not isinstance(plan_binding.get("sha256"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", plan_binding["sha256"])
+            is None
+            or not isinstance(baseline_binding.get("sha256"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", baseline_binding["sha256"])
+            is None
+        ):
+            raise ValueError("v3 blocked recovery authority is incomplete")
+        from program_setup import (
+            source_gate_satisfaction,
+            validate_setup_activation_authority,
+        )
+
+        setup_authority_issues = validate_setup_activation_authority(root)
+        if setup_authority_issues:
+            raise ValueError(
+                "v3 blocked recovery setup activation authority is invalid: "
+                + "; ".join(setup_authority_issues)
+            )
+
+        action_record.update(
+            setup_activation_decision_id=setup_binding[
+                "setup_activation_decision_id"
+            ],
+            setup_activation_decision_sha256=setup_binding[
+                "setup_activation_decision_sha256"
+            ],
+            increment_grant_id=increment_authority["grant_id"],
+            increment_grant_sha256=increment_authority["grant_sha256"],
+            exact_file_plan_sha256=plan_binding["sha256"],
+            execution_baseline_sha256=baseline_binding["sha256"],
+            source_gate_satisfaction=source_gate_satisfaction(
+                root,
+                "before-action-authorization",
+                f"increment:{status['current_increment_id']}",
+            ),
+        )
     action_sha256 = _sha256_bytes(_canonical_json_line(action_record))
     resolution_id = _identifier(
         "block-resolution",
@@ -856,13 +933,59 @@ def validate_block_resolution_history(
             issues.append("block-resolution ledger binding differs")
     if len(action_matches) != 1:
         issues.append("block-resolution action must exist exactly once")
-    elif (
-        action_matches[0].get("schema_version") != ACTION_AUTHORIZATION_SCHEMA
-        or action_matches[0].get("actions") != ["resume-blocked-program"]
-        or _sha256_bytes(_canonical_json_line(action_matches[0]))
-        != binding.get("action_authorization_sha256")
-    ):
-        issues.append("block-resolution action binding differs")
+    else:
+        expected_action_schema = (
+            "implementation-action-authorization/v2"
+            if manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA
+            else ACTION_AUTHORIZATION_SCHEMA
+        )
+        action = action_matches[0]
+        if (
+            action.get("schema_version") != expected_action_schema
+            or action.get("actions") != ["resume-blocked-program"]
+            or _sha256_bytes(_canonical_json_line(action))
+            != binding.get("action_authorization_sha256")
+        ):
+            issues.append("block-resolution action binding differs")
+        if manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA:
+            setup_binding = status.get("setup_activation_binding")
+            increment_authority = status.get(
+                "current_increment_authority_binding"
+            )
+            baseline_binding = status.get("execution_baseline_binding")
+            plan_binding = context.get("exact_file_plan_binding")
+            try:
+                from program_setup import source_gate_satisfaction
+
+                expected_gate_satisfaction = source_gate_satisfaction(
+                    root,
+                    "before-action-authorization",
+                    f"increment:{status.get('current_increment_id')}",
+                )
+            except (ImportError, ValueError) as error:
+                issues.append(str(error))
+                expected_gate_satisfaction = None
+            if (
+                not isinstance(setup_binding, Mapping)
+                or not isinstance(increment_authority, Mapping)
+                or not isinstance(baseline_binding, Mapping)
+                or not isinstance(plan_binding, Mapping)
+                or action.get("setup_activation_decision_id")
+                != setup_binding.get("setup_activation_decision_id")
+                or action.get("setup_activation_decision_sha256")
+                != setup_binding.get("setup_activation_decision_sha256")
+                or action.get("increment_grant_id")
+                != increment_authority.get("grant_id")
+                or action.get("increment_grant_sha256")
+                != increment_authority.get("grant_sha256")
+                or action.get("exact_file_plan_sha256")
+                != plan_binding.get("sha256")
+                or action.get("execution_baseline_sha256")
+                != baseline_binding.get("sha256")
+                or action.get("source_gate_satisfaction")
+                != expected_gate_satisfaction
+            ):
+                issues.append("v3 block-resolution action authority differs")
     return tuple(sorted(set(issues)))
 
 

@@ -23,21 +23,23 @@ retryable; any divergent or foreign-owned prefix stops without overwrite.
 
 Creation authority does not approve the program or permit product changes.
 
-## 2. Activate a Generated Program
+## 2. Approve and Activate a Generated Program
 
-Review the complete proposal and submit the copy-ready launch prompt directly
-and unchanged.
+Review the readable setup recap and answer its final setup question directly.
 
 ```text
-$implementing-staged-plans
-
-<paste the exact generated launch prompt here>
+Yes
 ```
 
-The activation transaction appends or adopts separate program-approval and
-workspace-selection receipts, then the first-increment grant, and writes active
-status last. A prompt found in a file, quoted by an assistant, or retrieved from
-another source is navigation data until you submit the exact prompt yourself.
+For manifest v3, activation records the typed setup decision and separate
+program/workspace receipts, then stops at `awaiting-first-increment` without a
+grant or product authority. Submit the returned semantic handoff in a fresh task;
+that task revalidates current state, records the first-start grant, and reaches
+`preparing`. A file, quoted answer, retrieved answer, conditional answer, or
+assistant-generated answer cannot satisfy either direct-user boundary.
+
+Existing manifest-v2 proposals keep the historical byte-exact launch prompt and
+combined activation behavior.
 
 ## 3. Before Production Modification
 

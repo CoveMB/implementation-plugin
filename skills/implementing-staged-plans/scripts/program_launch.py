@@ -15,6 +15,7 @@ from program_authority import (
     APPROVED_VALIDATION_MODE,
     PROPOSAL_VALIDATION_MODE,
     SUPPORTED_NEW_PROGRAM_APPROVAL_MODES,
+    SETUP_PROGRAM_MANIFEST_SCHEMA,
     load_json_lines,
     load_json_object,
     resolve_managed_path,
@@ -206,17 +207,37 @@ def _launch_command(
 
 
 def render_program_launch_prompt(program_root: Path) -> str:
-    """Render the one exact prompt that may activate this proposal."""
-    return render_exact_prompt(_launch_command(Path(program_root)))
+    """Render the legacy exact prompt or the v3 readable setup recap."""
+    root = Path(program_root)
+    manifest, issues = load_json_object(root / "manifest.json")
+    if manifest is None:
+        raise ValueError("; ".join(issues))
+    if manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA:
+        status, _ = _load_role(root, manifest, "status")
+        if status.get("schema_version") != "implementation-program-status/v3":
+            raise ValueError("manifest v3 requires status v3")
+        from program_setup import render_setup_recap
+
+        return render_setup_recap(root)
+    return render_exact_prompt(_launch_command(root))
 
 
 def validate_submitted_program_launch_prompt(
     program_root: Path, submitted_prompt: str
 ) -> dict[str, object]:
     """Validate direct prompt bytes against freshly loaded proposal authority."""
+    root = Path(program_root)
+    manifest, issues = load_json_object(root / "manifest.json")
+    if manifest is None:
+        raise ValueError("; ".join(issues))
+    if manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA:
+        status, _ = _load_role(root, manifest, "status")
+        if status.get("schema_version") != "implementation-program-status/v3":
+            raise ValueError("manifest v3 requires status v3")
+        raise ValueError("v3 activation requires a typed setup decision")
     command = parse_exact_prompt(submitted_prompt, LAUNCH_COMMAND_SCHEMA)
     expected = _launch_command(
-        Path(program_root),
+        root,
         proposal_status_sha256=command.get("proposal_status_sha256"),
         proposal_status_sequence=command.get("proposal_status_sequence"),
     )

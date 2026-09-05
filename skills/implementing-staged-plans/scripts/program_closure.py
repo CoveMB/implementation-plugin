@@ -26,12 +26,14 @@ from program_activation import (
     _without_owned_program_paths,
 )
 from program_authority import (
+    SETUP_PROGRAM_MANIFEST_SCHEMA,
     load_json_lines,
     load_json_object,
     resolve_managed_path,
     resolve_program_closure_paths,
     sha256_file,
 )
+from program_setup import source_gate_satisfaction
 from repository_preparation import (
     execution_baseline_from_value,
     inspect_repository,
@@ -694,6 +696,9 @@ def build_closure_command_candidate(
     manifest, manifest_issues = load_json_object(root / "manifest.json")
     if manifest is None:
         raise ValueError("; ".join(manifest_issues))
+    is_setup_program = (
+        manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA
+    )
     status, status_path = _load_role(root, manifest, "status")
     state = status.get("program_state")
     if state not in {"awaiting-closure-approval", "closed"}:
@@ -701,6 +706,13 @@ def build_closure_command_candidate(
     closure = status.get("closure_binding")
     if not isinstance(closure, dict):
         raise ValueError("closure binding is missing")
+    gate_satisfaction = None
+    if is_setup_program:
+        gate_satisfaction = source_gate_satisfaction(
+            root,
+            "before-program-closure",
+            f"program:{manifest['program_id']}",
+        )
     closure_paths = resolve_program_closure_paths(root)
     for key, digest_field in (
         ("reconciliation", "reconciliation_sha256"),
@@ -746,6 +758,8 @@ def build_closure_command_candidate(
             },
             closure_command_binding=command_binding,
         )
+        if gate_satisfaction is not None:
+            closed_status["source_gate_satisfaction"] = gate_satisfaction
         closed_status_bytes = _canonical_json_bytes(closed_status)
     else:
         command_binding = status.get("closure_command_binding")
@@ -807,7 +821,9 @@ def build_closure_command_candidate(
     program = status["program_binding"]
     brief = status["brief_binding"]
     approval_record = {
-        "schema_version": APPROVAL_SCHEMA,
+        "schema_version": (
+            "implementation-approval/v2" if is_setup_program else APPROVAL_SCHEMA
+        ),
         "event_id": approval_event_id,
         "type": "program-closure-approval",
         "decision": "approved",
@@ -839,6 +855,24 @@ def build_closure_command_candidate(
             "accepted_product_delta_sha256"
         ],
     }
+    if is_setup_program:
+        setup_binding = status.get("setup_activation_binding")
+        increment_authority = status.get("current_increment_authority_binding")
+        if not isinstance(setup_binding, dict) or not isinstance(
+            increment_authority, dict
+        ):
+            raise ValueError("v3 closure authority is incomplete")
+        approval_record.update(
+            setup_activation_decision_id=setup_binding[
+                "setup_activation_decision_id"
+            ],
+            setup_activation_decision_sha256=setup_binding[
+                "setup_activation_decision_sha256"
+            ],
+            increment_grant_id=increment_authority["grant_id"],
+            increment_grant_sha256=increment_authority["grant_sha256"],
+            source_gate_satisfaction=gate_satisfaction,
+        )
     return ClosureCommandCandidate(
         base_seed_sha256=base_seed_sha256,
         checkpoint_id=checkpoint_id,
