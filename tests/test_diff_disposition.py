@@ -92,12 +92,16 @@ class DiffDispositionTests(unittest.TestCase):
 
             with mock.patch.object(DIFF, "load_json_object", side_effect=recording_load):
                 prompt = DIFF.render_diff_disposition_prompt(program_root)
-            self.assertEqual(prompt.count("Accept and stop."), 1)
-            self.assertNotIn("continue", prompt.lower())
-            self.assertFalse(any("traceability" in path for path in loaded_paths))
             candidate = DIFF.build_diff_acceptance_candidate(
                 program_root, _observation
             )
+            self.assertEqual(
+                prompt,
+                f"Accept and stop.\n\n{candidate.prompt}",
+            )
+            self.assertEqual(prompt.count("Accept and stop."), 1)
+            self.assertNotIn("continue", prompt.lower())
+            self.assertFalse(any("traceability" in path for path in loaded_paths))
             binding = candidate.accepted_status["diff_disposition_binding"]
             self.assertNotIn("accepted_status_sha256", binding)
             self.assertNotIn("submitted_prompt_sha256", binding)
@@ -110,6 +114,24 @@ class DiffDispositionTests(unittest.TestCase):
         )
         try:
             prompt = DIFF.render_diff_disposition_prompt(program_root)
+            acceptance = DIFF.build_diff_acceptance_candidate(
+                program_root, observation
+            )
+            extension = DIFF._continuation.build_continuation_extension(
+                program_root, acceptance, observation
+            )
+            self.assertIsNotNone(extension)
+            continued = DIFF._continuation.build_accept_continue_candidate(
+                acceptance, extension
+            )
+            self.assertEqual(
+                prompt,
+                (
+                    f"Accept and stop.\n\n{acceptance.prompt}\n"
+                    f"Accept and continue to `{extension.successor_increment_id}`.\n\n"
+                    f"{continued.prompt}"
+                ),
+            )
             self.assertEqual(prompt.count("Accept and stop."), 1)
             self.assertEqual(
                 prompt.count("Accept and continue to `ARCHIVE-VERIFY`."), 1
@@ -140,6 +162,13 @@ class DiffDispositionTests(unittest.TestCase):
                 fixture, program_root, _observation = awaiting_diff_program(successors)
                 try:
                     prompt = DIFF.render_diff_disposition_prompt(program_root)
+                    candidate = DIFF.build_diff_acceptance_candidate(
+                        program_root, _observation
+                    )
+                    expected = f"Accept and stop.\n\n{candidate.prompt}"
+                    if reason != "no allocated successor":
+                        expected += f"\nContinuation unavailable: {reason}.\n"
+                    self.assertEqual(prompt, expected)
                     self.assertEqual(prompt.count("Accept and stop."), 1)
                     self.assertNotIn("Accept and continue", prompt)
                     if successors is None:
