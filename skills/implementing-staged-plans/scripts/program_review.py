@@ -13,6 +13,7 @@ from program_activation import (
     _canonical_json_bytes,
     _create_or_adopt_bytes,
     _identifier,
+    _require_fresh_program_observation,
     _replace_or_adopt_status,
     _without_owned_program_paths,
 )
@@ -460,11 +461,12 @@ def _review_transaction_context(
 ]:
     root = Path(program_root)
     fresh = inspect_repository(Path(observation.path), observation.base_commit)
-    normalized = _without_owned_program_paths(root, fresh.observation)
-    if asdict(normalized) != asdict(
-        _without_owned_program_paths(root, observation)
-    ):
-        raise ValueError("workspace observation changed before review transaction")
+    normalized = _require_fresh_program_observation(
+        root,
+        observation,
+        fresh.observation,
+        "workspace observation changed before review transaction",
+    )
     manifest, manifest_issues = load_json_object(root / "manifest.json")
     if manifest is None:
         raise ValueError("; ".join(manifest_issues))
@@ -831,11 +833,12 @@ def build_review_preparation(
     """Build and validate the complete current review transaction in memory."""
     root = Path(program_root)
     fresh = inspect_repository(Path(observation.path), observation.base_commit)
-    normalized = _without_owned_program_paths(root, fresh.observation)
-    if asdict(normalized) != asdict(
-        _without_owned_program_paths(root, observation)
-    ):
-        raise ValueError("workspace observation changed before review preparation")
+    normalized = _require_fresh_program_observation(
+        root,
+        observation,
+        fresh.observation,
+        "workspace observation changed before review preparation",
+    )
     manifest, manifest_issues = load_json_object(root / "manifest.json")
     if manifest is None:
         raise ValueError("; ".join(manifest_issues))

@@ -22,8 +22,8 @@ from program_activation import (
     _canonical_json_line,
     _create_or_adopt_bytes,
     _identifier,
+    _require_fresh_program_observation,
     _replace_or_adopt_status,
-    _without_owned_program_paths,
 )
 from program_authority import (
     SETUP_PROGRAM_MANIFEST_SCHEMA,
@@ -107,10 +107,12 @@ def _fresh_observation(
     root: Path, supplied: RepositoryObservation
 ) -> RepositoryObservation:
     fresh = inspect_repository(Path(supplied.path), supplied.base_commit).observation
-    normalized = _without_owned_program_paths(root, fresh)
-    if asdict(normalized) != asdict(_without_owned_program_paths(root, supplied)):
-        raise ValueError("workspace observation changed before program closure")
-    return normalized
+    return _require_fresh_program_observation(
+        root,
+        supplied,
+        fresh,
+        "workspace observation changed before program closure",
+    )
 
 
 def _load_role(
