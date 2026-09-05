@@ -52,27 +52,6 @@ from state_authority import (
 
 RESUMABLE_PROGRAM_STATES = frozenset({"active", "blocked"})
 SUPPORTED_PROGRAM_STATES = frozenset({*RESUMABLE_PROGRAM_STATES, "closed"})
-PLAN_A_DISCOVERY_DISPOSITIONS = frozenset(
-    {
-        "new-program-bootstrap-ready",
-        "proposal-publication-retry-ready",
-        "program-activation-ready",
-        "program-activation-retry-ready",
-        "plan-preparation-retry-ready",
-        "plan-materialization-retry-ready",
-        "review-preparation-retry-ready",
-        "increment-acceptance-retry-ready",
-        "accepted-continuation-retry-ready",
-        "closure-preparation-retry-ready",
-        "closure-approval-retry-ready",
-        "resume",
-        "program-setup-ready",
-        "first-increment-start-ready",
-        "accepted-stop",
-        "closure-approval-ready",
-        "terminal-programs",
-    }
-)
 PLAN_A_ROUTE_DETAILS = {
     "program-setup-ready": (
         "program-setup-approval",
@@ -252,7 +231,6 @@ NEW_PROGRAM_STATES = frozenset(
     }
 )
 SUPPORTED_PROGRAM_OPERATIONS = frozenset({"create", "activate", "continue"})
-UNSUPPORTED_LIVE_PROGRAM_MUTATIONS = frozenset({"revise", "supersede", "cancel"})
 
 
 @dataclass(frozen=True)
