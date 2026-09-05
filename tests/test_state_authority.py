@@ -1,10 +1,8 @@
 import copy
 import hashlib
-import importlib.util
 import json
 import os
 import shutil
-import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -17,6 +15,7 @@ from tests.program_bootstrap_support import (
     canonical_json,
     repository_snapshot,
 )
+from tests.script_module_support import load_script_module
 from tests.test_program_activation import activated_program
 
 
@@ -32,16 +31,7 @@ STATE_OVERLAY = (
     / "tests/fixtures/state-authorization/portable-archive-run"
 )
 
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC = importlib.util.spec_from_file_location("state_authority", STATE_AUTHORITY_PATH)
-    if SPEC is None or SPEC.loader is None:
-        raise RuntimeError(f"Unable to load state authority from {STATE_AUTHORITY_PATH}")
-    AUTHORITY = importlib.util.module_from_spec(SPEC)
-    sys.modules[SPEC.name] = AUTHORITY
-    SPEC.loader.exec_module(AUTHORITY)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+AUTHORITY = load_script_module("state_authority", STATE_AUTHORITY_PATH)
 
 from tests.test_diff_disposition import awaiting_diff_program
 from tests.test_blocked_recovery import BLOCKED, block_request, implementing_program

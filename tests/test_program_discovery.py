@@ -1,4 +1,3 @@
-import importlib.util
 import json
 import shutil
 import subprocess
@@ -15,22 +14,14 @@ from tests.program_bootstrap_support import (
     canonical_json,
     repository_snapshot,
 )
+from tests.script_module_support import load_script_module
 from tests.test_program_setup import ACTIVATION, BOOTSTRAP, SETUP
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills" / "implementing-staged-plans" / "scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "program_discovery.py"
-SPEC = importlib.util.spec_from_file_location("program_discovery", SCRIPT_PATH)
-if SPEC is None or SPEC.loader is None:
-    raise RuntimeError(f"Unable to load program discovery from {SCRIPT_PATH}")
-DISCOVERY = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = DISCOVERY
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC.loader.exec_module(DISCOVERY)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+DISCOVERY = load_script_module("program_discovery", SCRIPT_PATH)
 
 
 BASE_COMMIT = "b" * 40

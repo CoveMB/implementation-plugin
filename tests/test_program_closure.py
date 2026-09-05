@@ -1,6 +1,4 @@
-import importlib.util
 import json
-import sys
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -10,6 +8,7 @@ from tests.program_bootstrap_support import (
     repository_snapshot,
     run_program_discovery,
 )
+from tests.script_module_support import load_script_module
 from tests.test_diff_disposition import DIFF, awaiting_diff_program
 
 
@@ -17,16 +16,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "program_closure.py"
 
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC = importlib.util.spec_from_file_location("program_closure", SCRIPT_PATH)
-    if SPEC is None or SPEC.loader is None:
-        raise RuntimeError(f"Unable to load program closure from {SCRIPT_PATH}")
-    CLOSURE = importlib.util.module_from_spec(SPEC)
-    sys.modules[SPEC.name] = CLOSURE
-    SPEC.loader.exec_module(CLOSURE)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+CLOSURE = load_script_module("program_closure", SCRIPT_PATH)
 
 
 def accepted_program():
