@@ -20,74 +20,34 @@ PACKAGE_CONTENT_ROOT = Path("skills/implementing-staged-plans")
 PACKAGE_VERSION = "0.1.2"
 SKILL_MARKDOWN = Path("skills/implementing-staged-plans/SKILL.md")
 OPENAI_METADATA = Path("skills/implementing-staged-plans/agents/openai.yaml")
-PROGRAM_AUTHORITY_REFERENCE = Path(
-    "skills/implementing-staged-plans/references/program-authority.md"
-)
-PROGRAM_AUTHORITY_SCRIPT = Path(
-    "skills/implementing-staged-plans/scripts/program_authority.py"
-)
-STATE_AUTHORITY_REFERENCE = Path(
-    "skills/implementing-staged-plans/references/state-authorization.md"
-)
-STATE_AUTHORITY_SCRIPT = Path(
-    "skills/implementing-staged-plans/scripts/state_authority.py"
-)
-REPOSITORY_PREPARATION_REFERENCE = Path(
-    "skills/implementing-staged-plans/references/repository-preparation.md"
-)
-REPOSITORY_PREPARATION_SCRIPT = Path(
-    "skills/implementing-staged-plans/scripts/repository_preparation.py"
-)
-EXECUTION_DISCIPLINE_REFERENCE = Path(
-    "skills/implementing-staged-plans/references/execution-discipline.md"
-)
-EXECUTION_DISCIPLINE_SCRIPT = Path(
-    "skills/implementing-staged-plans/scripts/execution_discipline.py"
-)
-REVIEW_COORDINATION_REFERENCE = Path(
-    "skills/implementing-staged-plans/references/review-coordination.md"
-)
-REVIEW_COORDINATION_SCRIPT = Path(
-    "skills/implementing-staged-plans/scripts/review_coordination.py"
-)
-CONTINUITY_CLOSURE_REFERENCE = Path(
-    "skills/implementing-staged-plans/references/continuity-closure.md"
-)
-CONTINUITY_CLOSURE_SCRIPT = Path(
-    "skills/implementing-staged-plans/scripts/continuity_closure.py"
-)
-APPROVAL_CHECKPOINT_REFERENCE = Path(
-    "skills/implementing-staged-plans/references/approval-checkpoints.md"
-)
-APPROVAL_CHECKPOINT_SCRIPT = Path(
-    "skills/implementing-staged-plans/scripts/approval_checkpoint.py"
-)
-PROGRAM_DISCOVERY_REFERENCE = Path(
-    "skills/implementing-staged-plans/references/program-discovery.md"
-)
-PROGRAM_DISCOVERY_SCRIPT = Path(
-    "skills/implementing-staged-plans/scripts/program_discovery.py"
-)
-PLAN_A_PRODUCTION_SCRIPTS = tuple(
-    Path(f"skills/implementing-staged-plans/scripts/{name}.py")
-    for name in (
-        "program_bootstrap",
-        "program_launch",
-        "program_activation",
-        "program_setup",
-        "task_prompt",
-        "program_review",
-        "diff_disposition",
-        "program_closure",
-    )
-)
-PLAN_B_PRODUCTION_SCRIPTS = tuple(
-    Path(f"skills/implementing-staged-plans/scripts/{name}.py")
-    for name in (
-        "program_continuation",
-        "program_rollover",
-        "blocked_recovery",
-    )
+REQUIRED_AUTHORITY_ASSETS = (
+    Path("skills/implementing-staged-plans/references/program-authority.md"),
+    Path("skills/implementing-staged-plans/scripts/program_authority.py"),
+    Path("skills/implementing-staged-plans/references/state-authorization.md"),
+    Path("skills/implementing-staged-plans/scripts/state_authority.py"),
+    Path("skills/implementing-staged-plans/references/repository-preparation.md"),
+    Path("skills/implementing-staged-plans/scripts/repository_preparation.py"),
+    Path("skills/implementing-staged-plans/references/execution-discipline.md"),
+    Path("skills/implementing-staged-plans/scripts/execution_discipline.py"),
+    Path("skills/implementing-staged-plans/references/review-coordination.md"),
+    Path("skills/implementing-staged-plans/scripts/review_coordination.py"),
+    Path("skills/implementing-staged-plans/references/continuity-closure.md"),
+    Path("skills/implementing-staged-plans/scripts/continuity_closure.py"),
+    Path("skills/implementing-staged-plans/references/approval-checkpoints.md"),
+    Path("skills/implementing-staged-plans/scripts/approval_checkpoint.py"),
+    Path("skills/implementing-staged-plans/references/program-discovery.md"),
+    Path("skills/implementing-staged-plans/scripts/program_discovery.py"),
+    Path("skills/implementing-staged-plans/scripts/program_bootstrap.py"),
+    Path("skills/implementing-staged-plans/scripts/program_launch.py"),
+    Path("skills/implementing-staged-plans/scripts/program_activation.py"),
+    Path("skills/implementing-staged-plans/scripts/program_setup.py"),
+    Path("skills/implementing-staged-plans/scripts/task_prompt.py"),
+    Path("skills/implementing-staged-plans/scripts/program_review.py"),
+    Path("skills/implementing-staged-plans/scripts/diff_disposition.py"),
+    Path("skills/implementing-staged-plans/scripts/program_closure.py"),
+    Path("skills/implementing-staged-plans/scripts/program_continuation.py"),
+    Path("skills/implementing-staged-plans/scripts/program_rollover.py"),
+    Path("skills/implementing-staged-plans/scripts/blocked_recovery.py"),
 )
 
 EXPECTED_MANIFEST: dict[str, object] = {
@@ -505,26 +465,7 @@ def validate_forbidden_components(repository_root: Path) -> list[str]:
 def validate_authority_assets(repository_root: Path) -> list[str]:
     """Require the accepted focused procedure and mechanical authority boundary."""
     issues: list[str] = []
-    for relative_path in (
-        PROGRAM_AUTHORITY_REFERENCE,
-        PROGRAM_AUTHORITY_SCRIPT,
-        STATE_AUTHORITY_REFERENCE,
-        STATE_AUTHORITY_SCRIPT,
-        REPOSITORY_PREPARATION_REFERENCE,
-        REPOSITORY_PREPARATION_SCRIPT,
-        EXECUTION_DISCIPLINE_REFERENCE,
-        EXECUTION_DISCIPLINE_SCRIPT,
-        REVIEW_COORDINATION_REFERENCE,
-        REVIEW_COORDINATION_SCRIPT,
-        CONTINUITY_CLOSURE_REFERENCE,
-        CONTINUITY_CLOSURE_SCRIPT,
-        APPROVAL_CHECKPOINT_REFERENCE,
-        APPROVAL_CHECKPOINT_SCRIPT,
-        PROGRAM_DISCOVERY_REFERENCE,
-        PROGRAM_DISCOVERY_SCRIPT,
-        *PLAN_A_PRODUCTION_SCRIPTS,
-        *PLAN_B_PRODUCTION_SCRIPTS,
-    ):
+    for relative_path in REQUIRED_AUTHORITY_ASSETS:
         path = repository_root / relative_path
         if not path.is_file() or path.is_symlink():
             issues.append(
