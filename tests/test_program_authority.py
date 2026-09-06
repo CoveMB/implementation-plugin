@@ -658,12 +658,7 @@ class ProposalAuthorityAndStorageTests(ProgramAuthorityTestCase):
             "increments/ARCHIVE-INDEX/review-evidence.json"
         )
         destination.parent.mkdir(parents=True)
-        self.fixture.path("state/status.json").replace(destination)
-        manifest = self.fixture.load_json("manifest.json")
-        manifest["logical_roles"]["status"] = (
-            "increments/ARCHIVE-INDEX/review-evidence.json"
-        )
-        self.fixture.write_json("manifest.json", manifest)
+        os.link(self.fixture.path("state/status.json"), destination)
 
         issues = AUTHORITY.validate_program_authority(
             self.fixture.root,
