@@ -4,7 +4,7 @@
 
 **Goal:** Add truthful, fail-closed support for exact regular-file `Delete` operations so a program can preserve an accepted absent path through review, diff acceptance, rollover, recovery, and closure without weakening existing `Create`, `Modify`, or `Preserve` contracts.
 
-**Architecture:** Keep manifest/status v1, v2, and existing manifest-v3/setup-v1 programs on their exact current routes. A manifest-v3 program that selects setup-semantics/envelope v2 enters one nested v2 lifecycle family at sequence zero: every increment uses file-map, baseline, product-result, review, diff, blocked-context, rollover, discovery, and closure v2, including an empty ordered Delete section before the increment that first deletes a file. Route by exact schema pairs, never by optional-field presence or by whether the current increment happens to contain Delete. The workflow continues to authorize a human or agent to modify the bound local workspace—it does not become an automatic deletion engine, migration engine, cleanup command, or generic destructive-action authority.
+**Architecture:** Keep manifest/status v1, v2, and existing manifest-v3/setup-v1 programs on their exact current routes. A manifest-v3 program that selects setup-semantics/envelope v2 enters one nested v2 lifecycle family at sequence zero: every increment uses file-map, baseline, product-result, execution-transition, review, diff, blocked-context, rollover, discovery, and closure v2, including an empty ordered Delete section before the increment that first deletes a file. Route by exact schema pairs, never by optional-field presence or by whether the current increment happens to contain Delete. The workflow continues to authorize a human or agent to modify the bound local workspace—it does not become an automatic deletion engine, migration engine, cleanup command, or generic destructive-action authority.
 
 **Tech Stack:** Python 3 standard library, frozen dataclasses, canonical JSON and SHA-256, `unittest`, temporary Git repositories, existing atomic/no-overwrite/status-last writers.
 
@@ -12,9 +12,9 @@
 
 ## Global Constraints
 
-- The first reviewed plan-repair baseline is commit `31a04be196c5235cd1f75ec931502c0d79f2a46d`; its parent is the first plan commit `44ef42acdef540af72577e224054d763da80fc5f`, whose parent and implementation candidate is exactly `b5eb689e780f48b218b807a4691f0994474e4178`. This second-corrections commit must be the single plan-only child of `31a04be196c5235cd1f75ec931502c0d79f2a46d`. Start implementation only from that clean second-corrections HEAD on branch `repair/delete-operation-support`, with no path other than this plan changed from the candidate.
+- The implementation candidate is exactly `b5eb689e780f48b218b807a4691f0994474e4178`. Start implementation only when that candidate is an ancestor of the clean kickoff HEAD on branch `repair/delete-operation-support`, every commit in `b5eb689e780f48b218b807a4691f0994474e4178..HEAD` changes only `docs/superpowers/plans/2026-09-05-delete-operation-support.md`, and the aggregate candidate-to-HEAD diff contains only that plan. Record the actual kickoff HEAD and the plan's actual SHA-256 as execution evidence before Task 1; do not use any correction commit's parent position or hash as a durable prerequisite.
 - Use `rtk` for every repository command.
-- Preserve manifest/status v1 and v2 and operation-envelope/setup/file-map/baseline/result/rollover/blocked/closure v1 bytes and behavior; do not rewrite persisted programs or frozen `0.1.1` fixtures.
+- Preserve manifest/status v1 and v2 and operation-envelope/setup/file-map/baseline/result/execution-transition/rollover/blocked/closure v1 bytes and behavior; do not rewrite persisted programs or frozen `0.1.1` fixtures.
 - Existing manifest-v3 programs with `implementation-program-setup-semantics/v1` and `implementation-operation-envelope/v1` remain exactly `Create`/`Modify`/`Preserve` programs.
 - Delete-capable manifest-v3 proposals use `implementation-program-setup-semantics/v2` paired with `implementation-operation-envelope/v2`; that setup choice fixes the complete program to the nested v2 lifecycle family from its first increment, and mixed v1/v2 nested contracts fail before every write.
 - A `Delete` target must be one normalized repository-relative path that is a program-owned regular non-symlink, non-hard-linked file beneath the selected workspace when its deletion-increment baseline is captured. Setup may bind either an initially `existing` target or an `accepted-predecessor` target created and accepted by a strict predecessor increment; the latter requires a same-path predecessor `Create` allocation. Directories, symlinks, symlinked ancestors, hard links, special files, absent Delete baselines, external paths, protected paths, and pre-existing user work remain unsupported.
@@ -47,6 +47,7 @@ The defect is confirmed at the locked baseline:
 9. Current activation and workspace assessment check the final `Path` with `is_symlink()`/`is_file()` but do not share a component walk. A safe final file beneath a later-swapped symlink ancestor can therefore evade the intended workspace-bound path contract. The shared walk must still preserve the current valid absence semantics for a Create target whose parent is not created yet and for already-absent user work; operation callers, not the primitive walk, own required-presence rules.
 10. The real pipeFlow lifecycle does not begin with all 27 Task 8 Delete targets. `test/legacy/characterization.test.ts` is absent at setup, created and accepted in Task 1, inherited as present, and deleted with the other 26 legacy files in Task 8. A fixture that pre-creates all 27 paths does not exercise future Delete allocation, predecessor collision facts, or a real late tombstone.
 11. `implementing-staged-plans-bootstrap-execution-review-runbook.md` declares itself the Plan A `0.1.1` plus Plan B `0.1.2` boundary and documents singleton/final-only closure. It is a live operational runbook, so `0.1.3` path states and complete-chain closure must update it rather than reclassifying it as historical.
+12. `program_activation.py::advance_execution_state(...)` writes and retry-adopts only `implementation-execution-transition/v1` with `product_delta_sha256`, while `state_authority.py` accepts only that v1 shape and derives the event identifier from that v1 digest field. A setup-v2 writer output therefore has no exact execution-transition schema, result-family binding, event seed, state-authority route, or discovery retry/recovery contract even though Task 2 claims a complete v2 baseline/result family.
 
 The smallest coherent repair is therefore a versioned Delete-only path-state extension inside manifest-v3. The pending manifest/status-v4 expanded-operations design remains pending for Move/Rename, Replace, migration groups, automated staging/finalization, and expanded Preserve; this repair does not claim to implement it.
 
@@ -72,13 +73,13 @@ Unsafe alternatives are rejected:
 - `docs/superpowers/specs/2026-08-23-expanded-local-refactor-operations-design.md` — state that basic exact regular-file Delete is owned by `0.1.3`, while advanced migration/staging semantics remain pending v4 work.
 - `skills/implementing-staged-plans/scripts/program_setup.py` — own setup-semantics/envelope v2 validation, pairing, and recap rendering.
 - `skills/implementing-staged-plans/scripts/program_authority.py` — recognize only the exact new setup authority schemas on manifest-v3 and reject cross-family substitution.
-- `skills/implementing-staged-plans/scripts/state_authority.py` — own shared versioned file-map types, exact nested-schema routing, state bindings, and v1 compatibility rejection.
+- `skills/implementing-staged-plans/scripts/state_authority.py` — own shared versioned file-map types, exact nested-schema routing, execution-transition/result-family bindings, state bindings, and v1 compatibility rejection.
 - `skills/implementing-staged-plans/scripts/repository_preparation.py` — parse exact-file-map v2, parse baseline v2, and assess present/absent path states.
 - `skills/implementing-staged-plans/scripts/program_activation.py` — construct Delete-aware plan candidates/baselines and bind v2 execution transitions without changing public signatures.
 - `skills/implementing-staged-plans/scripts/program_discovery.py` — route manifest-v3/setup-v2 plan preparation/materialization, review, acceptance, immediate/later rollover, closure, and divergent prefixes by exact schema family before generic state validation.
 - `skills/implementing-staged-plans/scripts/execution_discipline.py` — validate deleted ownership and semantic surfaces without treating Delete as a physical rename.
 - `skills/implementing-staged-plans/scripts/review_coordination.py` — carry and validate the v2 accepted path-state result in review evidence and packets.
-- `skills/implementing-staged-plans/scripts/program_review.py` — persist/revalidate Delete-aware review and remediation bindings.
+- `skills/implementing-staged-plans/scripts/program_review.py` — persist/revalidate Delete-aware review and remediation bindings, including the v2 remediating-to-reviewing execution transition.
 - `skills/implementing-staged-plans/scripts/diff_disposition.py` — bind the exact reviewed v2 product result during acceptance.
 - `skills/implementing-staged-plans/scripts/blocked_recovery.py` — freeze and revalidate Delete path states across blocked/resume.
 - `skills/implementing-staged-plans/scripts/program_continuation.py` — consume accepted present/absent results and render/parse exact accepted-state-continuation v1/v2 commands without coercing absence to a string digest.
@@ -123,12 +124,15 @@ Before Task 1, record and require all of the following without changing the tree
 
 ```bash
 rtk git status --short --branch
-rtk git rev-parse HEAD^ HEAD^^ HEAD^^^
-rtk git diff --name-only b5eb689e780f48b218b807a4691f0994474e4178...HEAD
-rtk git diff --check b5eb689e780f48b218b807a4691f0994474e4178...HEAD
+rtk git rev-parse HEAD
+rtk sha256sum docs/superpowers/plans/2026-09-05-delete-operation-support.md
+rtk git merge-base --is-ancestor b5eb689e780f48b218b807a4691f0994474e4178 HEAD
+rtk git log --reverse --format='commit %H parents %P' --name-only b5eb689e780f48b218b807a4691f0994474e4178..HEAD
+rtk git diff --name-only b5eb689e780f48b218b807a4691f0994474e4178..HEAD
+rtk git diff --check b5eb689e780f48b218b807a4691f0994474e4178..HEAD
 ```
 
-Expected: the branch is `repair/delete-operation-support` and clean; `HEAD^` is `31a04be196c5235cd1f75ec931502c0d79f2a46d`; `HEAD^^` is `44ef42acdef540af72577e224054d763da80fc5f`; `HEAD^^^` is `b5eb689e780f48b218b807a4691f0994474e4178`; the only candidate-to-kickoff path is `docs/superpowers/plans/2026-09-05-delete-operation-support.md`; and `diff --check` is empty. Stop before implementation on any mismatch.
+Expected: the branch is `repair/delete-operation-support` and clean; record the exact `rev-parse HEAD` and plan SHA-256 stdout as the immutable kickoff evidence for this execution; `merge-base --is-ancestor` exits `0`; every path printed beneath every commit in the candidate-to-kickoff log is exactly `docs/superpowers/plans/2026-09-05-delete-operation-support.md`; the aggregate diff prints that one path; and `diff --check` is empty. Stop before implementation if the candidate is not an ancestor, any commit or aggregate diff contains a non-plan path, the tree is dirty, the recorded kickoff HEAD is not an ancestor of a later implementation HEAD, or the plan no longer reproduces the recorded kickoff SHA-256.
 
 ---
 
@@ -276,7 +280,7 @@ rtk git commit -m "feat: add typed delete setup contracts"
 
 ---
 
-### Task 2: Add Exact-Plan, Baseline, and Product Path-State Semantics
+### Task 2: Add Exact-Plan, Baseline, Product Path-State, and Execution-Transition Semantics
 
 **Files:**
 - Modify: `skills/implementing-staged-plans/scripts/state_authority.py`
@@ -294,8 +298,12 @@ rtk git commit -m "feat: add typed delete setup contracts"
 - Produces: `file_map_entries(file_map) -> tuple[tuple[str, tuple[str, ...]], ...]` and `file_map_paths(file_map, *, mutable_only: bool) -> tuple[str, ...]` so consumers do not reconstruct operation inventories inconsistently.
 - Produces: `WorkspacePathSnapshot(relative_path: str, exists: bool, sha256: str | None, mode: str | None, link_count: int | None)` and `inspect_workspace_path(workspace_root: Path, relative_path: str) -> WorkspacePathSnapshot`, the single component-by-component path-safety and containment check used at baseline and every reassessment.
 - Produces: `product_result_schema_version` on `ExecutionWorkspaceAssessment`; v1 remains `implementation-product-delta/v1`, v2 is `implementation-product-path-states/v2`.
+- Produces: `EXECUTION_TRANSITION_SCHEMA_V2 = "implementation-execution-transition/v2"` and `ExecutionTransitionReceiptV2`; v2 status bindings use `product_result_schema_version` and `product_result_sha256`, never `product_delta_sha256`.
+- Produces: exact baseline/result/transition pairing: baseline v1 + product-delta v1 + execution-transition v1, or baseline v2 + product-path-states v2 + execution-transition v2. A missing, mixed, substituted, or dual-family field set fails before adoption or any status write.
+- Produces: an execution-transition event identifier derived from the exact family-specific seed and a retry path that adopts only a fully reproduced binding, `previous_state`, `transition_authority`, result digest, and event identifier.
 - Produces: v2 product states in operation-section order and exact file-map order; v1 product deltas retain their current lexical ordering and bytes.
 - Produces: manifest-v3/setup-v2 sequence-one-and-later `plan-preparation-*` and `plan-materialization-*` retry/recovery classification from exact transaction prefixes before full state-authority validation or generic lifecycle routing; Task 1 exclusively owns sequence-zero activation-prefix classification.
+- Produces: writer-to-fresh-discovery coverage for implementing and reviewing status plus `execution-transition-recovery-required` classification for v1/v2 transition substitution or digest/event divergence.
 - Produces test helpers on `ExecutionWorkspaceValidationTests`: `delete_baseline(path: str) -> ExecutionBaselineV2` and `assess_v2(baseline: ExecutionBaselineV2, state: str) -> ExecutionWorkspaceAssessment`; both use the class's temporary `workspace` path.
 - Preserves: public plan preparation/materialization and three-argument future-write signatures.
 
@@ -351,6 +359,10 @@ def test_v2_delete_path_must_transition_from_exact_file_to_absence(self) -> None
 
 Add negative cases for a missing Delete target at baseline, unchanged Delete at reviewing, changed-but-present Delete, symlink/hard-link/directory/special-file targets, overlap with recorded user work, duplicate cross-disposition paths, `sha256` on an absent result, and `None` on a present result. Retain the existing assertion that deleting a v1 Modify path fails.
 
+Drive `program_activation.py::advance_execution_state(...)` through `authorized -> implementing -> reviewing` for one setup-v1 program and one setup-v2 program. For each family, pass the production-written implementing and reviewing statuses directly to fresh discovery and require `resume`, with state authority clean. Inject a lost response after each status-last write and call the same transition again: the exact binding must return `recovered is True` without changing status bytes. Recompute each `event_id` from the exact seed specified in Step 5 and compare it with both `execution_transition_binding.event_id` and `transition_authority.event_id`.
+
+For both target states, substitute a v1 transition into the v2 status and a v2 transition into the v1 status; also try both digest field families together, remove the required result schema, change the result digest, change one seed-bound field, and change only `event_id`. The direct retry must raise `execution-transition-recovery-required: status binding differs`, fresh state authority must report `execution transition binding is invalid` or the family-specific reviewed-result mismatch, discovery must return `execution-transition-recovery-required` with `required_input == "execution-transition-recovery"` and `stop_required is True`, and every rejected case must preserve status bytes. Compare the production v1 transition/status serialization with the existing frozen `tests/fixtures/program-bootstrap/v0.1.1` route byte-for-byte; do not update that fixture.
+
 Add one manifest-v3/setup-v2 program whose first increment contains only Create/Modify/Preserve, including Create for a currently absent exact path, and whose strict successor owns Delete for that same path with collision `accepted-predecessor`. In this task, assert only that the first increment rejects a v1 or unversioned file map, accepts file-map/baseline/result v2 with an empty Delete section, and reaches `authorized` with an exact v2 baseline. Do not fabricate or require accepted predecessor state here: Task 3 owns v2 review/diff acceptance, and Task 5 owns the production rollover into the Delete increment. Assert the inverse family substitution fails for setup v1.
 
 For path traversal, add `nested/legacy.ts` with a real directory ancestor and capture an authorized baseline. Replace `nested` after authorization with a symlink to a temporary directory outside the workspace, then require the next `validate_execution_workspace(...)` call to report `execution path has symlinked ancestor: nested/legacy.ts` before reading or hashing the external target. Cover the same symlinked-ancestor rejection during baseline construction, and assert the external sentinel is unchanged in both cases. Also preserve the current positive cases for an absent v1 Create target below a not-yet-created parent and an already-absent tracked user-work path whose suffix is missing. A missing suffix returns `exists=False`; Delete/Modify/Preserve baseline callers must then reject it as missing, while Create, accepted/inherited absence, and already-absent user-work callers may accept it.
@@ -361,7 +373,7 @@ For path traversal, add `nested/legacy.ts` with a real directory ancestor and ca
 rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_repository_preparation tests.test_program_activation tests.test_approval_checkpoint tests.test_program_discovery tests.test_state_authority -v
 ```
 
-Expected: the unversioned parser test exposes the current Delete-to-Modify absorption; v2 imports and absent-result assertions fail; existing v1 tests pass.
+Expected: the unversioned parser test exposes the current Delete-to-Modify absorption; v2 imports, absent-result assertions, v2 transition schema, and writer-to-discovery assertions fail; existing v1 tests pass.
 
 - [ ] **Step 3: Add versioned file-map and baseline types**
 
@@ -430,17 +442,72 @@ if disposition == "Delete":
 
 For v2 Create/Modify results emit `final_state: "present"` with the real digest. Construct v2 results by iterating `file_map_entries(...)` in Create, Modify, Delete, Preserve section order and retaining each section's exact path order; do not sort v2 states after construction. Keep the v1 result object, lexical sort, and hash byte-for-byte unchanged. Include Delete paths in mapped product dirt and claimed paths, but never in managed lifecycle requirements.
 
-- [ ] **Step 5: Route exact setup-v2 plan prefixes before generic rejection**
+- [ ] **Step 5: Version execution-transition writes, adoption, and validation**
+
+Keep `EXECUTION_TRANSITION_SCHEMA`, `ExecutionTransitionReceipt`, the v1 binding fields, and the v1 event seed byte-for-byte unchanged. Add:
+
+```python
+EXECUTION_TRANSITION_SCHEMA_V2 = "implementation-execution-transition/v2"
+PRODUCT_PATH_STATES_SCHEMA_V2 = "implementation-product-path-states/v2"
+
+@dataclass(frozen=True)
+class ExecutionTransitionReceiptV2:
+    prior_state: str
+    increment_state: str
+    status_sha256: str
+    product_result_schema_version: str
+    product_result_sha256: str
+    recovered: bool
+```
+
+For a baseline/result v2 assessment, `advance_execution_state(...)` writes exactly this binding; `review_remediation_sha256` is the only additional field allowed, and is required only for the Task 3 `remediating -> reviewing` writer:
+
+```python
+{
+    "schema_version": "implementation-execution-transition/v2",
+    "event_id": event_id,
+    "authorization_id": authorization_id,
+    "prior_increment_state": current_state,
+    "target_increment_state": target_increment_state,
+    "prior_status_sha256": prior_sha256,
+    "product_result_schema_version": "implementation-product-path-states/v2",
+    "product_result_sha256": assessment.product_delta_sha256,
+}
+```
+
+`product_result_sha256` is the canonical SHA-256 already computed over the ordered v2 path-state tuple; it must reproduce from `assessment.product_delta` without sorting or coercing `None`. Derive `event_id = _identifier("execution-transition", event_seed)` from exactly:
+
+```python
+{
+    "program_id": status["program_id"],
+    "program_revision": status["program_revision"],
+    "increment_id": status["current_increment_id"],
+    "prior_status_sha256": prior_sha256,
+    "prior_increment_state": current_state,
+    "target_increment_state": target_increment_state,
+    "product_result_schema_version": "implementation-product-path-states/v2",
+    "product_result_sha256": assessment.product_delta_sha256,
+    "authorization_id": authorization_id,
+}
+```
+
+Append `review_remediation_sha256` to that seed and binding only when `prior_increment_state == "remediating"`. `transition_authority.event_id` must equal the derived identifier and use the same authorization. `previous_state.status_sha256` must equal `prior_status_sha256`, and its sequence must be exactly one below the new status.
+
+Select v1 or v2 only from the validated manifest setup/envelope, execution-baseline, and assessment result-schema tuple. The v1 binding has `product_delta_sha256` and no product-result fields; the v2 binding has the two product-result fields and no `product_delta_sha256`. In the same-target retry branch, rebuild the expected family, fields, canonical result digest, event seed, `previous_state`, and `transition_authority` before returning a recovered receipt; do not adopt from schema/target/digest alone. A mismatch raises the existing recovery-required error before any write.
+
+In `state_authority.py`, validate the same exact field sets and family table, recompute the event identifier, and reject a cross-family or dual-family binding. While state is `implementing` or `remediating`, validate the entry digest's shape and seed binding but preserve it while product work may evolve; at `reviewing`, `verified`, `awaiting-diff-approval`, and `accepted`, recompute the v1 delta or canonical v2 path-state digest from the fresh assessment and require equality. Preserve the v1 error text and add `reviewed product result differs from its status binding` for v2. In `program_discovery.py`, classify either transition-invalid message and either reviewed-result mismatch as `execution-transition-recovery-required` before generic invalid routing; an exact production-written v1 or v2 transition proceeds to the existing `resume` route.
+
+- [ ] **Step 6: Route exact setup-v2 plan prefixes before generic rejection**
 
 In `program_discovery.py::_load_setup_candidate(...)`, preserve without reimplementing the exact setup-v1/setup-v2 sequence-zero activation retry/recovery routing completed in Task 1. For sequence one and later only, load the allocated transaction files and relevant ledgers, derive the fresh observation, and call `_exact_plan_prefix_disposition(...)` before `validate_state_authority(...)` or any generic `resume`/invalid route. Do not accept a prefix by state name alone. For a manifest-v3/setup-v2 program, interrupt standard-mode preparation after the exact plan and awaiting-plan status, and materialization after the plan approval, v2 baseline, and action authorization. Each byte-exact incomplete prefix must return the matching `plan-preparation-retry-ready` or `plan-materialization-retry-ready`; missing/out-of-order records, changed plan bytes, a v1 baseline, or changed v2 path-state order must return the matching recovery-required disposition. After the exact authorized status is written last, discovery returns `resume` only after full state validation. `approval:pre-approve` and `approval:full-increment` must exercise their shorter exact materialization prefixes and completed-status route. The same cases for setup-v1 keep their existing bytes and disposition names.
 
-- [ ] **Step 6: Run the focused tests and verify GREEN**
+- [ ] **Step 7: Run the focused tests and verify GREEN**
 
 Run the Step 2 command.
 
-Expected: the exact parser, baseline, authorization, partial implementation, complete absence, and legacy-negative tests pass.
+Expected: the exact parser, baseline, authorization, partial implementation, complete absence, transition writer/retry/discovery, cross-family rejection, and legacy-byte tests pass.
 
-- [ ] **Step 7: Commit exact-plan and baseline support**
+- [ ] **Step 8: Commit exact-plan, baseline, and execution-transition support**
 
 ```bash
 rtk git add skills/implementing-staged-plans/scripts/state_authority.py skills/implementing-staged-plans/scripts/repository_preparation.py skills/implementing-staged-plans/scripts/program_activation.py skills/implementing-staged-plans/scripts/program_discovery.py tests/test_repository_preparation.py tests/test_program_activation.py tests/test_approval_checkpoint.py tests/test_program_discovery.py tests/test_state_authority.py
@@ -469,6 +536,7 @@ rtk git commit -m "feat: validate delete path states"
 **Interfaces:**
 - Produces: `implementation-review-evidence/v2`, `implementation-review-packet/v2`, `implementation-review-preparation/v2`, `implementation-review-remediation/v2`, `implementation-diff-disposition-binding/v2`, and `implementation-diff-disposition-command/v2` only for product path-state v2.
 - Produces: review evidence field `product_result = {schema_version, sha256, ordered_path_states}`.
+- Consumes: Task 2's exact execution-transition v1/v2 family; the remediation-return writer uses v2 result fields and seed extension for setup-v2 without redefining the schema.
 - Produces: exact-family discovery of v2 acceptance prefixes and an `accepted-stop` route for an exact accepted v2 diff binding.
 - Produces test helpers in `tests/program_bootstrap_support.py`: `BootstrapFixture.observation() -> RepositoryObservation` and `reviewing_delete_program() -> tuple[BootstrapFixture, Path, RepositoryObservation]`, returning a real temporary manifest-v3/setup-v2 program at `reviewing` with `legacy.ts` absent and raw review reports ready.
 - Preserves: v1 review evidence, packet rendering, remediation, prompt bytes, diff bindings, and approval records.
@@ -511,6 +579,8 @@ def test_delete_result_is_reviewed_and_accepted_as_absent(self) -> None:
 
 Add failures for a reappeared Delete target, changed path-state order, `final_state: present`, non-null absent digest, omitted Delete state, extra path state, v1/v2 review substitution, and remediation that restores or changes the deleted target without a renewed v2 assessment and review. In `tests/test_program_discovery.py`, persist an exact v2 diff-acceptance prefix and assert the pre-status prefix is `increment-acceptance-retry-ready`, the byte-exact accepted status is `accepted-stop`, and a substituted v1 binding, reordered state, or changed digest is `increment-acceptance-recovery-required` rather than resume or terminal.
 
+Drive one v2 remediation return through the production `program_review.py` writer. Require `implementation-execution-transition/v2`, the exact renewed product-result schema/digest, and an `event_id` derived from the Task 2 seed plus the exact `review_remediation_sha256`. Retry the byte-exact written status and require adoption without mutation. Substitute a v1 transition or v1 `product_delta_sha256` into that v2 return, and a v2 transition into the v1 control; require review retry, state authority, and discovery to fail on the exact transition family before any later review artifact is written. Preserve the existing v1 remediation-transition bytes.
+
 This task owns the chronology assertion deferred from Task 2: drive a setup-v2 first increment containing only Create/Modify/Preserve through v2 review and exact `accept-stop`, with an empty Delete section in its file map/result family, and assert discovery returns `accepted-stop` before any successor or Delete plan is prepared. Use production review and diff writers; do not edit accepted status directly.
 
 For manifest-v3/setup-v2 discovery, interrupt review preparation after evidence, packet, and verified status, then verify the exact awaiting-diff status written last routes to `resume` only after complete review-state validation. Interrupt acceptance after approval and accepted status. Every byte-exact incomplete review prefix returns `review-preparation-retry-ready`; the exact acceptance approval prefix returns `increment-acceptance-retry-ready`; the exact accepted status returns `accepted-stop`. Packet-before-evidence, changed evidence/packet/status, mixed v1/v2 review or command bytes, and changed/reordered accepted path states return the domain-specific recovery disposition before generic state validation. Repeat one setup-v1 control to prove its prompt bytes and route names are unchanged.
@@ -528,6 +598,8 @@ Expected: new v2 review/result schemas are absent and Delete surfaces cannot be 
 Extend execution ownership with a literal `delete` disposition: it requires a non-empty pre-write fingerprint, exact `post_write_fingerprint == "absent"`, program ownership, and no accepted user-work overlap. Add `deleted` to execution surface changes and require one semantic naming/compatibility record for each deleted path; keep physical `renamed` rejection unchanged.
 
 When `assessment.product_result_schema_version` is v2, `program_review.py` writes v2 review evidence containing the exact ordered states and v2 preparation/remediation bindings. `review_coordination.py` validates that the result digest is the canonical digest of those exact states and renders absent paths as absent—never as files with digests.
+
+For a v2 remediation return, `program_review.py` must consume Task 2's execution-transition contract and emit the exact v2 binding with `product_result_schema_version`, `product_result_sha256`, and `review_remediation_sha256`; its event seed is the Task 2 v2 seed plus that remediation digest. Its retry/adoption branch must reproduce the full binding, event identifier, previous-state link, transition authority, and renewed assessment before returning recovered. Keep the v1 writer and retry bytes unchanged.
 
 `diff_disposition.py` loads that exact reviewed result, freshly reassesses the workspace, compares schema/digest/states, and emits v2 binding/command schemas containing `product_result_schema_version`. Its submitted-prompt parser derives the expected command schema from the persisted review/result family before calling `parse_exact_prompt(...)`; it never accepts caller-selected family substitution. `program_discovery.py::_exact_review_prefix_disposition(...)`, `_exact_acceptance_prefix_disposition(...)`, and accepted-status routing must recognize only the exact v1 or v2 review/diff family, rebuild the matching production candidate, and classify byte-exact v2 accepted-stop and retry prefixes without a hard-coded v1 gate.
 
@@ -1062,6 +1134,8 @@ external-state authority.
 
 Record authorized/implementing/reviewing state rules, typed absent results, blocked recovery, cumulative tombstones, explicit recreation, and complete-chain closure once at their canonical references; link from the skill and reader docs. Update `references/program-discovery.md` to make its existing prefix-before-generic-rejection rule explicit for both setup/envelope families and to enumerate exact setup-v2 plan preparation/materialization, review, acceptance, immediate/later rollover, and closure retry/recovery routes. State that advanced Move/Rename, Replace, migration groups, automatic staging/finalization, and expanded Preserve remain pending under the broader v4 design.
 
+In the two version-owning design specs, `references/state-authorization.md`, `references/program-discovery.md`, and the live runbook, document `implementation-execution-transition/v2` as the setup-v2 companion to baseline/result v2: list its exact product-result fields, canonical ordered-state digest, family-specific event seed, conditional remediation-digest extension, retry/adoption checks, fresh-discovery route, and cross-family rejection. Preserve the documented v1 `product_delta_sha256` shape and byte contract.
+
 Synchronize `implementing-staged-plans-bootstrap-execution-review-runbook.md` as a current `0.1.3` operational runbook, not historical evidence: retain its 0.1.1/0.1.2 guarantees, add setup-v2's from-first-increment file-map/baseline/result family and empty Delete sections before late Delete, document v2 accepted-stop and divergent-prefix discovery, and require closure to bind the complete accepted path-state chain and final cumulative digest. Do not rewrite older dated design plans; they remain historical version-bound records.
 
 - [ ] **Step 5: Synchronize package version `0.1.3`**
@@ -1133,7 +1207,7 @@ Report commits, exact changed paths, focused/full check evidence, scenario repla
 ## Rollback and Failure Semantics
 
 - Before any v2 program artifact is persisted, the implementation commits can be reverted normally; v1 programs remain readable throughout.
-- After a Delete-capable v2 setup, baseline, review, rollover, blocked context, or closure artifact exists, do not downgrade that program to `0.1.2` or rewrite it as v1. Retain a `0.1.3` reader or ship a forward repair that preserves the v2 bytes.
+- After a Delete-capable v2 setup, baseline, execution transition, review, rollover, blocked context, or closure artifact exists, do not downgrade that program to `0.1.2` or rewrite it as v1. Retain a `0.1.3` reader or ship a forward repair that preserves the v2 bytes.
 - A failure before product mutation preserves the baseline file and exact partial control-plane prefix; retry may adopt only byte-identical owner-bound artifacts.
 - A failure after a planned Delete while status is `implementing` preserves the absence as a valid partial product result. Recovery may block and resume from the exact bound absence; it does not restore automatically.
 - A failure after review or diff acceptance must reproduce the same ordered path states and digest. Reappearance, changed content, missing result records, reordered states, or mixed schema families is divergent and stops without cleanup.
@@ -1145,7 +1219,7 @@ Report commits, exact changed paths, focused/full check evidence, scenario repla
 
 | Requirement | Primary owner | Required evidence | Failure signal |
 | --- | --- | --- | --- |
-| Locked implementation baseline | Git preflight | first repair `31a04be...` has parent `44ef42ac...`, whose parent is candidate `b5eb689e...`; second-corrections kickoff is the single clean plan-only child of `31a04be...` on `repair/delete-operation-support` | stop before edits |
+| Locked implementation baseline | Git preflight | candidate `b5eb689e...` is an ancestor of the clean kickoff HEAD on `repair/delete-operation-support`; every candidate-to-HEAD commit and aggregate path is only this plan; actual kickoff HEAD and plan SHA-256 are recorded | stop before edits |
 | Locked real source | scenario fixture/live replay | SHA-256 `a0dfa057...` and exact ordered 27-path Task 8 inventory | source drift; no claim |
 | Setup can state Delete truthfully | `program_setup.py` | envelope/setup v2 validates and recap renders path, absent state, disposition, rationale | unsupported or mixed schema |
 | Legacy setup unchanged | `program_setup.py`, `program_authority.py` | v1 golden bytes and cross-family negatives | any v1 byte/result drift |
@@ -1154,6 +1228,7 @@ Report commits, exact changed paths, focused/full check evidence, scenario repla
 | Baseline proves a real removable file | `program_activation.py`, `inspect_workspace_path(...)` | component `lstat`, workspace containment, existing regular-file digest; unsafe/user-owned targets rejected | missing/unsafe/overlap issue |
 | Ancestor safety is reassessed | `inspect_workspace_path(...)`, operation callers | baseline symlinked ancestor and post-authorization ancestor swap fail before external reads; missing suffix remains valid only for Create, accepted/inherited absence, and already-absent user work | path escape, rejected valid absence, or missing required Delete/Modify/Preserve target |
 | Lifecycle path-state semantics | `validate_execution_workspace(...)` | authorized exact; implementing exact-or-absent; reviewing absent; v2 result with null digest and exact-map ordering | accidental loss, fabricated digest, or reordered state |
+| Execution transition matches result family | `program_activation.py`, `program_review.py`, `state_authority.py`, `program_discovery.py` | v1 keeps `product_delta_sha256`; v2 uses `implementation-execution-transition/v2` with exact product-result schema/digest and derived event; production writer output survives fresh discovery and exact retry | mixed/dual family, changed seed or digest, invalid adoption, generic discovery route, or v1 byte drift |
 | Managed lifecycle writes stay separate | `state_authority.py` | required writes remain only Create/Modify/Preserve | Delete accepted for a control path |
 | Review and remediation bind absence | `program_review.py`, `review_coordination.py` | v2 evidence has exact ordered states/digest and renewed result after repair | stale/missing/mixed result |
 | Diff acceptance binds reviewed result | `diff_disposition.py` | v2 binding/command matches fresh review result | prompt or result mismatch |
