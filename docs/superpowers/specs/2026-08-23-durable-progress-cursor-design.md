@@ -208,7 +208,8 @@ An increment is delivered only after implementation, required checks, review,
 diff disposition, accepted status, and any required destructive-operation
 recovery cleanup are durable.
 
-After a delivered non-final new-program increment, output ends with exactly:
+After successor rollover creates and status-binds the next increment's `ready`
+cursor, output for the delivered non-final predecessor ends with exactly:
 
 ```text
 Next: INC-003 (increment 3 of 5) — part 1 of 3, task 1 of 4.

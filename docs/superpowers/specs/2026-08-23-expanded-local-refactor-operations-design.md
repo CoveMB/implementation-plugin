@@ -183,6 +183,17 @@ identifier. `migration_group_id` is required for Move/Rename, Replace, and
 Delete and forbidden for Create, Modify, and Preserve; omission, fabrication,
 or cross-operation reuse is invalid.
 
+Accepted state is operation- and path-role-specific. Create, Modify, and
+Preserve paths must be `present`. Move/Rename and Replace sources must be
+`absent` while their destinations must be `present`. Delete paths must be
+`absent`. Fresh assessment derives the complete expected accepted-state map
+from the bound product-operation inventory and, for Move/Rename, Replace, and
+Delete, requires exact agreement with the migration-group record's expected
+accepted path states. Every result path must also match its expected operation,
+migration-group membership, lineage, identity or bounded absence reason, and
+order. A missing, extra, reordered, role-mismatched, or state-mismatched entry
+is divergent and cannot reach review, acceptance, inheritance, or closure.
+
 Before status enters `reviewing`, fresh execution assessment appends one
 immutable `implementation-execution-result/v2` record to the manifest-owned
 execution-result ledger and writes status last with an opaque binding containing
@@ -490,7 +501,9 @@ Compatibility is versioned and no-rewrite:
 Implementation must add causal writer-to-fresh-discovery tests for:
 
 - parsing, ownership, baselines, accepted states, and verification for all six
-  operation types;
+  operation types, including rejection of every wrong present/absent state,
+  absence reason, lineage, operation binding, migration-group binding, or
+  expected-state-map mismatch;
 - present and absent execution states flowing from fresh assessment through
   execution transition, initial and follow-up review, remediation, diff
   disposition, acceptance, rollover, inherited workspace, blocked recovery,
