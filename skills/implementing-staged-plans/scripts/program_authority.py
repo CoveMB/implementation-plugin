@@ -1252,8 +1252,6 @@ def _manifest_increment_ids(
                 value
                 for value in assigned
                 if _is_non_empty_string(value)
-                and len(PurePosixPath(str(value)).parts) == 1
-                and "\\" not in str(value)
             )
     return increment_ids
 

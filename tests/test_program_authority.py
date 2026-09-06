@@ -672,6 +672,20 @@ class ProposalAuthorityAndStorageTests(ProgramAuthorityTestCase):
 
         self.assert_issue(issues, "duplicate filesystem targets")
 
+    def test_destination_identity_reports_unsafe_traceability_increment(self) -> None:
+        traceability = self.fixture.load_json("program/traceability.json")
+        traceability["atomic_requirements"][0]["assigned_increments"] = [
+            "../outside"
+        ]
+        self.fixture.write_json("program/traceability.json", traceability)
+
+        issues = AUTHORITY.validate_program_authority(
+            self.fixture.root,
+            validation_mode=AUTHORITY.PROPOSAL_VALIDATION_MODE,
+        )
+
+        self.assert_issue(issues, "must be one safe path segment")
+
     def test_destination_identity_uses_native_future_name_semantics(self) -> None:
         manifest = self.fixture.load_json("manifest.json")
         manifest["closure_storage"].update(
