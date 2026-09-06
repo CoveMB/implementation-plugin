@@ -4,7 +4,7 @@
 
 **Goal:** Add truthful, fail-closed support for exact regular-file `Delete` operations so a program can preserve an accepted absent path through review, diff acceptance, rollover, recovery, and closure without weakening existing `Create`, `Modify`, or `Preserve` contracts.
 
-**Architecture:** Keep manifest/status v1, v2, and existing manifest-v3/setup-v1 programs on their exact current routes. A manifest-v3 program that selects setup-semantics/envelope v2 enters one nested v2 lifecycle family at sequence zero: every increment uses file-map, baseline, product-result, execution-transition, review, diff, blocked-context, rollover, discovery, and closure v2, including an empty ordered Delete section before the increment that first deletes a file. Route by exact schema pairs, never by optional-field presence or by whether the current increment happens to contain Delete. The workflow continues to authorize a human or agent to modify the bound local workspace—it does not become an automatic deletion engine, migration engine, cleanup command, or generic destructive-action authority.
+**Architecture:** Keep manifest/status v1, v2, and existing manifest-v3/setup-v1 programs on their exact current routes. A manifest-v3 program that selects setup-semantics/envelope v2 enters one nested v2 lifecycle family at sequence zero: every increment uses file-map, baseline, product-result, execution-transition, review, diff, blocked-context, rollover, discovery, and closure v2, including an empty ordered Delete section before the increment that first deletes a file. One canonical fail-closed Delete-target validator protects Git metadata, program roots, and manifest-owned control paths at allocation and every later reassessment. Complete-chain closure derives requirement ownership from traceability plus accepted per-increment evidence, validates later accepted deltas, and reuses existing nonfinal handoffs and the final manifest-owned closure artifacts instead of inventing an addendum. Route by exact schema pairs, never by optional-field presence or by whether the current increment happens to contain Delete. The workflow continues to authorize a human or agent to modify the bound local workspace—it does not become an automatic deletion engine, migration engine, cleanup command, or generic destructive-action authority.
 
 **Tech Stack:** Python 3 standard library, frozen dataclasses, canonical JSON and SHA-256, `unittest`, temporary Git repositories, existing atomic/no-overwrite/status-last writers.
 
@@ -18,6 +18,7 @@
 - Existing manifest-v3 programs with `implementation-program-setup-semantics/v1` and `implementation-operation-envelope/v1` remain exactly `Create`/`Modify`/`Preserve` programs.
 - Delete-capable manifest-v3 proposals use `implementation-program-setup-semantics/v2` paired with `implementation-operation-envelope/v2`; that setup choice fixes the complete program to the nested v2 lifecycle family from its first increment, and mixed v1/v2 nested contracts fail before every write.
 - A `Delete` target must be one normalized repository-relative path that is a program-owned regular non-symlink, non-hard-linked file beneath the selected workspace when its deletion-increment baseline is captured. Setup may bind either an initially `existing` target or an `accepted-predecessor` target created and accepted by a strict predecessor increment; the latter requires a same-path predecessor `Create` allocation. Directories, symlinks, symlinked ancestors, hard links, special files, absent Delete baselines, external paths, protected paths, and pre-existing user work remain unsupported.
+- Every Delete allocation and reassessment must pass the same fail-closed protection context. Reject a lexical `.git` component; an existing path or ancestor that resolves to the worktree `.git` entry, Git directory, or Git common directory; the conventional `implementation-programs` root; the actual or intended manifest program root; and every manifest-resolved logical-role, increment-storage, or closure-storage control path. Use `RepositoryInspection.git_directory` and `.git_common_directory` for normal and linked worktrees, filesystem identity for existing aliases, and exact component boundaries so `.github`, `.gitignore`, and ordinary product names containing `git` remain allowed. Missing, empty, stale, or unresolvable protection metadata is an error, never permission.
 - Baseline capture and every later reassessment must repeat one shared component-by-component `lstat` walk and workspace-containment proof. Reject any unsafe existing component or containment escape, but return an absent snapshot after the first missing component so a caller may permit an absent suffix for Create, accepted Delete tombstones, inherited absence, or already-absent user work. Delete/Modify/Preserve baseline callers and every present-state caller separately require the ancestors and final regular file their operation needs; no earlier safe observation authorizes a later swapped ancestor.
 - `Delete` means the approved final state is absent. Never encode absence as `Modify`, `Preserve`, an omitted path, an empty digest, or a fabricated digest.
 - `authorized` requires every Delete target to remain byte-identical to its baseline; `implementing` permits either the exact baseline file or its absence; `reviewing` and later require absence. A changed-but-present Delete target is always invalid.
@@ -48,6 +49,8 @@ The defect is confirmed at the locked baseline:
 10. The real pipeFlow lifecycle does not begin with all 27 Task 8 Delete targets. `test/legacy/characterization.test.ts` is absent at setup, created and accepted in Task 1, inherited as present, and deleted with the other 26 legacy files in Task 8. A fixture that pre-creates all 27 paths does not exercise future Delete allocation, predecessor collision facts, or a real late tombstone.
 11. `implementing-staged-plans-bootstrap-execution-review-runbook.md` declares itself the Plan A `0.1.1` plus Plan B `0.1.2` boundary and documents singleton/final-only closure. It is a live operational runbook, so `0.1.3` path states and complete-chain closure must update it rather than reclassifying it as historical.
 12. `program_activation.py::advance_execution_state(...)` writes and retry-adopts only `implementation-execution-transition/v1` with `product_delta_sha256`, while `state_authority.py` accepts only that v1 shape and derives the event identifier from that v1 digest field. A setup-v2 writer output therefore has no exact execution-transition schema, result-family binding, event seed, state-authority route, or discovery retry/recovery contract even though Task 2 claims a complete v2 baseline/result family.
+13. `_safe_relative_path(...)` and exact-file-map normalization accept `.git/config`. In a normal checkout that is a regular file; in a linked worktree `.git` itself is a regular gitfile. `RepositoryInspection` already records the resolved Git directory and common directory, but blocked recovery and state authority currently synthesize inspections with both fields empty, while the shared test snapshot intentionally skips `.git`. Path-shape validation and snapshot equality therefore cannot enforce the protected boundary.
+14. `program_closure.py::_traceability_context(...)` counts every requirement not assigned to the final increment as unresolved, then fabricates every disposition as `implemented` with the final increment as owner and no accepted evidence. Task 6 also names a required `handoff addendum`, but the manifest increment storage and production rollover transaction create only a review packet, handoff, successor brief, and bound rollover record; the addendum belongs only to the preserved legacy continuity model and has no new-model writer or storage role.
 
 The smallest coherent repair is therefore a versioned Delete-only path-state extension inside manifest-v3. The pending manifest/status-v4 expanded-operations design remains pending for Move/Rename, Replace, migration groups, automated staging/finalization, and expanded Preserve; this repair does not claim to implement it.
 
@@ -74,7 +77,7 @@ Unsafe alternatives are rejected:
 - `skills/implementing-staged-plans/scripts/program_setup.py` — own setup-semantics/envelope v2 validation, pairing, and recap rendering.
 - `skills/implementing-staged-plans/scripts/program_authority.py` — recognize only the exact new setup authority schemas on manifest-v3 and reject cross-family substitution.
 - `skills/implementing-staged-plans/scripts/state_authority.py` — own shared versioned file-map types, exact nested-schema routing, execution-transition/result-family bindings, state bindings, and v1 compatibility rejection.
-- `skills/implementing-staged-plans/scripts/repository_preparation.py` — parse exact-file-map v2, parse baseline v2, and assess present/absent path states.
+- `skills/implementing-staged-plans/scripts/repository_preparation.py` — own the canonical Git/program/control protection context, parse exact-file-map v2, parse baseline v2, and assess present/absent path states.
 - `skills/implementing-staged-plans/scripts/program_activation.py` — construct Delete-aware plan candidates/baselines and bind v2 execution transitions without changing public signatures.
 - `skills/implementing-staged-plans/scripts/program_discovery.py` — route manifest-v3/setup-v2 plan preparation/materialization, review, acceptance, immediate/later rollover, closure, and divergent prefixes by exact schema family before generic state validation.
 - `skills/implementing-staged-plans/scripts/execution_discipline.py` — validate deleted ownership and semantic surfaces without treating Delete as a physical rename.
@@ -83,9 +86,9 @@ Unsafe alternatives are rejected:
 - `skills/implementing-staged-plans/scripts/diff_disposition.py` — bind the exact reviewed v2 product result during acceptance.
 - `skills/implementing-staged-plans/scripts/blocked_recovery.py` — freeze and revalidate Delete path states across blocked/resume.
 - `skills/implementing-staged-plans/scripts/program_continuation.py` — consume accepted present/absent results and render/parse exact accepted-state-continuation v1/v2 commands without coercing absence to a string digest.
-- `skills/implementing-staged-plans/scripts/program_rollover.py` — persist v2 rollover records and cumulative inherited present/absent path states.
+- `skills/implementing-staged-plans/scripts/program_rollover.py` — persist v2 rollover records with accepted review/diff/handoff bindings and cumulative inherited present/absent path states.
 - `skills/implementing-staged-plans/scripts/continuity_closure.py` — validate/render versioned closure reconciliation over accepted result bindings and cumulative path states.
-- `skills/implementing-staged-plans/scripts/program_closure.py` — build closure from the complete accepted increment chain and final cumulative state.
+- `skills/implementing-staged-plans/scripts/program_closure.py` — build closure from complete accepted-increment evidence, traceability-owned requirement dispositions, later-invalidation checks, and final cumulative state.
 - `skills/implementing-staged-plans/scripts/validate_package.py` — set and enforce package version `0.1.3`.
 - `skills/implementing-staged-plans/SKILL.md` — route and explain the Delete-capable nested v2 family.
 - `skills/implementing-staged-plans/agents/openai.yaml` — describe exact local Delete support without implying generic destructive authority.
@@ -141,12 +144,14 @@ Expected: the branch is `repair/delete-operation-support` and clean; record the 
 **Files:**
 - Modify: `skills/implementing-staged-plans/scripts/program_setup.py`
 - Modify: `skills/implementing-staged-plans/scripts/program_authority.py`
+- Modify: `skills/implementing-staged-plans/scripts/repository_preparation.py`
 - Modify: `skills/implementing-staged-plans/scripts/program_activation.py`
 - Modify: `skills/implementing-staged-plans/scripts/program_discovery.py`
 - Modify: `skills/implementing-staged-plans/scripts/state_authority.py`
 - Modify: `tests/program_bootstrap_support.py`
 - Test: `tests/test_program_setup.py`
 - Test: `tests/test_program_authority.py`
+- Test: `tests/test_repository_preparation.py`
 - Test: `tests/test_program_bootstrap.py`
 - Test: `tests/test_program_activation.py`
 - Test: `tests/test_program_discovery.py`
@@ -156,6 +161,7 @@ Expected: the branch is `repair/delete-operation-support` and clean; record the 
 - Consumes: manifest-v3 `setup_semantics` and the existing immutable setup decision flow.
 - Produces: `SETUP_SEMANTICS_SCHEMA_V2`, `OPERATION_ENVELOPE_SCHEMA_V2`, `SETUP_RECAP_SCHEMA_V2`, `SETUP_RECAP_CHECKPOINT_SCHEMA_V2`, `SETUP_DECISION_ADAPTER_SCHEMA_V2`, and `SETUP_ACTIVATION_SCHEMA_V2`.
 - Produces: `_operation_contract(semantics: Mapping[str, object]) -> tuple[tuple[str, ...], bool]`, returning the exact supported-operation tuple and whether Delete fields are required.
+- Produces: `DeleteProtectionContext`, `build_delete_protection_context(workspace_root: Path, manifest_program_root: Path, manifest: Mapping[str, object], inspection: RepositoryInspection) -> DeleteProtectionContext`, and `validate_delete_target_path(context: DeleteProtectionContext, relative_path: str) -> None` as the only Delete protection policy used by setup and later tasks.
 - Produces test helpers: `BootstrapFixture.configure_delete_setup_v2(allocation: Mapping[str, object]) -> dict[str, object]`, `configure_v1_envelope_with_delete() -> list[str]`, and `configure_mixed_setup_versions() -> list[str]`; each recomputes the semantic digest after its exact mutation.
 - Produces: recap, checkpoint, decision, activation-record, program-authority, and state-authority dispatch selected from the exact setup/envelope family before any activation record is written.
 - Produces: manifest-v3/setup-v2 sequence-zero activation-prefix discovery that returns `program-activation-retry-ready` for every byte-exact incomplete prefix and `program-activation-recovery-required` for every started mixed, out-of-order, or divergent prefix before generic invalid-state routing.
@@ -219,6 +225,8 @@ def test_v1_and_mixed_setup_contracts_reject_delete(self) -> None:
 
 Also assert proposal validation, publication, recap checkpoint, and setup decision accept the all-v2 nested family and reject a substituted v1 record or v2 record in a v1 setup. Add a two-increment allocation for one initially absent exact path: `Create` in the first increment with facts `absent`/`none`/`None`/`none`, then `Delete` in its strict successor with facts `regular-file`/`none`/`100644`/`accepted-predecessor`. Require one same-path Create allocation in a transitive predecessor for `accepted-predecessor`, and reject an unrelated, same-increment, later, or absent predecessor allocation; the distinct operations are not a duplicate allocation. Keep an initially present Delete allocation on collision `existing` and reject any other collision/fact combination.
 
+Before accepting either Delete allocation form, exercise the production protection validator in a normal temporary checkout and a real linked worktree. Reject `.git`, `.git/config`, a symlink or case/alias resolving into `.git`, the resolved `git_directory`, the resolved `git_common_directory`, `implementation-programs/**`, the intended `implementation-programs/<program_id>` publication target, an instruction-declared actual program root, `manifest.json`, every logical-role file, and the increment/closure storage roots even when the allocation says `protected: false`. In the linked worktree specifically prove that the regular `.git` gitfile is rejected. If the platform cannot create a case alias or hard link, skip only that alias variant and retain the symlink and linked-worktree cases. Positive controls must accept ordinary product files such as `.github/legacy.yml`, `.gitignore.backup`, and `src/legitimate-config.ts`; component matching must not become a substring ban.
+
 Drive `program_activation.py::activate_program(...)` through the real sequence-zero transaction and assert that it writes `setup-activation-decision/v2`, not `setup-activation-decision/v1`, before the status-last transition; substitute either activation schema across families and require both program and state authority to fail closed. After each byte-exact v2 activation prefix, run discovery and require the existing `program-activation-retry-ready` route. For each started-prefix record class—setup activation decision, required source-gate decision, program approval, and workspace approval—change one bound field, substitute the opposite setup schema where applicable, or place the record out of order; require read-only discovery to return `program-activation-recovery-required`, `required_input == "activation-prefix-recovery"`, and `stop_required is True` without falling through to generic invalid-state or publication recovery. Keep malformed sequence-zero proposals with no activation transaction artifact on their existing invalid route.
 
 - [ ] **Step 2: Run the focused tests and verify RED**
@@ -226,7 +234,7 @@ Drive `program_activation.py::activate_program(...)` through the real sequence-z
 Run:
 
 ```bash
-rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_program_setup tests.test_program_authority tests.test_program_bootstrap tests.test_program_activation tests.test_program_discovery tests.test_state_authority -v
+rtk env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_program_setup tests.test_program_authority tests.test_repository_preparation tests.test_program_bootstrap tests.test_program_activation tests.test_program_discovery tests.test_state_authority -v
 ```
 
 Expected: new tests fail because only setup/envelope v1 exists and `Delete` is unsupported; all pre-existing tests remain green.
@@ -259,7 +267,150 @@ def _operation_contract(
     raise ValueError("setup semantics and operation envelope schema families do not match")
 ```
 
+In `repository_preparation.py`, add the protection context without changing the persisted repository-inspection v1 bytes:
+
+```python
+@dataclass(frozen=True)
+class DeleteProtectionContext:
+    workspace_root: Path
+    git_directory: Path
+    git_common_directory: Path
+    protected_roots: tuple[Path, ...]
+    protected_paths: tuple[Path, ...]
+
+def build_delete_protection_context(
+    workspace_root: Path,
+    manifest_program_root: Path,
+    manifest: Mapping[str, object],
+    inspection: RepositoryInspection,
+) -> DeleteProtectionContext:
+    workspace = Path(workspace_root)
+    if workspace.is_symlink() or not workspace.is_dir():
+        raise ValueError("Delete protection requires a regular workspace root")
+    workspace = workspace.resolve(strict=True)
+
+    git_directory = Path(inspection.git_directory)
+    git_common_directory = Path(inspection.git_common_directory)
+    if not git_directory.is_absolute() or not git_common_directory.is_absolute():
+        raise ValueError("Delete protection requires resolved Git metadata paths")
+    if not git_directory.exists() or not git_common_directory.exists():
+        raise ValueError("Delete protection Git metadata paths are missing")
+
+    program_root = Path(manifest_program_root).absolute()
+    try:
+        program_root.relative_to(workspace.absolute())
+    except ValueError as error:
+        raise ValueError("manifest program root escapes the workspace") from error
+
+    def managed_relative(value: object, label: str) -> PurePosixPath:
+        if not isinstance(value, str) or not value or "\\" in value:
+            raise ValueError(f"{label} is not a safe relative POSIX path")
+        relative = PurePosixPath(value)
+        if relative.is_absolute() or any(
+            part in {"", ".", ".."} for part in relative.parts
+        ):
+            raise ValueError(f"{label} is not a safe relative POSIX path")
+        return relative
+
+    roles = manifest.get("logical_roles")
+    increment_storage = manifest.get("increment_storage")
+    closure_storage = manifest.get("closure_storage")
+    if not isinstance(roles, Mapping):
+        raise ValueError("manifest logical_roles must be an object")
+    if not isinstance(increment_storage, Mapping) or not isinstance(
+        closure_storage, Mapping
+    ):
+        raise ValueError("manifest lifecycle storage descriptors must be objects")
+
+    increment_root = program_root.joinpath(
+        *managed_relative(increment_storage.get("root"), "increment storage root").parts
+    )
+    closure_root = program_root.joinpath(
+        *managed_relative(closure_storage.get("root"), "closure storage root").parts
+    )
+    control_paths = [program_root / "manifest.json"]
+    control_paths.extend(
+        program_root.joinpath(*managed_relative(value, f"logical role {role}").parts)
+        for role, value in sorted(roles.items())
+    )
+    program_binding = manifest.get("program_binding")
+    if isinstance(program_binding, Mapping):
+        for field in ("path", "traceability_path"):
+            control_paths.append(
+                program_root.joinpath(
+                    *managed_relative(
+                        program_binding.get(field), f"program binding {field}"
+                    ).parts
+                )
+            )
+
+    protected_roots = (
+        workspace / ".git",
+        git_directory,
+        git_common_directory,
+        workspace / "implementation-programs",
+        program_root,
+        increment_root,
+        closure_root,
+    )
+    for protected in (*protected_roots, *control_paths):
+        if protected.is_symlink():
+            raise ValueError("Delete protection metadata contains a symlink")
+    return DeleteProtectionContext(
+        workspace_root=workspace,
+        git_directory=git_directory.resolve(strict=True),
+        git_common_directory=git_common_directory.resolve(strict=True),
+        protected_roots=tuple(path.absolute() for path in protected_roots),
+        protected_paths=tuple(path.absolute() for path in control_paths),
+    )
+
+def validate_delete_target_path(
+    context: DeleteProtectionContext,
+    relative_path: str,
+) -> None:
+    relative = PurePosixPath(relative_path)
+    if (
+        not relative_path
+        or "\\" in relative_path
+        or relative.is_absolute()
+        or relative.as_posix() != relative_path
+        or any(part in {"", ".", ".."} for part in relative.parts)
+    ):
+        raise ValueError("Delete target must be one normalized repository-relative path")
+    if ".git" in relative.parts:
+        raise ValueError(f"Delete target is protected: {relative_path}")
+
+    candidate = context.workspace_root.joinpath(*relative.parts).absolute()
+    protected = (*context.protected_roots, *context.protected_paths)
+    if any(candidate == item or candidate.is_relative_to(item) for item in protected):
+        raise ValueError(f"Delete target is protected: {relative_path}")
+
+    current = context.workspace_root
+    for part in relative.parts:
+        current = current / part
+        if not current.exists() and not current.is_symlink():
+            break
+        if current.is_symlink():
+            raise ValueError(f"Delete target has a symlink component: {relative_path}")
+        resolved = current.resolve(strict=True)
+        for protected_path in protected:
+            protected_resolved = protected_path.resolve(strict=False)
+            same_file = protected_path.exists() and current.samefile(protected_path)
+            if (
+                same_file
+                or resolved == protected_resolved
+                or resolved.is_relative_to(protected_resolved)
+            ):
+                raise ValueError(f"Delete target is protected: {relative_path}")
+```
+
+The builder requires a strict regular non-symlink workspace root, non-empty absolute Git directory/common-directory values from a fresh `inspect_repository(...)`, a manifest program root lexically beneath the workspace, and safe exact manifest path descriptors. Its protected roots are the workspace `.git` entry, both resolved Git metadata directories, the conventional `workspace/implementation-programs` root, the intended or actual manifest program root, and the manifest's increment/closure storage roots. Its protected exact paths include `manifest.json`, all resolved `logical_roles`, and every manifest binding path. Fail closed if any required protection value is missing, ambiguous, escaping, or symlinked.
+
+The validator first rejects any normalized path with an exact lexical `.git` component. It then proves lexical workspace containment and walks existing components with `lstat`; compare existing filesystem identities with `samefile` where available and compare strict resolved ancestors against every protected root/path. This must catch case aliases, the linked-worktree gitfile, the per-worktree Git directory, the shared common directory, and symlink aliases before reading target bytes. Use exact path-component containment, not string prefixes. An absent suffix may still be classified by Task 2 only after its nearest existing ancestor passes this protection check.
+
 For v2, require `accepted_state == "absent"`, one allowed `content_disposition`, and a non-empty rationale only on Delete allocations; reject those fields on non-Delete allocations. Require an exact-path Delete allocation to be program-owned, non-protected, non-user-work, and to declare collision `existing` or `accepted-predecessor`. The latter is valid only when the setup dependency graph contains one same-path `Create` allocation in a strict transitive predecessor; it does not weaken the activation-time exact fact comparison. Preserve all existing ownership, file-kind, link-kind, mode, collision, overlap, and duplicate-allocation checks.
+
+For each setup-v2 Delete allocation, derive a fresh repository inspection from the setup workspace binding, reproduce the persisted workspace observation, build the context with the intended publication root, and call `validate_delete_target_path(...)`. Proposal validation, activation, and every activation retry must repeat this check; an old setup decision is not protection evidence. Use a local import if needed to avoid a `program_setup.py`/`repository_preparation.py` import cycle. Setup-v1 never enters this Delete-only route and retains exact bytes.
 
 Select recap/checkpoint/adapter/activation schema versions solely from `_operation_contract(...)`. In this same task, change `program_activation.py::_build_v3_setup_record(...)` to select and write the matching activation schema instead of importing and unconditionally emitting `SETUP_ACTIVATION_SCHEMA`; update its activation-prefix adoption tests before calling this task GREEN. Extend `program_authority.py::SETUP_AUTHORITY_RECORD_SCHEMAS`, `program_setup.py`'s activation-record loaders/validators, and `state_authority.py::SETUP_ONLY_STATUS_SCHEMAS` plus its manifest-v3 family validation without admitting the v2 records to setup-v1 or legacy manifests.
 
@@ -274,7 +425,7 @@ Expected: all setup, authority, generic proposal-publication, and sequence-zero 
 - [ ] **Step 5: Commit the setup contract**
 
 ```bash
-rtk git add skills/implementing-staged-plans/scripts/program_setup.py skills/implementing-staged-plans/scripts/program_authority.py skills/implementing-staged-plans/scripts/program_activation.py skills/implementing-staged-plans/scripts/program_discovery.py skills/implementing-staged-plans/scripts/state_authority.py tests/program_bootstrap_support.py tests/test_program_setup.py tests/test_program_authority.py tests/test_program_bootstrap.py tests/test_program_activation.py tests/test_program_discovery.py tests/test_state_authority.py
+rtk git add skills/implementing-staged-plans/scripts/program_setup.py skills/implementing-staged-plans/scripts/program_authority.py skills/implementing-staged-plans/scripts/repository_preparation.py skills/implementing-staged-plans/scripts/program_activation.py skills/implementing-staged-plans/scripts/program_discovery.py skills/implementing-staged-plans/scripts/state_authority.py tests/program_bootstrap_support.py tests/test_program_setup.py tests/test_program_authority.py tests/test_repository_preparation.py tests/test_program_bootstrap.py tests/test_program_activation.py tests/test_program_discovery.py tests/test_state_authority.py
 rtk git commit -m "feat: add typed delete setup contracts"
 ```
 
@@ -297,6 +448,7 @@ rtk git commit -m "feat: add typed delete setup contracts"
 - Produces: `ExactFileMapV2`, `ExecutionBaselineV2`, and `InheritedPathStateV2` while retaining `ExactFileMap` and `ExecutionBaseline` as v1 types.
 - Produces: `file_map_entries(file_map) -> tuple[tuple[str, tuple[str, ...]], ...]` and `file_map_paths(file_map, *, mutable_only: bool) -> tuple[str, ...]` so consumers do not reconstruct operation inventories inconsistently.
 - Produces: `WorkspacePathSnapshot(relative_path: str, exists: bool, sha256: str | None, mode: str | None, link_count: int | None)` and `inspect_workspace_path(workspace_root: Path, relative_path: str) -> WorkspacePathSnapshot`, the single component-by-component path-safety and containment check used at baseline and every reassessment.
+- Consumes: Task 1's `DeleteProtectionContext` and `validate_delete_target_path(...)`; every Delete branch validates protection immediately before its component walk and never accepts an empty/synthetic Git protection context.
 - Produces: `product_result_schema_version` on `ExecutionWorkspaceAssessment`; v1 remains `implementation-product-delta/v1`, v2 is `implementation-product-path-states/v2`.
 - Produces: `EXECUTION_TRANSITION_SCHEMA_V2 = "implementation-execution-transition/v2"` and `ExecutionTransitionReceiptV2`; v2 status bindings use `product_result_schema_version` and `product_result_sha256`, never `product_delta_sha256`.
 - Produces: exact baseline/result/transition pairing: baseline v1 + product-delta v1 + execution-transition v1, or baseline v2 + product-path-states v2 + execution-transition v2. A missing, mixed, substituted, or dual-family field set fails before adoption or any status write.
@@ -365,7 +517,9 @@ For both target states, substitute a v1 transition into the v2 status and a v2 t
 
 Add one manifest-v3/setup-v2 program whose first increment contains only Create/Modify/Preserve, including Create for a currently absent exact path, and whose strict successor owns Delete for that same path with collision `accepted-predecessor`. In this task, assert only that the first increment rejects a v1 or unversioned file map, accepts file-map/baseline/result v2 with an empty Delete section, and reaches `authorized` with an exact v2 baseline. Do not fabricate or require accepted predecessor state here: Task 3 owns v2 review/diff acceptance, and Task 5 owns the production rollover into the Delete increment. Assert the inverse family substitution fails for setup v1.
 
-For path traversal, add `nested/legacy.ts` with a real directory ancestor and capture an authorized baseline. Replace `nested` after authorization with a symlink to a temporary directory outside the workspace, then require the next `validate_execution_workspace(...)` call to report `execution path has symlinked ancestor: nested/legacy.ts` before reading or hashing the external target. Cover the same symlinked-ancestor rejection during baseline construction, and assert the external sentinel is unchanged in both cases. Also preserve the current positive cases for an absent v1 Create target below a not-yet-created parent and an already-absent tracked user-work path whose suffix is missing. A missing suffix returns `exists=False`; Delete/Modify/Preserve baseline callers must then reject it as missing, while Create, accepted/inherited absence, and already-absent user-work callers may accept it.
+For path traversal, add `nested/legacy.ts` with a real directory ancestor and capture an authorized baseline. Replace `nested` after authorization with a symlink to a temporary directory outside the workspace, then require the next `validate_execution_workspace(...)` call to report `execution path has symlinked ancestor: nested/legacy.ts` before reading or hashing the external target. Repeat the swap with a symlink into `.git` and into the active program root, and where supported with a hard-link/case alias to an existing protected file. Cover the same rejection during baseline construction, and assert every external/control sentinel is unchanged in both cases. Inject a lost response after the baseline and action-authorization prefixes, perform the protected swap, then retry materialization: it must return the exact plan-domain recovery stop without adopting authorization or writing status. A direct v2 baseline or inherited-state tamper that introduces `.git/config` or a manifest control path must also fail before hashing or status writes; repository snapshots that skip `.git` are not sufficient evidence, so assert the protected sentinel bytes and Git identity explicitly.
+
+Preserve the current positive cases for an absent v1 Create target below a not-yet-created parent and an already-absent tracked user-work path whose suffix is missing. A missing suffix returns `exists=False`; Delete/Modify/Preserve baseline callers must then reject it as missing, while Create, accepted/inherited absence, and already-absent user-work callers may accept it. Add positive v2 Delete baselines for `.github/legacy.yml` and an ordinary nested product file to prove the protection rule does not narrow legitimate product deletion.
 
 - [ ] **Step 2: Run the focused tests and verify RED**
 
@@ -413,7 +567,7 @@ Add `implementation-execution-baseline/v2` in `repository_preparation.py` with a
 
 Implement `inspect_workspace_path(...)` with `os.lstat`, never `Path.is_file()` or `resolve()` as the symlink test: normalize the relative POSIX path; `lstat` and reject a symlinked/non-directory supplied workspace root before resolving it strictly; prove the lexical candidate is beneath that root; then `lstat` components from the root downward. Every existing ancestor must be a non-symlink directory whose strict resolution remains inside the strict workspace root. If a component is missing, stop walking and return one absent snapshot for the whole remaining suffix without resolving, reading, or creating it. If the final component exists, require a regular non-symlink file, prove its strict resolution remains inside the workspace, and only then return its digest, mode, and link count. Reject every other existing component kind or containment escape.
 
-Use this helper in activation allocation-fact checks, `_path_baselines(...)`, `_user_work_baselines(...)`, and every current, inherited, and user-work branch of `validate_execution_workspace(...)`. Callers then enforce their own presence contract: baseline Delete/Modify/Preserve and every state that expects presence require an existing regular file; Create before creation, Delete after removal, inherited tombstones, and recorded already-absent user work permit an absent suffix. A later lifecycle reassessment must repeat the complete walk; an authorization-time result is never reused as current path-safety evidence.
+Use this helper in activation allocation-fact checks, `_path_baselines(...)`, `_user_work_baselines(...)`, and every current, inherited, and user-work branch of `validate_execution_workspace(...)`. Every branch whose current operation or inherited state is Delete must first rebuild Task 1's protection context from the current manifest and fresh real `RepositoryInspection`, then call `validate_delete_target_path(...)`; a persisted allocation, baseline, action authorization, review, or accepted result is never a waiver. Callers then enforce their own presence contract: baseline Delete/Modify/Preserve and every state that expects presence require an existing regular file; Create before creation, Delete after removal, inherited tombstones, and recorded already-absent user work permit an absent suffix. A later lifecycle reassessment must repeat both the protection check and complete walk; an authorization-time result is never reused as current path-safety evidence.
 
 - [ ] **Step 4: Implement Delete-aware candidate and workspace validation**
 
@@ -495,7 +649,7 @@ Append `review_remediation_sha256` to that seed and binding only when `prior_inc
 
 Select v1 or v2 only from the validated manifest setup/envelope, execution-baseline, and assessment result-schema tuple. The v1 binding has `product_delta_sha256` and no product-result fields; the v2 binding has the two product-result fields and no `product_delta_sha256`. In the same-target retry branch, rebuild the expected family, fields, canonical result digest, event seed, `previous_state`, and `transition_authority` before returning a recovered receipt; do not adopt from schema/target/digest alone. A mismatch raises the existing recovery-required error before any write.
 
-In `state_authority.py`, validate the same exact field sets and family table, recompute the event identifier, and reject a cross-family or dual-family binding. While state is `implementing` or `remediating`, validate the entry digest's shape and seed binding but preserve it while product work may evolve; at `reviewing`, `verified`, `awaiting-diff-approval`, and `accepted`, recompute the v1 delta or canonical v2 path-state digest from the fresh assessment and require equality. Preserve the v1 error text and add `reviewed product result differs from its status binding` for v2. In `program_discovery.py`, classify either transition-invalid message and either reviewed-result mismatch as `execution-transition-recovery-required` before generic invalid routing; an exact production-written v1 or v2 transition proceeds to the existing `resume` route.
+In `state_authority.py`, validate the same exact field sets and family table, recompute the event identifier, and reject a cross-family or dual-family binding. While state is `implementing` or `remediating`, validate the entry digest's shape and seed binding but preserve it while product work may evolve; at `reviewing`, `verified`, `awaiting-diff-approval`, and `accepted`, recompute the v1 delta or canonical v2 path-state digest from the fresh assessment and require equality. Replace the current synthetic `RepositoryInspection(git_directory="", git_common_directory="", ...)` with a fresh `inspect_repository(...)`, require its observation to reproduce the supplied status-current observation, and pass its real Git metadata into Delete protection. Missing or changed Git metadata fails closed. Preserve the v1 error text and add `reviewed product result differs from its status binding` for v2. In `program_discovery.py`, classify either transition-invalid message and either reviewed-result mismatch as `execution-transition-recovery-required` before generic invalid routing; an exact production-written v1 or v2 transition proceeds to the existing `resume` route.
 
 - [ ] **Step 6: Route exact setup-v2 plan prefixes before generic rejection**
 
@@ -579,6 +733,8 @@ def test_delete_result_is_reviewed_and_accepted_as_absent(self) -> None:
 
 Add failures for a reappeared Delete target, changed path-state order, `final_state: present`, non-null absent digest, omitted Delete state, extra path state, v1/v2 review substitution, and remediation that restores or changes the deleted target without a renewed v2 assessment and review. In `tests/test_program_discovery.py`, persist an exact v2 diff-acceptance prefix and assert the pre-status prefix is `increment-acceptance-retry-ready`, the byte-exact accepted status is `accepted-stop`, and a substituted v1 binding, reordered state, or changed digest is `increment-acceptance-recovery-required` rather than resume or terminal.
 
+After authorization and again after review preparation, replace an allowed Delete target or ancestor with an alias into `.git` or the program control root. Require `build_review_preparation(...)`, remediation return, `build_diff_acceptance_candidate(...)`, direct submission, state authority, and discovery to reject the protected target before reading it, accepting a packet, or appending an approval. Retry after an injected review-evidence or diff-approval prefix must preserve that prefix and return the matching review/acceptance recovery disposition. Keep a normal product Delete positive control through accepted-stop.
+
 Drive one v2 remediation return through the production `program_review.py` writer. Require `implementation-execution-transition/v2`, the exact renewed product-result schema/digest, and an `event_id` derived from the Task 2 seed plus the exact `review_remediation_sha256`. Retry the byte-exact written status and require adoption without mutation. Substitute a v1 transition or v1 `product_delta_sha256` into that v2 return, and a v2 transition into the v1 control; require review retry, state authority, and discovery to fail on the exact transition family before any later review artifact is written. Preserve the existing v1 remediation-transition bytes.
 
 This task owns the chronology assertion deferred from Task 2: drive a setup-v2 first increment containing only Create/Modify/Preserve through v2 review and exact `accept-stop`, with an empty Delete section in its file map/result family, and assert discovery returns `accepted-stop` before any successor or Delete plan is prepared. Use production review and diff writers; do not edit accepted status directly.
@@ -597,7 +753,7 @@ Expected: new v2 review/result schemas are absent and Delete surfaces cannot be 
 
 Extend execution ownership with a literal `delete` disposition: it requires a non-empty pre-write fingerprint, exact `post_write_fingerprint == "absent"`, program ownership, and no accepted user-work overlap. Add `deleted` to execution surface changes and require one semantic naming/compatibility record for each deleted path; keep physical `renamed` rejection unchanged.
 
-When `assessment.product_result_schema_version` is v2, `program_review.py` writes v2 review evidence containing the exact ordered states and v2 preparation/remediation bindings. `review_coordination.py` validates that the result digest is the canonical digest of those exact states and renders absent paths as absent—never as files with digests.
+When `assessment.product_result_schema_version` is v2, `program_review.py` writes v2 review evidence containing the exact ordered states and v2 preparation/remediation bindings. `review_coordination.py` validates that the result digest is the canonical digest of those exact states and renders absent paths as absent—never as files with digests. Every review, remediation, diff-candidate, diff-submission, retry, state-authority, and discovery entry point must obtain a fresh real repository inspection and repeat Task 1's Delete protection check through `validate_execution_workspace(...)`; do not trust the baseline or prior result to prove that a path is still outside control metadata.
 
 For a v2 remediation return, `program_review.py` must consume Task 2's execution-transition contract and emit the exact v2 binding with `product_result_schema_version`, `product_result_sha256`, and `review_remediation_sha256`; its event seed is the Task 2 v2 seed plus that remediation digest. Its retry/adoption branch must reproduce the full binding, event identifier, previous-state link, transition authority, and renewed assessment before returning recovered. Keep the v1 writer and retry bytes unchanged.
 
@@ -675,6 +831,8 @@ def test_reviewing_delete_can_block_and_resume_only_with_the_same_absence(self) 
 
 Also cover an implementing-state partial deletion, a post-block extra deletion, changed state order, evidence that claims a missing Delete file digest, exact prompt-bound resume, every failure-injection prefix, and v1 context byte compatibility.
 
+Add a post-block protection swap: after blocking a normal product Delete, alias its ancestor into `.git` and separately into the program root. `validate_blocked_context(...)`, resolution-candidate construction, exact resume submission, state authority, and discovery must fail without reading the protected target or appending a resolution. Retry after a persisted blocked prefix must preserve the prefix. Assert protected sentinel bytes directly because the shared repository snapshot omits `.git`.
+
 - [ ] **Step 2: Run the focused tests and verify RED**
 
 ```bash
@@ -685,7 +843,7 @@ Expected: blocked context v1 has no path-state binding and Delete is not include
 
 - [ ] **Step 3: Implement v2 blocked-context binding**
 
-Build a fresh execution assessment before writing blocked status. For a v2 baseline, bind its exact schema, result digest, and ordered current path states into the block identifier. `validate_blocked_context(...)` must reproduce all three from fresh observation before resolution. Include Delete in `blocked_workspace_paths(...)` but exclude absent Delete targets from regular-file evidence bindings.
+Build a fresh execution assessment before writing blocked status. For a v2 baseline, bind its exact schema, result digest, and ordered current path states into the block identifier. `validate_blocked_context(...)` must reproduce all three from a fresh real `inspect_repository(...)` result before resolution; remove the synthetic inspection with empty Git directory/common-directory fields. Include Delete in `blocked_workspace_paths(...)` but exclude absent Delete targets from regular-file evidence bindings. The fresh assessment repeats `validate_delete_target_path(...)` before examining any present or absent Delete state.
 
 Keep the existing status-last transaction and exact record adoption. Never recreate, restore, remove, or clean a product path during block or resume.
 
@@ -726,6 +884,7 @@ rtk git commit -m "feat: preserve delete state in recovery"
 - Produces: `ACCEPTED_STATE_CONTINUATION_SCHEMA_V2 = "implementation-accepted-state-continuation-binding/v2"` and `ContinuationCommandV2`, whose inherited-workspace value embeds the exact accepted product-result schema, digest, and ordered present/absent path states.
 - Produces: `build_continuation_extension(...) -> ContinuationExtension | ContinuationExtensionV2 | None`, `build_accept_continue_candidate(acceptance, extension: ContinuationExtension | ContinuationExtensionV2 | None) -> DiffAcceptanceCandidate`, and `_build_accepted_state_command(...) -> ContinuationCommand | ContinuationCommandV2`, all selected by exact persisted family rather than nullable-field presence.
 - Produces: `implementation-successor-authority-projection/v2`, `implementation-increment-rollover/v2`, `implementation-increment-rollover-binding/v2`, and `implementation-inherited-workspace/v2`.
+- Produces: each v2 rollover record copies the accepted status's exact review-evidence, review-packet, and diff-disposition bindings, plus `accepted_diff_approval_binding = {event_id, sha256}` and the existing manifest-owned `handoff_binding`; these are immutable closure-chain evidence after the status file advances to the successor.
 - Produces: accept-and-continue status bindings that retain the exact v1 or v2 diff-disposition family of the accepted stop candidate instead of rewriting v2 acceptance as v1.
 - Produces: `validated_inherited_path_states(program_root, status, observation) -> tuple[InheritedPathStateV2, ...]` while preserving `validated_inherited_paths(...)` for v1.
 - Produces: cumulative last-writer-wins path states only when the later increment explicitly owns the same path under a valid operation, using stable replace-in-place/append ordering rather than lexical resorting.
@@ -774,6 +933,10 @@ Assert immediate accept-and-continue and later accepted-state continuation both 
 
 Add a positive recreation case where a later exact plan explicitly owns `legacy.ts` as Create from an inherited absent baseline. Add negative cases for implicit recreation, Delete against inherited absence, Modify/Preserve against absence, Create against inherited presence, omitted/reordered/duplicated state, mixed v1/v2 continuation commands and rollover chains, `str(None)`, and a current result that is not the exact reviewed/diff-accepted v2 result. Add an ordering case whose first result has two paths in non-lexical exact-map order and whose second result replaces the first path and adds a new path: the replacement must keep its existing cumulative slot, the untouched state must keep its slot, and the new state must append in current result order.
 
+Assert that every completed v2 rollover record contains byte-reproducible accepted review-evidence/packet bindings, the complete v2 diff-disposition binding, one uniquely matching diff-approval record digest, and the existing handoff path/digest. Delete or tamper with the nonfinal review evidence, review packet, diff approval, or handoff and require `_validated_completed_rollover_records(...)`, state authority, discovery, later rollover, and closure preflight to fail. Do not add a handoff addendum field, filename, writer, or schema.
+
+Before consuming a current result or cumulative inherited state, replace an allowed Delete target with a symlink/alias into `.git` or the program root, and separately inject `.git/config` or a manifest control path into a v2 rollover record. Immediate continuation, later continuation, rollover retry/adoption, state authority, and discovery must repeat the canonical protection check and stop before action/grant/handoff/status writes. Preserve an allowed product tombstone through the same paths as the positive control.
+
 - [ ] **Step 2: Run focused continuation/rollover tests and verify RED**
 
 ```bash
@@ -784,7 +947,7 @@ Expected: current continuation coerces `None` to a string and current rollover r
 
 - [ ] **Step 3: Implement versioned accepted-result consumption and cumulative merge**
 
-For v2, load the exact product result from current review evidence, freshly reassess it, and compare it with the diff binding before constructing continuation authority. Use a separate dataclass:
+For v2, load the exact product result from current review evidence, freshly reassess it with a real repository inspection and the canonical Delete protection context, and compare it with the diff binding before constructing continuation authority. Use a separate dataclass:
 
 ```python
 @dataclass(frozen=True)
@@ -840,9 +1003,11 @@ Never pass v2 entries through `ProductDeltaPath(sha256: str)`, `ContinuationExte
 }
 ```
 
-In `program_continuation.py::build_accept_continue_candidate(...)`, dispatch from the exact accepted-stop binding schema and emit the matching v2 binding and command rather than unconditionally importing/writing `DIFF_DISPOSITION_BINDING_SCHEMA` and `DIFF_DISPOSITION_COMMAND_SCHEMA`; reject a mixed acceptance/projection family. The v2 rollover record carries the accepted current result plus the canonical cumulative `inherited_path_states` and digest. Each current result already follows operation-section order plus exact file-map order. Merge accepted increments without sorting: start with the prior cumulative list; for each current state in order, replace an existing path in its current list position only when the current exact operation inventory owns that path and its baseline agrees with the inherited state; append a newly owned path at the end. Reject duplicate paths in either input. This deterministic replace-in-place/append rule is part of the v2 digest contract; preserve the v1 lexical merge and bytes unchanged.
+In `program_continuation.py::build_accept_continue_candidate(...)`, dispatch from the exact accepted-stop binding schema and emit the matching v2 binding and command rather than unconditionally importing/writing `DIFF_DISPOSITION_BINDING_SCHEMA` and `DIFF_DISPOSITION_COMMAND_SCHEMA`; reject a mixed acceptance/projection family. The v2 rollover record carries the accepted current result plus the canonical cumulative `inherited_path_states` and digest. Before the accepted status is replaced, copy its exact `review_evidence_binding`, `review_packet_binding`, and full v2 `diff_disposition_binding`; find the unique canonical approval record named by `approval_event_id` and bind its canonical JSON-line SHA-256. Retain the existing `handoff_binding` and validate its manifest-derived path and bytes during every completed-chain read. These fields belong only to rollover v2; do not change v1 bytes.
 
-`validated_inherited_path_states(...)` validates every completed v2 rollover record, action, grant, review result, diff decision, and cumulative digest. It requires present files to match exact digests and absent files to remain absent. Mixed result families stop before persistence.
+Each current result already follows operation-section order plus exact file-map order. Merge accepted increments without sorting: start with the prior cumulative list; for each current state in order, replace an existing path in its current list position only when the current exact operation inventory owns that path and its baseline agrees with the inherited state; append a newly owned path at the end. Reject duplicate paths in either input. Call `validate_delete_target_path(...)` for every current or inherited Delete state before merge or filesystem reassessment. This deterministic replace-in-place/append rule is part of the v2 digest contract; preserve the v1 lexical merge and bytes unchanged.
+
+`validated_inherited_path_states(...)` validates every completed v2 rollover record, action, grant, review evidence, review packet, diff decision, diff approval, handoff, and cumulative digest. It requires present files to match exact digests and absent files to remain absent after fresh protection validation. Mixed result families or an unresolvable/empty Git protection context stop before persistence.
 
 - [ ] **Step 4: Render and parse exact accepted-state continuation families**
 
@@ -852,7 +1017,7 @@ Make `_build_accepted_state_command(...)` return `ContinuationCommand | Continua
 
 - [ ] **Step 5: Consume inherited states in successor baselines**
 
-`program_activation.py::_build_plan_candidate(...)` stores validated v2 inherited states in baseline v2 and strips their expected Git dirt from user-work observation. `repository_preparation.py::validate_execution_workspace(...)` validates untouched inherited states throughout the successor. It allows an explicit Create only from inherited absence and Modify/Delete/Preserve only from inherited presence; no current operation means the inherited state must remain exact.
+`program_activation.py::_build_plan_candidate(...)` stores validated v2 inherited states in baseline v2 and strips their expected Git dirt from user-work observation. `repository_preparation.py::validate_execution_workspace(...)` validates untouched inherited states throughout the successor after repeating the canonical Delete protection check. It allows an explicit Create only from inherited absence and Modify/Delete/Preserve only from inherited presence; no current operation means the inherited state must remain exact. A path becoming protected is invalid even when its absent/present digest is otherwise unchanged.
 
 `state_authority.py` validates exact v1 or v2 rollover/binding pairs and delegates to the matching inherited validator. Do not modify v1 cumulative-path or digest behavior.
 
@@ -890,7 +1055,9 @@ rtk git commit -m "feat: inherit accepted delete tombstones"
 
 **Interfaces:**
 - Produces: `implementation-closure-reconciliation/v2`, `implementation-closure-packet/v2`, `implementation-closure-preparation/v2`, `implementation-program-closure-command/v2`, and `implementation-program-closure-command-binding/v2` for a v2 accepted chain.
-- Produces: reconciliation fields `accepted_result_bindings`, `final_inherited_path_states`, and `final_inherited_path_states_sha256`.
+- Produces: `AcceptedResultBindingV2(increment_id, product_result_schema_version, product_result_sha256, ordered_path_states, review_evidence_path, review_evidence_sha256, review_packet_path, review_packet_sha256, diff_approval_event_id, diff_approval_sha256, handoff_path, handoff_sha256)`; the final increment alone has both handoff fields `None`.
+- Produces: reconciliation fields `accepted_result_bindings`, `final_inherited_path_states`, and `final_inherited_path_states_sha256`; `accepted_artifact_bindings` contains review-evidence/review-packet bindings for every accepted increment and the existing handoff binding for every nonfinal increment, never a v2 handoff addendum.
+- Produces: `_accepted_increment_chain_v2(...)` and `_requirement_dispositions_v2(...)` as deterministic internal constructors over the exact rollover chain, final accepted status, immutable setup/traceability allocation, accepted review/diff evidence, and later accepted results.
 - Produces: exact v2 discovery classification for closure-preparation and closure-approval retry/recovery prefixes.
 - Consumes test helper: `accepted_three_increment_delete_program() -> ThreeIncrementDeleteFixture`, which extends the Task 5 fixture through accepted `THIRD` state with current review/diff evidence intact.
 - Preserves: all v1 closure dataclasses, renderers, commands, approvals, and singleton first-increment closure bytes.
@@ -911,6 +1078,17 @@ def test_v2_closure_binds_every_accepted_result_and_final_tombstone(self) -> Non
         )
         self.assertEqual(len(reconciliation["accepted_result_bindings"]), 3)
         self.assertEqual(
+            {
+                item["requirement_id"]: item["owner"]
+                for item in reconciliation["requirement_dispositions"]
+            },
+            {
+                "REQ-FIRST": "FIRST",
+                "REQ-DELETE": "SECOND",
+                "REQ-FINAL": "THIRD",
+            },
+        )
+        self.assertEqual(
             next(
                 item
                 for item in reconciliation["final_inherited_path_states"]
@@ -926,7 +1104,13 @@ def test_v2_closure_binds_every_accepted_result_and_final_tombstone(self) -> Non
         fixture.close()
 ```
 
-`accepted_three_increment_delete_program()` must create and accept `legacy.ts` in FIRST under setup/file-map/baseline/result v2 with an empty Delete section, validate it as inherited-present with collision `accepted-predecessor`, accept its Delete in SECOND, and accept an unrelated THIRD increment before closure. Add failures for a missing/reordered/duplicated accepted increment, missing earlier review packet or diff decision, changed result digest, lost tombstone, unexpected reappearance, unowned recreation, stale later-invalidation check, mixed v1/v2 chain, and absent path represented as an evidence file.
+`accepted_three_increment_delete_program()` must give the immutable traceability three independently owned requirements: `REQ-FIRST` assigned only to FIRST, `REQ-DELETE` assigned only to SECOND, and `REQ-FINAL` assigned only to THIRD. It creates and accepts `legacy.ts` in FIRST under setup/file-map/baseline/result v2 with an empty Delete section, validates it as inherited-present with collision `accepted-predecessor`, accepts its Delete in SECOND, and accepts an unrelated `final.txt` Create in THIRD before closure. The final plan allocates both manifest-owned closure paths. Assert closure succeeds, attributes the three owners exactly, retains FIRST and SECOND evidence, and reaches closure assertions rather than reporting that earlier-only requirements are unallocated from THIRD.
+
+Add failures for a missing/reordered/duplicated accepted increment; a traceability allocation absent from the accepted chain; missing/tampered earlier review evidence, review packet, diff decision, diff approval, or nonfinal handoff; changed result digest; lost tombstone; unexpected reappearance; stale later-invalidation check; mixed v1/v2 chain; and absent path represented as an evidence file. A later unrelated `final.txt` result must not invalidate REQ-FIRST or REQ-DELETE. A THIRD recreation/change of `legacy.ts` without assigning REQ-DELETE to THIRD or recording a resolved disposition must invalidate REQ-DELETE and block closure; the same change is valid when THIRD is explicitly added to that requirement's immutable allocation and has accepted review/diff evidence.
+
+Exercise `current_disposition` values explicitly. `allocated`, `implemented`, and `resolved` produce closure `implemented` only with a complete accepted allocation/evidence chain. `amended` requires a decision reference present in both approved and resolved amendment IDs. `deferred` requires one exact deferral with a non-`none` owner and decision reference. `rejected` and `not-applicable` retain their disposition and first traceability-ordered decision reference. A missing assignment/evidence, unsupported disposition, unmatched amendment, ownerless/mismatched deferral, or unresolved later invalidation increments the blocker and stops before writes; never fabricate `implemented`, final-increment ownership, or `approval_reference="none"` for a satisfied implemented requirement.
+
+For protection closure coverage, accept a normal product tombstone, then alias its path into `.git` and separately into the program root before preparation and before approval retry. `build_closure_preparation(...)`, state authority, discovery, and command construction must fail before reading the protected target or persisting/adopting closure bytes. Assert Git/control sentinels directly.
 
 In `tests/test_program_discovery.py`, interrupt v2 closure preparation after each persisted reconciliation/packet prefix. Require a byte-exact prefix to return `closure-preparation-retry-ready`, packet-without-reconciliation or any changed/reordered v2 path state/digest to return `closure-preparation-recovery-required`, an exact persisted closure approval before status-last completion to return `closure-approval-retry-ready`, and any substituted v1 closure-preparation/command binding or divergent closed status to return `closure-approval-recovery-required`. Assert the same disposition names and bytes remain unchanged for v1.
 
@@ -943,6 +1127,27 @@ Expected: current production closure emits only the final increment and has no c
 Keep `ClosureReconciliation` and `ClosurePacket` unchanged. Add v2 dataclasses with the three new result fields and exact schema-specific constructors/validators/renderers. Canonical validation requires:
 
 ```python
+@dataclass(frozen=True)
+class AcceptedResultBindingV2:
+    increment_id: str
+    product_result_schema_version: str
+    product_result_sha256: str
+    ordered_path_states: tuple[Mapping[str, object], ...]
+    review_evidence_path: str
+    review_evidence_sha256: str
+    review_packet_path: str
+    review_packet_sha256: str
+    diff_approval_event_id: str
+    diff_approval_sha256: str
+    handoff_path: str | None
+    handoff_sha256: str | None
+```
+
+The validator requires accepted-result bindings in exact accepted-increment order, one unique review evidence/packet and diff approval for each increment, and a handoff path/digest on every nonfinal binding only. For v2, `accepted_artifact_bindings` must equal the ordered labels/digests `increment:review-evidence`, `increment:review-packet`, then `increment:handoff` for each nonfinal increment. Reject optional or complete `handoff-addendum` coverage in v2. Leave the existing v1 validator, legacy `ContinuityHandoff` fields, fixtures, renderers, and addendum rule byte-for-byte unchanged.
+
+Canonical final-state validation requires:
+
+```python
 expected_state_digest = hashlib.sha256(
     json.dumps(
         list(candidate.final_inherited_path_states),
@@ -955,13 +1160,37 @@ if candidate.final_inherited_path_states_sha256 != expected_state_digest:
     issues.append("final inherited path-state digest mismatch")
 ```
 
-Do not put absent paths in `evidence_paths`; bind their typed result and final-state digest instead.
+Do not put absent product paths in `evidence_paths`; bind their typed result and final-state digest instead. Requirement evidence paths are only manifest-owned review evidence, review packets, nonfinal handoffs, and the final reconciliation/closure-packet paths. The reconciliation may name the final closure paths, but it must not include its own or the packet's digest in `accepted_artifact_bindings`: the v2 preparation binding, awaiting/closed status, exact command, and approval bind both finalized digests after construction and avoid a circular hash.
 
 - [ ] **Step 4: Build closure from the canonical rollover chain**
 
-In `program_closure.py::build_closure_preparation(...)`, dispatch on the exact setup family paired with the accepted product-result schema. For v2, enumerate `program_rollover.py::_validated_completed_rollover_records(...)` plus the final accepted increment in order. Bind each increment's exact reviewed result, review packet, diff decision, and required handoff addendum; merge the final current result into validated cumulative inherited states; perform later-invalidation checks across every accepted increment; then construct v2 reconciliation and packet.
+In `program_closure.py::build_closure_preparation(...)`, dispatch on the exact setup family paired with the accepted product-result schema. For v2, enumerate Task 5's fully validated `program_rollover.py::_validated_completed_rollover_records(...)` plus the final accepted status in order. The chain must begin at `setup_semantics.first_increment_id`, be contiguous and duplicate-free, end at status-current, contain every traceability-assigned increment exactly where declared, and leave no allocated successor. Build each `AcceptedResultBindingV2` from the rollover record's copied accepted bindings for nonfinal increments and the final status's live bindings for the final increment. Revalidate the manifest-derived review evidence/packet files, unique diff approval, typed result bytes/digest/order, and each nonfinal manifest-owned handoff path/digest before using them.
 
-Version closure preparation, prompt, approval, command, and status bindings together. `state_authority.py::_validate_closure_readiness(...)` recomputes the complete chain and exact final-state digest. Change `program_discovery.py::_exact_closure_prefix_disposition(...)` to accept only the exact v1 diff/preparation/command family or exact v2 family, rebuild the matching closure candidate for retry classification, and route every divergent partial v2 prefix to the existing preparation/approval recovery dispositions. In `_load_setup_candidate(...)`, run that exact classifier before full state-authority validation and before generic awaiting-closure/terminal routing. Remove its hard-coded v1 diff-binding and closure-preparation gates without using field presence as schema inference. Existing v1 closure remains on its current singleton or legacy route.
+Replace `_traceability_context(traceability, final_increment_id)` on the v2 route with deterministic chain-aware construction:
+
+```python
+accepted_ids = tuple(item.increment_id for item in accepted_results)
+for requirement in traceability["atomic_requirements"]:
+    assigned = tuple(requirement["assigned_increments"])
+    assigned_in_chain_order = tuple(item for item in accepted_ids if item in assigned)
+    if assigned != assigned_in_chain_order or not assigned:
+        unresolved += 1
+        continue
+    owner = assigned[-1]
+    contributing = tuple(
+        item for item in accepted_results if item.increment_id in assigned
+    )
+    later = accepted_results[accepted_ids.index(owner) + 1 :]
+    invalidated = later_result_invalidates(contributing, later, requirement)
+```
+
+`later_result_invalidates(...)` compares the canonical path states contributed by assigned increments with every later accepted delta. An unrelated new path is non-invalidating. A later change to a contributed path is invalidating unless that later increment is also assigned to the requirement or the traceability carries a closure-valid amended/deferred/rejected/not-applicable disposition and decision reference. Every later increment must still have a valid requirements-scope review, accepted packet, and diff approval; a material finding whose `affected_requirement_or_invariant` names the requirement must be fully repaired and renewed before it can count as checked. Set `later_invalidation_checked=True` only after all later accepted results pass, and keep `later_invalidation_checks` in exact accepted-chain order.
+
+For `allocated`, `implemented`, or `resolved`, emit closure `implemented` only after all assigned increments have accepted evidence and no later invalidation; set `owner` to the last assigned accepted increment and `approval_reference` to that owner's diff-approval event. For `amended`, require one traceability-ordered decision reference present in both `approved_amendment_ids` and `resolved_amendment_ids`. For `deferred`, require exactly one matching deferral tuple with a non-`none` owner and a decision reference. Preserve `rejected` and `not-applicable` only with a decision reference. Invalid allocation/evidence, unresolved or mismatched amendments, ownerless deferrals, unsupported dispositions, and unhandled invalidation increment the exact closure blocker and stop before writes.
+
+Build each requirement's stable de-duplicated evidence paths in accepted-chain order from the assigned increments' review evidence and review packet, the existing handoff for any assigned nonfinal increment, then the manifest-owned final reconciliation and closure packet. Do not substitute product paths, and do not create a handoff addendum. Merge the final current result into the validated cumulative inherited states only after every path repeats the canonical Delete protection check; then construct v2 reconciliation and packet.
+
+Version closure preparation, prompt, approval, command, and status bindings together. The v2 preparation/status/command binding includes the ordered accepted-result-binding digest, final inherited-state digest, reconciliation digest, and closure-packet digest. `state_authority.py::_validate_closure_readiness(...)` obtains a fresh real repository inspection, repeats protected Delete validation, and recomputes the complete accepted chain, per-requirement owners/evidence/dispositions/later checks, and exact final-state digest. Change `program_discovery.py::_exact_closure_prefix_disposition(...)` to accept only the exact v1 diff/preparation/command family or exact v2 family, rebuild the matching closure candidate for retry classification, and route every divergent partial v2 prefix to the existing preparation/approval recovery dispositions. In `_load_setup_candidate(...)`, run that exact classifier before full state-authority validation and before generic awaiting-closure/terminal routing. Remove its hard-coded v1 diff-binding and closure-preparation gates without using field presence as schema inference. Existing v1 closure remains on its current singleton or legacy route.
 
 - [ ] **Step 5: Run closure tests and verify GREEN**
 
@@ -1092,11 +1321,18 @@ def test_pipeflow_delete_inventory_replays_proposal_to_closure(self) -> None:
             [item["path"] for item in closure["final_inherited_path_states"] if item["final_state"] == "absent"],
             list(delete_paths),
         )
+        self.assertEqual(
+            {
+                item["requirement_id"]: item["owner"]
+                for item in closure["requirement_dispositions"]
+            },
+            fixture.expected_requirement_owners,
+        )
     finally:
         fixture.close()
 ```
 
-The proposal contains two exact allocations for the characterization path: Create in the predecessor with absent/none/`None`/none facts, and Delete in the later increment with regular-file/none/`100644`/`accepted-predecessor` facts. The other 26 Delete allocations use collision `existing`. The predecessor exact plan must use file-map/baseline/result v2 with an empty Delete section, create the characterization file, reach exact accepted status, and rollover it as inherited-present before the Delete plan is prepared; discovery must return `accepted-stop` at that boundary. The Delete plan then lists all 27 paths in frozen order and its baseline validates the two collision classes separately. The unrelated successor also uses v2 with an empty Delete section.
+The proposal contains two exact allocations for the characterization path: Create in the predecessor with absent/none/`None`/none facts, and Delete in the later increment with regular-file/none/`100644`/`accepted-predecessor` facts. The other 26 Delete allocations use collision `existing`. Give the predecessor creation requirement, Delete requirement, and unrelated final requirement distinct traceability ownership so the replay proves PLUG-002's earlier-increment closure semantics. The predecessor exact plan must use file-map/baseline/result v2 with an empty Delete section, create the characterization file, reach exact accepted status, and rollover it as inherited-present before the Delete plan is prepared; discovery must return `accepted-stop` at that boundary. The Delete plan then lists all 27 paths in frozen order and its baseline validates the two collision classes separately. The unrelated successor also uses v2 with an empty Delete section, allocates the final closure artifacts, and contributes only an unrelated product result. Closure must reach its intended assertions with the earlier requirements attributed to their actual accepted increments, not fail because they are absent from the final increment's allocation.
 
 Add negatives that pre-create the characterization path before its Create baseline, omit one of the other 26 paths before the Delete baseline, or declare the characterization Delete collision as `existing`; each must fail the production allocation-fact check before the corresponding plan/baseline write. Add `test_external_pipeflow_source_matches_frozen_inventory`, guarded only by `PIPEFLOW_PLAN_PATH`; when supplied, it computes the exact SHA-256, extracts Task 8's Delete bullets, and compares the ordered 27-path tuple with the fixture. The deterministic suite uses the frozen fixture and never requires the external path.
 
@@ -1132,11 +1368,11 @@ destructive-operation, cleanup, migration, Git, publication, deployment, or
 external-state authority.
 ```
 
-Record authorized/implementing/reviewing state rules, typed absent results, blocked recovery, cumulative tombstones, explicit recreation, and complete-chain closure once at their canonical references; link from the skill and reader docs. Update `references/program-discovery.md` to make its existing prefix-before-generic-rejection rule explicit for both setup/envelope families and to enumerate exact setup-v2 plan preparation/materialization, review, acceptance, immediate/later rollover, and closure retry/recovery routes. State that advanced Move/Rename, Replace, migration groups, automatic staging/finalization, and expanded Preserve remain pending under the broader v4 design.
+Record authorized/implementing/reviewing state rules, typed absent results, blocked recovery, cumulative tombstones, explicit recreation, and complete-chain closure once at their canonical references; link from the skill and reader docs. Document the canonical Delete protection boundary: lexical/resolved `.git`, Git directory/common directory in normal and linked worktrees, conventional/actual program roots, and manifest-owned control paths are never Delete targets, while exact ordinary product paths remain allowed. Update `references/program-discovery.md` to make its existing prefix-before-generic-rejection rule explicit for both setup/envelope families and to enumerate exact setup-v2 plan preparation/materialization, review, acceptance, immediate/later rollover, and closure retry/recovery routes. State that advanced Move/Rename, Replace, migration groups, automatic staging/finalization, and expanded Preserve remain pending under the broader v4 design.
 
 In the two version-owning design specs, `references/state-authorization.md`, `references/program-discovery.md`, and the live runbook, document `implementation-execution-transition/v2` as the setup-v2 companion to baseline/result v2: list its exact product-result fields, canonical ordered-state digest, family-specific event seed, conditional remediation-digest extension, retry/adoption checks, fresh-discovery route, and cross-family rejection. Preserve the documented v1 `product_delta_sha256` shape and byte contract.
 
-Synchronize `implementing-staged-plans-bootstrap-execution-review-runbook.md` as a current `0.1.3` operational runbook, not historical evidence: retain its 0.1.1/0.1.2 guarantees, add setup-v2's from-first-increment file-map/baseline/result family and empty Delete sections before late Delete, document v2 accepted-stop and divergent-prefix discovery, and require closure to bind the complete accepted path-state chain and final cumulative digest. Do not rewrite older dated design plans; they remain historical version-bound records.
+Synchronize `implementing-staged-plans-bootstrap-execution-review-runbook.md` as a current `0.1.3` operational runbook, not historical evidence: retain its 0.1.1/0.1.2 guarantees, add setup-v2's from-first-increment file-map/baseline/result family and empty Delete sections before late Delete, document v2 accepted-stop and divergent-prefix discovery, and require closure to bind the complete accepted path-state chain, real per-requirement owners/evidence/later checks, existing nonfinal handoffs, and final cumulative digest. State explicitly that v2 creates no handoff addendum; the legacy continuity addendum contract remains v1-only. Do not rewrite older dated design plans; they remain historical version-bound records.
 
 - [ ] **Step 5: Synchronize package version `0.1.3`**
 
@@ -1212,7 +1448,7 @@ Report commits, exact changed paths, focused/full check evidence, scenario repla
 - A failure after a planned Delete while status is `implementing` preserves the absence as a valid partial product result. Recovery may block and resume from the exact bound absence; it does not restore automatically.
 - A failure after review or diff acceptance must reproduce the same ordered path states and digest. Reappearance, changed content, missing result records, reordered states, or mixed schema families is divergent and stops without cleanup.
 - Rollover merges a Delete tombstone only after exact diff acceptance. An unrelated successor cannot erase it; only a later exact Create operation whose baseline agrees with inherited absence can replace it.
-- Closure binds the entire accepted chain and final cumulative state. It cannot close when a tombstone disappeared, a deleted file reappeared, an earlier accepted result is missing, or evidence treats an absent path as a file.
+- Closure binds the entire accepted chain, per-requirement allocation/owner/evidence/disposition, every later-invalidation check, existing nonfinal handoffs, and final cumulative state. It cannot close when a tombstone disappeared, a deleted file reappeared, an earlier accepted artifact is missing, an earlier-only requirement is falsely assigned to the final increment, a later result invalidates earlier evidence without a resolved disposition, or evidence treats an absent path as a file.
 - Recovery bytes are not created by this repair. Source recovery remains a separately authorized manual or Git operation; the plugin never resets, restores, stashes, cleans, or deletes automatically.
 
 ## Final Validation Matrix
@@ -1222,6 +1458,7 @@ Report commits, exact changed paths, focused/full check evidence, scenario repla
 | Locked implementation baseline | Git preflight | candidate `b5eb689e...` is an ancestor of the clean kickoff HEAD on `repair/delete-operation-support`; every candidate-to-HEAD commit and aggregate path is only this plan; actual kickoff HEAD and plan SHA-256 are recorded | stop before edits |
 | Locked real source | scenario fixture/live replay | SHA-256 `a0dfa057...` and exact ordered 27-path Task 8 inventory | source drift; no claim |
 | Setup can state Delete truthfully | `program_setup.py` | envelope/setup v2 validates and recap renders path, absent state, disposition, rationale | unsupported or mixed schema |
+| Protected targets are mechanically excluded | `build_delete_protection_context(...)`, `validate_delete_target_path(...)` | normal and linked-worktree tests reject lexical/resolved `.git`, Git directory/common directory, conventional/actual program roots, every manifest control path, symlink/case/hard-link aliases, retries, and post-authorization swaps; allowed product controls pass | missing protection metadata, control-path Delete, alias escape, protected read, or substring over-rejection |
 | Legacy setup unchanged | `program_setup.py`, `program_authority.py` | v1 golden bytes and cross-family negatives | any v1 byte/result drift |
 | Exact plan does not misclassify Delete | `repository_preparation.py` | unversioned heading fails; v2 parses ordered Delete section | Delete absorbed as Modify |
 | Late Delete uses one program family | setup/activation/preparation/rollover | `test/legacy/characterization.test.ts` begins absent, is created/accepted by a setup-v2 predecessor with an empty Delete section, becomes inherited-present with collision `accepted-predecessor`, then is deleted with the 26 initially existing targets | pre-created fixture, false collision facts, or mixed v1/v2 rollover/closure |
@@ -1229,15 +1466,15 @@ Report commits, exact changed paths, focused/full check evidence, scenario repla
 | Ancestor safety is reassessed | `inspect_workspace_path(...)`, operation callers | baseline symlinked ancestor and post-authorization ancestor swap fail before external reads; missing suffix remains valid only for Create, accepted/inherited absence, and already-absent user work | path escape, rejected valid absence, or missing required Delete/Modify/Preserve target |
 | Lifecycle path-state semantics | `validate_execution_workspace(...)` | authorized exact; implementing exact-or-absent; reviewing absent; v2 result with null digest and exact-map ordering | accidental loss, fabricated digest, or reordered state |
 | Execution transition matches result family | `program_activation.py`, `program_review.py`, `state_authority.py`, `program_discovery.py` | v1 keeps `product_delta_sha256`; v2 uses `implementation-execution-transition/v2` with exact product-result schema/digest and derived event; production writer output survives fresh discovery and exact retry | mixed/dual family, changed seed or digest, invalid adoption, generic discovery route, or v1 byte drift |
-| Managed lifecycle writes stay separate | `state_authority.py` | required writes remain only Create/Modify/Preserve | Delete accepted for a control path |
+| Managed lifecycle writes stay separate | `state_authority.py` | required writes remain only Create/Modify/Preserve and every Delete control-path collision is rejected independently | Delete accepted for a control path |
 | Review and remediation bind absence | `program_review.py`, `review_coordination.py` | v2 evidence has exact ordered states/digest and renewed result after repair | stale/missing/mixed result |
 | Diff acceptance binds reviewed result | `diff_disposition.py` | v2 binding/command matches fresh review result | prompt or result mismatch |
 | Discovery resumes v2 safely | `program_discovery.py` | setup-v2 plan preparation/materialization, review, acceptance, immediate/later rollover, and closure exact prefixes classify before generic state validation; divergent prefixes use their domain recovery routes | v1-only gate, invalid/generic route, wrong resume, or terminal route |
 | Blocked recovery freezes path state | `blocked_recovery.py` | v2 context reproduces exact partial/complete states | post-block change or evidence fabrication |
-| Rollover preserves ordered tombstones | `program_rollover.py` | accepted predecessor before Delete; replace-in-place/append merge retains absent state through unrelated work | reappearance, omission, reorder, or mixed chain |
+| Rollover preserves ordered tombstones and evidence | `program_rollover.py` | accepted predecessor before Delete; replace-in-place/append merge retains absent state; v2 record binds accepted review evidence/packet, diff decision/approval, and existing handoff | reappearance, omission, reorder, missing/tampered evidence or handoff, invented addendum, or mixed chain |
 | Accepted-state prompts preserve typed results | `program_continuation.py` | exact v1/v2 command dispatch and parsing; v2 embeds ordered path states with null absent digest; v1 golden bytes stay exact | cross-family prompt, `str(None)`, or v1 byte drift |
 | Recreation is explicit | activation/preparation | later Create owns inherited absent path and baseline agrees | implicit recreation or wrong operation |
-| Closure covers the complete chain | `program_closure.py`, `continuity_closure.py` | all accepted results/reviews/diff decisions plus final cumulative digest | singleton-only or lost tombstone |
+| Closure covers the complete chain | `program_closure.py`, `continuity_closure.py` | all accepted results/reviews/diff approvals/handoffs plus real traceability owners, evidence paths, disposition handling, later-invalidation checks, final closure bindings, and cumulative digest | singleton-only, final-owner fabrication, unresolved allocation/disposition, invalidated evidence, invented addendum, or lost tombstone |
 | Front door does not over-authorize | skill/references/docs | Delete remains local plan-bound `modify-workspace` only | generic destructive/external claim |
 | Operational runbook is current | bootstrap/execution/review runbook | `0.1.3` path states, discovery, and complete-chain closure match canonical owners | live runbook remains at `0.1.2` |
 | Package is synchronized | manifests/validator/docs | every owner says `0.1.3`; package validation exits `0` | version or inventory mismatch |
