@@ -636,6 +636,134 @@ class ProposalAuthorityAndStorageTests(ProgramAuthorityTestCase):
                 finally:
                     fixture.close()
 
+    def test_destination_identity_rejects_existing_hardlink_aliases(self) -> None:
+        approvals = self.fixture.path("state/approvals.jsonl")
+        alias = self.fixture.path("state/approvals-alias.jsonl")
+        os.link(approvals, alias)
+        manifest = self.fixture.load_json("manifest.json")
+        manifest["logical_roles"]["action_authorizations"] = (
+            "state/approvals-alias.jsonl"
+        )
+        self.fixture.write_json("manifest.json", manifest)
+
+        issues = AUTHORITY.validate_program_authority(
+            self.fixture.root,
+            validation_mode=AUTHORITY.PROPOSAL_VALIDATION_MODE,
+        )
+
+        self.assert_issue(issues, "duplicate filesystem targets")
+
+    def test_destination_identity_uses_allocated_increment_paths(self) -> None:
+        destination = self.fixture.path(
+            "increments/ARCHIVE-INDEX/review-evidence.json"
+        )
+        destination.parent.mkdir(parents=True)
+        os.link(self.fixture.path("state/status.json"), destination)
+
+        issues = AUTHORITY.validate_program_authority(
+            self.fixture.root,
+            validation_mode=AUTHORITY.PROPOSAL_VALIDATION_MODE,
+        )
+
+        self.assert_issue(issues, "duplicate filesystem targets")
+
+    def test_destination_identity_reports_unsafe_traceability_increment(self) -> None:
+        traceability = self.fixture.load_json("program/traceability.json")
+        traceability["atomic_requirements"][0]["assigned_increments"] = [
+            "../outside"
+        ]
+        self.fixture.write_json("program/traceability.json", traceability)
+
+        issues = AUTHORITY.validate_program_authority(
+            self.fixture.root,
+            validation_mode=AUTHORITY.PROPOSAL_VALIDATION_MODE,
+        )
+
+        self.assert_issue(issues, "must be one safe path segment")
+
+    def test_destination_identity_uses_native_future_name_semantics(self) -> None:
+        manifest = self.fixture.load_json("manifest.json")
+        manifest["closure_storage"].update(
+            reconciliation_filename="Report.json",
+            packet_filename="report.json",
+        )
+        self.fixture.write_json("manifest.json", manifest)
+        before = sorted(
+            path.relative_to(self.fixture.root).as_posix()
+            for path in self.fixture.root.rglob("*")
+        )
+
+        with patch.object(
+            AUTHORITY,
+            "_directory_name_semantics",
+            return_value=AUTHORITY._DirectoryNameSemantics(
+                case_sensitive=False,
+                normalizes_unicode=False,
+            ),
+        ):
+            issues = AUTHORITY.validate_program_authority(
+                self.fixture.root,
+                validation_mode=AUTHORITY.PROPOSAL_VALIDATION_MODE,
+            )
+
+        self.assert_issue(issues, "duplicate filesystem targets")
+        self.assertEqual(
+            before,
+            sorted(
+                path.relative_to(self.fixture.root).as_posix()
+                for path in self.fixture.root.rglob("*")
+            ),
+        )
+
+        with patch.object(
+            AUTHORITY,
+            "_directory_name_semantics",
+            return_value=AUTHORITY._DirectoryNameSemantics(
+                case_sensitive=True,
+                normalizes_unicode=False,
+            ),
+        ):
+            self.assertEqual(
+                AUTHORITY.validate_program_authority(
+                    self.fixture.root,
+                    validation_mode=AUTHORITY.PROPOSAL_VALIDATION_MODE,
+                ),
+                [],
+            )
+
+    def test_destination_identity_rejects_unicode_and_cross_class_aliases(self) -> None:
+        manifest = self.fixture.load_json("manifest.json")
+        manifest["closure_storage"].update(
+            reconciliation_filename="r\u00e9sum\u00e9.json",
+            packet_filename="re\u0301sume\u0301.json",
+        )
+        self.fixture.write_json("manifest.json", manifest)
+        with patch.object(
+            AUTHORITY,
+            "_directory_name_semantics",
+            return_value=AUTHORITY._DirectoryNameSemantics(
+                case_sensitive=True,
+                normalizes_unicode=True,
+            ),
+        ):
+            issues = AUTHORITY.validate_program_authority(
+                self.fixture.root,
+                validation_mode=AUTHORITY.PROPOSAL_VALIDATION_MODE,
+            )
+        self.assert_issue(issues, "duplicate filesystem targets")
+
+        manifest["closure_storage"].update(
+            root="state",
+            reconciliation_filename="status.json",
+            packet_filename="closure-packet.md",
+        )
+        self.fixture.write_json("manifest.json", manifest)
+        issues = AUTHORITY.validate_program_authority(
+            self.fixture.root,
+            validation_mode=AUTHORITY.PROPOSAL_VALIDATION_MODE,
+        )
+        self.assert_issue(issues, "duplicate filesystem targets")
+
         for descriptor_name, field, value in (
             ("increment_storage", "brief_filename", "nested/brief.md"),
             ("increment_storage", "root", "/tmp/increments"),

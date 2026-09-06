@@ -201,10 +201,9 @@ def _validate_preconditions(value: dict[str, object]) -> None:
 
 
 def _review_context(
-    root: Path,
     status: dict[str, object],
     paths: dict[str, Path],
-) -> tuple[dict[str, object], str, tuple[str, ...], tuple[tuple[str, int, str], ...], str]:
+) -> tuple[int, tuple[str, ...], tuple[tuple[str, int, str], ...], str]:
     evidence_binding = status.get("review_evidence_binding")
     packet_binding = status.get("review_packet_binding")
     if not isinstance(evidence_binding, dict) or not isinstance(packet_binding, dict):
@@ -220,64 +219,31 @@ def _review_context(
     review_issues = validate_review_bundle(evidence, packet_text)
     if review_issues:
         raise ValueError("; ".join(review_issues))
-    verification = evidence.get("final_verification")
-    reports = evidence.get("reports")
-    findings = evidence.get("findings")
-    if (
-        not isinstance(verification, dict)
-        or not isinstance(reports, list)
-        or not isinstance(findings, list)
-    ):
-        raise ValueError("accepted review evidence is incomplete")
-    commands_value = verification.get("commands")
-    if not isinstance(commands_value, list) or not commands_value:
-        raise ValueError("closure requires fresh program command evidence")
-    commands: list[tuple[str, int, str]] = []
-    for item in commands_value:
-        if not isinstance(item, dict):
-            raise ValueError("program command evidence must be an object")
-        command = item.get("command")
-        exit_code = item.get("exit_code")
-        completed_at = item.get("completed_at")
-        if (
-            not isinstance(command, str)
-            or not command
-            or not isinstance(exit_code, int)
-            or isinstance(exit_code, bool)
-            or not isinstance(completed_at, str)
-            or not completed_at
-        ):
-            raise ValueError("program command evidence is invalid")
-        commands.append((command, exit_code, completed_at))
-    reconciled_at = tuple(
-        item.get("reconciled_at")
-        for item in reports
-        if isinstance(item, dict) and isinstance(item.get("reconciled_at"), str)
+    verification = evidence["final_verification"]
+    reports = evidence["reports"]
+    findings = evidence["findings"]
+    commands = tuple(
+        (item["command"], item["exit_code"], item["completed_at"])
+        for item in verification["commands"]
     )
     parsed_reconciliations = tuple(
-        (value, _parse_timestamp(value)) for value in reconciled_at
-    )
-    if (
-        len(reconciled_at) != len(reports)
-        or not reconciled_at
-        or any(parsed is None for _value, parsed in parsed_reconciliations)
-    ):
-        raise ValueError("review reconciliation timestamps are incomplete")
-    unresolved = sum(
-        item.get("classification") == "material" and item.get("disposition") == "open"
-        for item in findings
-        if isinstance(item, dict)
+        (item["reconciled_at"], _parse_timestamp(item["reconciled_at"]))
+        for item in reports
     )
     finding_summaries = tuple(
-        f"{item.get('finding_id')}: {item.get('disposition')}"
+        f"{item['finding_id']}: {item['disposition']}"
         for item in findings
-        if isinstance(item, dict)
     ) or ("No material findings were reported.",)
     latest_reconciliation = max(
         parsed_reconciliations,
         key=lambda item: item[1],
     )[0]
-    return evidence, packet_text, finding_summaries, tuple(commands), latest_reconciliation
+    return (
+        verification["unresolved_material_findings"],
+        finding_summaries,
+        commands,
+        latest_reconciliation,
+    )
 
 
 def _traceability_context(
@@ -425,13 +391,9 @@ def build_closure_preparation(
     ):
         raise ValueError("accepted product delta no longer matches the accepted status")
 
-    evidence, _packet_text, finding_summaries, commands, latest_evidence = _review_context(
-        root, status, paths
+    unresolved_findings, finding_summaries, commands, latest_evidence = (
+        _review_context(status, paths)
     )
-    final_verification = evidence["final_verification"]
-    unresolved_findings = final_verification.get("unresolved_material_findings")
-    if not isinstance(unresolved_findings, int) or isinstance(unresolved_findings, bool):
-        raise ValueError("review unresolved material finding count is invalid")
     latest_evidence_instant = _parse_timestamp(latest_evidence)
     command_instants = tuple(
         _parse_timestamp(completed_at) for _, _, completed_at in commands

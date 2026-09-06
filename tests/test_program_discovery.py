@@ -1,4 +1,3 @@
-import importlib.util
 import json
 import shutil
 import subprocess
@@ -15,22 +14,14 @@ from tests.program_bootstrap_support import (
     canonical_json,
     repository_snapshot,
 )
-from tests.test_program_setup import ACTIVATION, BOOTSTRAP, SETUP
+from tests.script_module_support import load_script_module
+from tests.test_program_setup import ACTIVATION, BOOTSTRAP, SETUP, gate_definition
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills" / "implementing-staged-plans" / "scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "program_discovery.py"
-SPEC = importlib.util.spec_from_file_location("program_discovery", SCRIPT_PATH)
-if SPEC is None or SPEC.loader is None:
-    raise RuntimeError(f"Unable to load program discovery from {SCRIPT_PATH}")
-DISCOVERY = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = DISCOVERY
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC.loader.exec_module(DISCOVERY)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+DISCOVERY = load_script_module("program_discovery", SCRIPT_PATH)
 
 
 BASE_COMMIT = "b" * 40
@@ -81,6 +72,168 @@ class SetupV3DiscoveryTests(unittest.TestCase):
         self.assertEqual(result.disposition, "first-increment-start-ready")
         self.assertEqual(result.required_input, "first-increment-start-intent")
         self.assertFalse(result.stop_required)
+
+    def test_partial_activation_prefix_routes_each_missing_source_gate(self) -> None:
+        self.fixture.close()
+        self.fixture = BootstrapFixture()
+        first = gate_definition("SOURCE-GATE-ALPHA")
+        second = gate_definition("SOURCE-GATE-ZETA")
+        for gate in (first, second):
+            gate["source_sha256"] = self.fixture.source_sha256
+        self.fixture.configure_setup_v3(source_gate_definitions=(second, first))
+        BOOTSTRAP.publish_program_proposal(
+            self.fixture.repository,
+            self.fixture.source_plan,
+            self.fixture.candidate,
+            self.fixture.source_sha256,
+        )
+        decision = self.decision()
+        with self.assertRaisesRegex(ValueError, "not durably satisfied"):
+            ACTIVATION.activate_program(
+                self.fixture.program_root, decision, self.observation()
+            )
+
+        result = DISCOVERY.discover_programs(self.fixture.repository)
+        expected_recap = SETUP.render_source_gate_recap(
+            self.fixture.program_root,
+            "SOURCE-GATE-ALPHA",
+            "program:ARCHIVE-PROGRAM",
+        )
+        self.assertEqual(result.disposition, "source-gate-approval-ready")
+        self.assertEqual(result.required_input, "source-gate-approval")
+        self.assertTrue(result.stop_required)
+        self.assertTrue(result.next_action.endswith(expected_recap))
+
+        setup = json.loads(
+            (
+                self.fixture.program_root / "state/setup-activation-decision.json"
+            ).read_text(encoding="utf-8")
+        )
+        status_path = self.fixture.program_root / "state/status.json"
+        for index, gate in enumerate((first, second)):
+            adapter = SETUP.adapt_source_gate_decision(
+                self.fixture.program_root,
+                str(gate["gate_id"]),
+                str(gate["protected_subject"]),
+                "Yes",
+                role="user",
+                provenance="direct-user-message",
+            )
+            SETUP.persist_source_gate_decision(
+                self.fixture.program_root,
+                adapter,
+                status_sha256=SETUP.sha256_file(status_path),
+                status_sequence=0,
+                workspace_observation=setup["workspace_observation"],
+                boundary_authority={"setup_adapter_id": decision["adapter_id"]},
+            )
+            result = DISCOVERY.discover_programs(self.fixture.repository)
+            if index == 0:
+                second_recap = SETUP.render_source_gate_recap(
+                    self.fixture.program_root,
+                    "SOURCE-GATE-ZETA",
+                    "program:ARCHIVE-PROGRAM",
+                )
+                self.assertEqual(
+                    result.disposition, "source-gate-approval-ready"
+                )
+                self.assertTrue(result.next_action.endswith(second_recap))
+            else:
+                self.assertEqual(
+                    result.disposition, "program-activation-retry-ready"
+                )
+                self.assertFalse(result.stop_required)
+
+    def test_corrupt_sequence_zero_activation_prefix_fails_closed(self) -> None:
+        self.fixture.close()
+        self.fixture = BootstrapFixture()
+        gate = gate_definition()
+        gate["source_sha256"] = self.fixture.source_sha256
+        self.fixture.configure_setup_v3(source_gate_definitions=(gate,))
+        BOOTSTRAP.publish_program_proposal(
+            self.fixture.repository,
+            self.fixture.source_plan,
+            self.fixture.candidate,
+            self.fixture.source_sha256,
+        )
+        with self.assertRaisesRegex(ValueError, "not durably satisfied"):
+            ACTIVATION.activate_program(
+                self.fixture.program_root, self.decision(), self.observation()
+            )
+        setup_path = (
+            self.fixture.program_root / "state/setup-activation-decision.json"
+        )
+        setup = json.loads(setup_path.read_text(encoding="utf-8"))
+        setup["decision"] = "rejected"
+        setup_path.write_bytes(canonical_json(setup))
+
+        result = DISCOVERY.discover_programs(self.fixture.repository)
+
+        self.assertEqual(
+            result.disposition, "proposal-publication-recovery-required"
+        )
+        self.assertTrue(result.stop_required)
+        self.assertIn("setup-activation decision", " ".join(result.issues))
+
+    def test_divergent_activation_approval_prefix_fails_closed(self) -> None:
+        def fail_after_program_approval(persisted: str) -> None:
+            if persisted == "program-approval":
+                raise RuntimeError("injected-after:program-approval")
+
+        with mock.patch.object(
+            ACTIVATION, "_after_persist", side_effect=fail_after_program_approval
+        ):
+            with self.assertRaisesRegex(RuntimeError, "injected-after"):
+                ACTIVATION.activate_program(
+                    self.fixture.program_root,
+                    self.decision(),
+                    self.observation(),
+                )
+
+        retry = DISCOVERY.discover_programs(self.fixture.repository)
+        self.assertEqual(retry.disposition, "program-activation-retry-ready")
+
+        approvals_path = self.fixture.program_root / "state/approvals.jsonl"
+        expected_approval = json.loads(approvals_path.read_bytes())
+        cases = (
+            ("scope", ["different authority"]),
+            ("boolean revision", True),
+            ("float revision", 1.0),
+        )
+        for label, divergent_value in cases:
+            with self.subTest(label=label):
+                approval = dict(expected_approval)
+                field = "scope" if label == "scope" else "program_revision"
+                approval[field] = divergent_value
+                approvals_path.write_bytes(
+                    ACTIVATION._canonical_json_line(approval)
+                )
+                before = repository_snapshot(self.fixture.program_root)
+
+                result = DISCOVERY.discover_programs(self.fixture.repository)
+
+                self.assertEqual(
+                    result.disposition,
+                    "proposal-publication-recovery-required",
+                )
+                self.assertTrue(result.stop_required)
+                self.assertIn(
+                    "receipt binding mismatch", " ".join(result.issues)
+                )
+                with self.assertRaisesRegex(
+                    ValueError, "activation-recovery-required"
+                ):
+                    ACTIVATION.activate_program(
+                        self.fixture.program_root,
+                        self.decision(),
+                        self.observation(),
+                    )
+                self.assertEqual(
+                    repository_snapshot(self.fixture.program_root), before
+                )
+                approvals_path.write_bytes(
+                    ACTIVATION._canonical_json_line(expected_approval)
+                )
 
     def test_malformed_setup_revision_and_sequence_return_invalid_discovery(
         self,

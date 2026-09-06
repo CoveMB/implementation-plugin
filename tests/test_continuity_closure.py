@@ -1,5 +1,4 @@
 import hashlib
-import importlib.util
 import json
 import subprocess
 import sys
@@ -10,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.program_bootstrap_support import repository_snapshot
+from tests.script_module_support import load_script_module
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -20,16 +20,7 @@ FIXTURE_ROOT = (
     / "tests/fixtures/continuity-closure/portable-catalog-run"
 )
 
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC = importlib.util.spec_from_file_location("continuity_closure", SCRIPT_PATH)
-    if SPEC is None or SPEC.loader is None:
-        raise RuntimeError(f"Unable to load continuity and closure from {SCRIPT_PATH}")
-    CONTINUITY = importlib.util.module_from_spec(SPEC)
-    sys.modules[SPEC.name] = CONTINUITY
-    SPEC.loader.exec_module(CONTINUITY)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+CONTINUITY = load_script_module("continuity_closure", SCRIPT_PATH)
 
 
 def digest_text(value: str) -> str:

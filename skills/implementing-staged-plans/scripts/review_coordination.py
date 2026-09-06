@@ -51,27 +51,6 @@ FINDING_DISPOSITIONS = frozenset(
 )
 FINDING_CONFIDENCE = frozenset({"low", "medium", "high"})
 SEMANTIC_STATUSES = frozenset({"accepted", "finding"})
-PACKET_FIELDS = (
-    "identity_and_outcome",
-    "changes_and_rationale",
-    "program_context",
-    "changed_files_by_purpose",
-    "human_review_order",
-    "requirements_and_acceptance",
-    "exact_commands_and_results",
-    "baseline_failures",
-    "execution_evidence",
-    "reviewer_roles_findings_dispositions",
-    "repairs_and_renewed_verification",
-    "deviations_and_amendments",
-    "human_judgment",
-    "edge_cases_and_manual_checks",
-    "implications",
-    "residual_risks_and_deferred_work",
-    "recovery",
-    "workspace_and_logical_boundaries",
-    "current_state_and_next_action",
-)
 PACKET_HEADINGS = MappingProxyType(
     {
         "identity_and_outcome": "Identity and outcome",
@@ -95,6 +74,7 @@ PACKET_HEADINGS = MappingProxyType(
         "current_state_and_next_action": "Current state and next action",
     }
 )
+PACKET_FIELDS = tuple(PACKET_HEADINGS)
 BUNDLE_FIELDS = frozenset(
     {
         "schema_version",
@@ -809,6 +789,8 @@ def render_review_packet(packet: ReviewPacket) -> str:
 
 
 def _tuple_fields(value: Mapping[str, object], fields: Sequence[str]) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        raise TypeError
     converted = dict(value)
     for field in fields:
         if isinstance(converted.get(field), list):
@@ -835,7 +817,10 @@ def validate_review_bundle(
             ReviewReport(**_tuple_fields(item, ("finding_ids", "follow_up_for_finding_ids")))
             for item in bundle["reports"]
         )
-        findings = tuple(ReviewFinding(**item) for item in bundle["findings"])
+        findings_value = bundle["findings"]
+        if not isinstance(findings_value, list):
+            raise TypeError
+        findings = tuple(ReviewFinding(**item) for item in findings_value)
         expected_surfaces = tuple(
             (item["surface"], item["surface_kind"])
             for item in bundle["semantic_surfaces"]

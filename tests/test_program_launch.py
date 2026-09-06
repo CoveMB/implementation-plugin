@@ -1,4 +1,3 @@
-import importlib.util
 import json
 import subprocess
 import sys
@@ -6,23 +5,16 @@ import unittest
 from pathlib import Path
 
 from tests.program_bootstrap_support import BootstrapFixture, canonical_json
+from tests.script_module_support import load_script_module
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills" / "implementing-staged-plans" / "scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "program_launch.py"
-SPEC = importlib.util.spec_from_file_location("program_launch", SCRIPT_PATH)
-if SPEC is None or SPEC.loader is None:
-    raise RuntimeError(f"Unable to load program launch from {SCRIPT_PATH}")
-LAUNCH = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = LAUNCH
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    import program_setup as _PROGRAM_SETUP
-
-    SPEC.loader.exec_module(LAUNCH)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+_PROGRAM_SETUP = load_script_module(
+    "program_setup", SCRIPT_ROOT / "program_setup.py"
+)
+LAUNCH = load_script_module("program_launch", SCRIPT_PATH)
 
 
 class ProgramLaunchTests(unittest.TestCase):

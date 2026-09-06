@@ -65,6 +65,18 @@ def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _render_accept_stop_envelope(prompt: str) -> str:
+    return f"Accept and stop.\n\n{prompt}"
+
+
+def _render_accept_continue_envelope(increment_id: str, prompt: str) -> str:
+    return f"Accept and continue to `{increment_id}`.\n\n{prompt}"
+
+
+def _render_continuation_unavailable_envelope(stop_prompt: str, reason: str) -> str:
+    return f"{stop_prompt}\nContinuation unavailable: {reason}.\n"
+
+
 def _status_prior(
     status_path: Path, status: dict[str, object]
 ) -> tuple[str, int]:
@@ -318,7 +330,7 @@ def render_diff_disposition_prompt(program_root: Path) -> str:
         Path(selected["path"]), selected["base_commit"]
     ).observation
     candidate = build_diff_acceptance_candidate(root, observation)
-    stop_prompt = "Accept and stop.\n\n" + candidate.prompt
+    stop_prompt = _render_accept_stop_envelope(candidate.prompt)
     extension = _continuation.build_continuation_extension(
         root, candidate, observation
     )
@@ -326,13 +338,58 @@ def render_diff_disposition_prompt(program_root: Path) -> str:
         reason = _continuation.continuation_unavailability_reason(root, candidate)
         if reason == "no allocated successor":
             return stop_prompt
-        return f"{stop_prompt}\nContinuation unavailable: {reason}.\n"
+        return _render_continuation_unavailable_envelope(stop_prompt, reason)
     continued = _continuation.build_accept_continue_candidate(candidate, extension)
-    return (
-        f"{stop_prompt}\n"
-        f"Accept and continue to `{extension.successor_increment_id}`.\n\n"
-        f"{continued.prompt}"
+    continue_prompt = _render_accept_continue_envelope(
+        extension.successor_increment_id, continued.prompt
     )
+    return f"{stop_prompt}\n{continue_prompt}"
+
+
+def _persist_diff_acceptance_candidate(
+    root: Path, candidate: DiffAcceptanceCandidate
+) -> DiffDispositionReceipt:
+    parse_exact_prompt(candidate.prompt, DIFF_DISPOSITION_COMMAND_SCHEMA)
+    manifest, manifest_issues = load_json_object(root / "manifest.json")
+    if manifest is None:
+        raise ValueError("; ".join(manifest_issues))
+    roles = manifest["logical_roles"]
+    approvals_path, approval_issues = resolve_managed_path(
+        root, roles["approvals"], role="logical role approvals"
+    )
+    status_path, status_issues = resolve_managed_path(
+        root, roles["status"], role="logical role status"
+    )
+    if approvals_path is None or status_path is None:
+        raise ValueError("; ".join([*approval_issues, *status_issues]))
+    recovered = _append_or_adopt_approval(approvals_path, candidate)
+    _after_persist("diff-approval")
+    binding = candidate.accepted_status["diff_disposition_binding"]
+    recovered = (
+        _replace_or_adopt_status(
+            status_path,
+            candidate.accepted_status,
+            str(binding["prior_status_sha256"]),
+            "increment-acceptance",
+        )
+        or recovered
+    )
+    _after_persist("accepted-status")
+    if status_path.read_bytes() != candidate.accepted_status_bytes:
+        raise ValueError("increment-acceptance-recovery-required: accepted status differs")
+    return DiffDispositionReceipt(
+        decision=candidate.decision,
+        approval_event_id=candidate.approval_event_id,
+        increment_state="accepted",
+        status_sha256=sha256_file(status_path),
+        recovered=recovered,
+    )
+
+
+def _validate_accept_stop_authority(root: Path, observation: RepositoryObservation) -> None:
+    final_issues = validate_state_authority(root, _fresh_observation(root, observation))
+    if final_issues:
+        raise ValueError("; ".join(final_issues))
 
 
 def _append_or_adopt_approval(
@@ -380,45 +437,12 @@ def persist_accept_stop(
     """Append/adopt exact diff approval, then write accepted status last."""
     root = Path(program_root)
     candidate = build_diff_acceptance_candidate(root, observation)
-    expected_prompt = "Accept and stop.\n\n" + candidate.prompt
+    expected_prompt = _render_accept_stop_envelope(candidate.prompt)
     if submitted_prompt != expected_prompt:
         raise ValueError("submitted diff disposition prompt does not match current bytes")
-    parse_exact_prompt(candidate.prompt, DIFF_DISPOSITION_COMMAND_SCHEMA)
-    manifest, manifest_issues = load_json_object(root / "manifest.json")
-    if manifest is None:
-        raise ValueError("; ".join(manifest_issues))
-    roles = manifest["logical_roles"]
-    approvals_path, approval_issues = resolve_managed_path(
-        root, roles["approvals"], role="logical role approvals"
-    )
-    status_path, status_issues = resolve_managed_path(
-        root, roles["status"], role="logical role status"
-    )
-    if approvals_path is None or status_path is None:
-        raise ValueError("; ".join([*approval_issues, *status_issues]))
-    recovered = _append_or_adopt_approval(approvals_path, candidate)
-    _after_persist("diff-approval")
-    binding = candidate.accepted_status["diff_disposition_binding"]
-    recovered = (
-        _replace_or_adopt_status(
-            status_path,
-            candidate.accepted_status,
-            str(binding["prior_status_sha256"]),
-            "increment-acceptance",
-        )
-        or recovered
-    )
-    _after_persist("accepted-status")
-    final_issues = validate_state_authority(root, _fresh_observation(root, observation))
-    if final_issues:
-        raise ValueError("; ".join(final_issues))
-    return DiffDispositionReceipt(
-        decision="accept-stop",
-        approval_event_id=candidate.approval_event_id,
-        increment_state="accepted",
-        status_sha256=sha256_file(status_path),
-        recovered=recovered,
-    )
+    receipt = _persist_diff_acceptance_candidate(root, candidate)
+    _validate_accept_stop_authority(root, observation)
+    return receipt
 
 
 def _persist_diff_acceptance_prefix(
@@ -429,62 +453,31 @@ def _persist_diff_acceptance_prefix(
     """Persist either exact stop or the acceptance prefix of exact continue."""
     root = Path(program_root)
     acceptance = build_diff_acceptance_candidate(root, observation)
-    stop_prompt = "Accept and stop.\n\n" + acceptance.prompt
+    stop_prompt = _render_accept_stop_envelope(acceptance.prompt)
     if submitted_prompt == stop_prompt:
-        return persist_accept_stop(root, submitted_prompt, observation)
+        receipt = _persist_diff_acceptance_candidate(root, acceptance)
+        _validate_accept_stop_authority(root, observation)
+        return receipt
     extension = _continuation.build_continuation_extension(
         root, acceptance, observation
     )
     if extension is None:
         reason = _continuation.continuation_unavailability_reason(root, acceptance)
-        rendered_stop_only = (
-            f"{stop_prompt}\nContinuation unavailable: {reason}.\n"
+        rendered_stop_only = _render_continuation_unavailable_envelope(
+            stop_prompt, reason
         )
         if submitted_prompt == rendered_stop_only:
-            return persist_accept_stop(root, stop_prompt, observation)
+            receipt = _persist_diff_acceptance_candidate(root, acceptance)
+            _validate_accept_stop_authority(root, observation)
+            return receipt
         raise ValueError("submitted diff disposition prompt does not match current bytes")
     candidate = _continuation.build_accept_continue_candidate(acceptance, extension)
-    expected_prompt = (
-        f"Accept and continue to `{extension.successor_increment_id}`.\n\n"
-        f"{candidate.prompt}"
+    expected_prompt = _render_accept_continue_envelope(
+        extension.successor_increment_id, candidate.prompt
     )
     if submitted_prompt != expected_prompt:
         raise ValueError("submitted diff disposition prompt does not match current bytes")
-    parse_exact_prompt(candidate.prompt, DIFF_DISPOSITION_COMMAND_SCHEMA)
-    manifest, manifest_issues = load_json_object(root / "manifest.json")
-    if manifest is None:
-        raise ValueError("; ".join(manifest_issues))
-    roles = manifest["logical_roles"]
-    approvals_path, approval_issues = resolve_managed_path(
-        root, roles["approvals"], role="logical role approvals"
-    )
-    status_path, status_issues = resolve_managed_path(
-        root, roles["status"], role="logical role status"
-    )
-    if approvals_path is None or status_path is None:
-        raise ValueError("; ".join([*approval_issues, *status_issues]))
-    recovered = _append_or_adopt_approval(approvals_path, candidate)
-    _after_persist("diff-approval")
-    binding = candidate.accepted_status["diff_disposition_binding"]
-    recovered = (
-        _replace_or_adopt_status(
-            status_path,
-            candidate.accepted_status,
-            str(binding["prior_status_sha256"]),
-            "increment-acceptance",
-        )
-        or recovered
-    )
-    _after_persist("accepted-status")
-    if status_path.read_bytes() != candidate.accepted_status_bytes:
-        raise ValueError("increment-acceptance-recovery-required: accepted status differs")
-    return DiffDispositionReceipt(
-        decision="accept-continue",
-        approval_event_id=candidate.approval_event_id,
-        increment_state="accepted",
-        status_sha256=sha256_file(status_path),
-        recovered=recovered,
-    )
+    return _persist_diff_acceptance_candidate(root, candidate)
 
 
 def persist_diff_disposition(

@@ -1666,7 +1666,7 @@ def _append_or_adopt_record(
     if matching:
         if (
             len(matching) != 1
-            or matching[0] != record
+            or _canonical_json_line(matching[0]) != _canonical_json_line(record)
             or (
                 require_tail
                 and not path.read_bytes().endswith(_canonical_json_line(record))

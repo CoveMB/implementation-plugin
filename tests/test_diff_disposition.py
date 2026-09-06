@@ -1,6 +1,4 @@
-import importlib.util
 import json
-import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -10,8 +8,10 @@ from tests.program_bootstrap_support import (
     BootstrapFixture,
     canonical_json,
     repository_snapshot,
+    run_program_discovery,
     write_raw_review_reports,
 )
+from tests.script_module_support import load_script_module
 from tests.test_program_activation import ACTIVATION, activated_program, exact_plan_bytes
 from tests.test_program_review import REVIEW as PROGRAM_REVIEW
 from tests.test_program_review import reviewing_program
@@ -20,18 +20,8 @@ from tests.test_program_review import reviewing_program
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "diff_disposition.py"
-DISCOVERY_PATH = SCRIPT_ROOT / "program_discovery.py"
 
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC = importlib.util.spec_from_file_location("diff_disposition", SCRIPT_PATH)
-    if SPEC is None or SPEC.loader is None:
-        raise RuntimeError(f"Unable to load diff disposition from {SCRIPT_PATH}")
-    DIFF = importlib.util.module_from_spec(SPEC)
-    sys.modules[SPEC.name] = DIFF
-    SPEC.loader.exec_module(DIFF)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+DIFF = load_script_module("diff_disposition", SCRIPT_PATH)
 
 
 def setUpModule() -> None:
@@ -70,15 +60,7 @@ def awaiting_diff_program(successors: dict[str, tuple[str, ...]] | None = None):
 
 class DiffDispositionTests(unittest.TestCase):
     def discover(self, fixture) -> dict[str, object]:
-        completed = subprocess.run(
-            [sys.executable, str(DISCOVERY_PATH), "discover", str(fixture.repository)],
-            cwd=REPOSITORY_ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertIn(completed.returncode, {0, 1}, completed.stderr)
-        return json.loads(completed.stdout)
+        return run_program_discovery(fixture.repository)
 
     def test_prompt_always_offers_only_accept_and_stop_without_successor_input(self) -> None:
         fixture, program_root, _observation = awaiting_diff_program()
@@ -92,12 +74,16 @@ class DiffDispositionTests(unittest.TestCase):
 
             with mock.patch.object(DIFF, "load_json_object", side_effect=recording_load):
                 prompt = DIFF.render_diff_disposition_prompt(program_root)
-            self.assertEqual(prompt.count("Accept and stop."), 1)
-            self.assertNotIn("continue", prompt.lower())
-            self.assertFalse(any("traceability" in path for path in loaded_paths))
             candidate = DIFF.build_diff_acceptance_candidate(
                 program_root, _observation
             )
+            self.assertEqual(
+                prompt,
+                f"Accept and stop.\n\n{candidate.prompt}",
+            )
+            self.assertEqual(prompt.count("Accept and stop."), 1)
+            self.assertNotIn("continue", prompt.lower())
+            self.assertFalse(any("traceability" in path for path in loaded_paths))
             binding = candidate.accepted_status["diff_disposition_binding"]
             self.assertNotIn("accepted_status_sha256", binding)
             self.assertNotIn("submitted_prompt_sha256", binding)
@@ -110,6 +96,24 @@ class DiffDispositionTests(unittest.TestCase):
         )
         try:
             prompt = DIFF.render_diff_disposition_prompt(program_root)
+            acceptance = DIFF.build_diff_acceptance_candidate(
+                program_root, observation
+            )
+            extension = DIFF._continuation.build_continuation_extension(
+                program_root, acceptance, observation
+            )
+            self.assertIsNotNone(extension)
+            continued = DIFF._continuation.build_accept_continue_candidate(
+                acceptance, extension
+            )
+            self.assertEqual(
+                prompt,
+                (
+                    f"Accept and stop.\n\n{acceptance.prompt}\n"
+                    f"Accept and continue to `{extension.successor_increment_id}`.\n\n"
+                    f"{continued.prompt}"
+                ),
+            )
             self.assertEqual(prompt.count("Accept and stop."), 1)
             self.assertEqual(
                 prompt.count("Accept and continue to `ARCHIVE-VERIFY`."), 1
@@ -140,6 +144,13 @@ class DiffDispositionTests(unittest.TestCase):
                 fixture, program_root, _observation = awaiting_diff_program(successors)
                 try:
                     prompt = DIFF.render_diff_disposition_prompt(program_root)
+                    candidate = DIFF.build_diff_acceptance_candidate(
+                        program_root, _observation
+                    )
+                    expected = f"Accept and stop.\n\n{candidate.prompt}"
+                    if reason != "no allocated successor":
+                        expected += f"\nContinuation unavailable: {reason}.\n"
+                    self.assertEqual(prompt, expected)
                     self.assertEqual(prompt.count("Accept and stop."), 1)
                     self.assertNotIn("Accept and continue", prompt)
                     if successors is None:

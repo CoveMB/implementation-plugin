@@ -7,15 +7,15 @@ import unittest
 from pathlib import Path
 
 from tests import program_bootstrap_support as bootstrap_support
-from tests.program_bootstrap_support import BootstrapFixture, repository_snapshot
+from tests.program_bootstrap_support import (
+    BootstrapFixture,
+    repository_snapshot,
+    run_program_discovery,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SUPPORT_PATH = REPOSITORY_ROOT / "tests/program_bootstrap_support.py"
-DISCOVERY_PATH = (
-    REPOSITORY_ROOT
-    / "skills/implementing-staged-plans/scripts/program_discovery.py"
-)
 COMPATIBILITY_FIXTURE = (
     REPOSITORY_ROOT / "tests/fixtures/program-bootstrap/v0.1.1"
 )
@@ -72,20 +72,7 @@ class ProgramBootstrapLifecycleTests(unittest.TestCase):
         self.fixture = BootstrapFixture()
 
     def discover(self) -> dict[str, object]:
-        completed = subprocess.run(
-            [
-                sys.executable,
-                str(DISCOVERY_PATH),
-                "discover",
-                str(self.fixture.repository),
-            ],
-            cwd=REPOSITORY_ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertIn(completed.returncode, {0, 1}, completed.stderr)
-        return json.loads(completed.stdout)
+        return run_program_discovery(self.fixture.repository)
 
     def publish(self) -> str:
         _completed, value = self.run_phase("publish")
@@ -530,20 +517,7 @@ class ProgramBootstrapLifecycleTests(unittest.TestCase):
                         "manifest": manifest_path.read_bytes(),
                         "exact_plan": plan_path.read_bytes(),
                     }
-                    completed = subprocess.run(
-                        [
-                            sys.executable,
-                            str(DISCOVERY_PATH),
-                            "discover",
-                            str(fixture.repository),
-                        ],
-                        cwd=REPOSITORY_ROOT,
-                        text=True,
-                        capture_output=True,
-                        check=False,
-                    )
-                    self.assertIn(completed.returncode, {0, 1}, completed.stderr)
-                    discovered = json.loads(completed.stdout)
+                    discovered = run_program_discovery(fixture.repository)
                     status = json.loads(
                         (fixture.program_root / "state/status.json").read_text(
                             encoding="utf-8"

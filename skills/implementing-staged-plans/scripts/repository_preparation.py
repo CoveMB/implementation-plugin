@@ -35,9 +35,6 @@ REPOSITORY_INSPECTION_SCHEMA = "implementation-repository-inspection/v1"
 EVIDENCE_RECORD_SCHEMA = "implementation-evidence-record/v1"
 EXECUTION_BASELINE_SCHEMA = "implementation-execution-baseline/v1"
 
-DRIFT_CATEGORIES = frozenset(
-    {"benign", "reconcilable-relevant", "base-invalidating"}
-)
 MATERIAL_EVIDENCE_PREDICATES = frozenset(
     {
         "dependency-or-runtime-change",
@@ -1121,12 +1118,6 @@ def _without_control_paths(paths: Sequence[str], control_prefix: str) -> set[str
         for path in paths
         if path != control_prefix and not path.startswith(control_prefix + "/")
     }
-
-
-def _file_digest(path: Path) -> str | None:
-    if path.is_symlink() or (path.exists() and not path.is_file()):
-        return None
-    return sha256_file(path) if path.is_file() else None
 
 
 def validate_execution_workspace(

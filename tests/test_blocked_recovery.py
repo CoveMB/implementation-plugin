@@ -1,4 +1,3 @@
-import importlib.util
 import json
 import subprocess
 import sys
@@ -7,26 +6,21 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from unittest import mock
 
-from tests.program_bootstrap_support import BootstrapFixture, repository_snapshot
+from tests.program_bootstrap_support import (
+    BootstrapFixture,
+    repository_snapshot,
+    run_program_discovery,
+)
+from tests.script_module_support import load_script_module
 from tests.test_program_activation import ACTIVATION, activated_program, exact_plan_bytes
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_ROOT = REPOSITORY_ROOT / "skills/implementing-staged-plans/scripts"
 SCRIPT_PATH = SCRIPT_ROOT / "blocked_recovery.py"
-DISCOVERY_PATH = SCRIPT_ROOT / "program_discovery.py"
 LIFECYCLE_SUPPORT_PATH = REPOSITORY_ROOT / "tests/program_bootstrap_support.py"
 
-sys.path.insert(0, str(SCRIPT_ROOT))
-try:
-    SPEC = importlib.util.spec_from_file_location("blocked_recovery", SCRIPT_PATH)
-    if SPEC is None or SPEC.loader is None:
-        raise RuntimeError(f"Unable to load blocked recovery from {SCRIPT_PATH}")
-    BLOCKED = importlib.util.module_from_spec(SPEC)
-    sys.modules[SPEC.name] = BLOCKED
-    SPEC.loader.exec_module(BLOCKED)
-finally:
-    sys.path.remove(str(SCRIPT_ROOT))
+BLOCKED = load_script_module("blocked_recovery", SCRIPT_PATH)
 
 
 def implementing_program():
@@ -80,15 +74,7 @@ def resolution_candidate(program_root: Path) -> dict[str, object]:
 
 class BlockedRecoveryTests(unittest.TestCase):
     def discover(self, fixture: BootstrapFixture) -> dict[str, object]:
-        completed = subprocess.run(
-            [sys.executable, str(DISCOVERY_PATH), "discover", str(fixture.repository)],
-            cwd=REPOSITORY_ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertIn(completed.returncode, {0, 1}, completed.stderr)
-        return json.loads(completed.stdout)
+        return run_program_discovery(fixture.repository)
 
     def test_production_block_fresh_discovery_and_exact_resume(self) -> None:
         fixture, program_root, observation = implementing_program()
