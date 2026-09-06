@@ -138,6 +138,7 @@ Expected: the branch is `repair/delete-operation-support` and clean; `HEAD^` is 
 - Modify: `skills/implementing-staged-plans/scripts/program_setup.py`
 - Modify: `skills/implementing-staged-plans/scripts/program_authority.py`
 - Modify: `skills/implementing-staged-plans/scripts/program_activation.py`
+- Modify: `skills/implementing-staged-plans/scripts/program_discovery.py`
 - Modify: `skills/implementing-staged-plans/scripts/state_authority.py`
 - Modify: `tests/program_bootstrap_support.py`
 - Test: `tests/test_program_setup.py`
@@ -153,6 +154,7 @@ Expected: the branch is `repair/delete-operation-support` and clean; `HEAD^` is 
 - Produces: `_operation_contract(semantics: Mapping[str, object]) -> tuple[tuple[str, ...], bool]`, returning the exact supported-operation tuple and whether Delete fields are required.
 - Produces test helpers: `BootstrapFixture.configure_delete_setup_v2(allocation: Mapping[str, object]) -> dict[str, object]`, `configure_v1_envelope_with_delete() -> list[str]`, and `configure_mixed_setup_versions() -> list[str]`; each recomputes the semantic digest after its exact mutation.
 - Produces: recap, checkpoint, decision, activation-record, program-authority, and state-authority dispatch selected from the exact setup/envelope family before any activation record is written.
+- Produces: manifest-v3/setup-v2 sequence-zero activation-prefix discovery that returns `program-activation-retry-ready` for every byte-exact incomplete prefix and `program-activation-recovery-required` for every started mixed, out-of-order, or divergent prefix before generic invalid-state routing.
 - Preserves: every v1 setup/envelope/recap/decision/activation byte and error route.
 
 - [ ] **Step 1: Write failing setup and authority tests**
@@ -213,7 +215,7 @@ def test_v1_and_mixed_setup_contracts_reject_delete(self) -> None:
 
 Also assert proposal validation, publication, recap checkpoint, and setup decision accept the all-v2 nested family and reject a substituted v1 record or v2 record in a v1 setup. Add a two-increment allocation for one initially absent exact path: `Create` in the first increment with facts `absent`/`none`/`None`/`none`, then `Delete` in its strict successor with facts `regular-file`/`none`/`100644`/`accepted-predecessor`. Require one same-path Create allocation in a transitive predecessor for `accepted-predecessor`, and reject an unrelated, same-increment, later, or absent predecessor allocation; the distinct operations are not a duplicate allocation. Keep an initially present Delete allocation on collision `existing` and reject any other collision/fact combination.
 
-Drive `program_activation.py::activate_program(...)` through the real sequence-zero transaction and assert that it writes `setup-activation-decision/v2`, not `setup-activation-decision/v1`, before the status-last transition; substitute either activation schema across families and require both program and state authority to fail closed. After each byte-exact v2 activation prefix, run discovery and require the existing `program-activation-retry-ready` route; a mixed or divergent prefix must return `program-activation-recovery-required` before generic sequence-zero rejection.
+Drive `program_activation.py::activate_program(...)` through the real sequence-zero transaction and assert that it writes `setup-activation-decision/v2`, not `setup-activation-decision/v1`, before the status-last transition; substitute either activation schema across families and require both program and state authority to fail closed. After each byte-exact v2 activation prefix, run discovery and require the existing `program-activation-retry-ready` route. For each started-prefix record class—setup activation decision, required source-gate decision, program approval, and workspace approval—change one bound field, substitute the opposite setup schema where applicable, or place the record out of order; require read-only discovery to return `program-activation-recovery-required`, `required_input == "activation-prefix-recovery"`, and `stop_required is True` without falling through to generic invalid-state or publication recovery. Keep malformed sequence-zero proposals with no activation transaction artifact on their existing invalid route.
 
 - [ ] **Step 2: Run the focused tests and verify RED**
 
@@ -257,16 +259,18 @@ For v2, require `accepted_state == "absent"`, one allowed `content_disposition`,
 
 Select recap/checkpoint/adapter/activation schema versions solely from `_operation_contract(...)`. In this same task, change `program_activation.py::_build_v3_setup_record(...)` to select and write the matching activation schema instead of importing and unconditionally emitting `SETUP_ACTIVATION_SCHEMA`; update its activation-prefix adoption tests before calling this task GREEN. Extend `program_authority.py::SETUP_AUTHORITY_RECORD_SCHEMAS`, `program_setup.py`'s activation-record loaders/validators, and `state_authority.py::SETUP_ONLY_STATUS_SCHEMAS` plus its manifest-v3 family validation without admitting the v2 records to setup-v1 or legacy manifests.
 
+In `program_discovery.py::_single_bootstrap_prefix_disposition(...)` and `_load_setup_candidate(...)`, inspect the sequence-zero transaction prefix before proposal-publication or generic program/state rejection. Preserve the existing pristine `program-setup-ready`, pending-gate `source-gate-approval-ready`, and exact-prefix `program-activation-retry-ready` routes for both setup families. When activation has started and `inspect_sequence_zero_activation_prefix(...)` reports a mixed, out-of-order, or divergent decision, gate, or approval prefix, return `program-activation-recovery-required` with the exact prefix issues for diagnosis; `_single_bootstrap_prefix_disposition(...)` must not relabel that owned activation divergence as `proposal-publication-recovery-required`, and `_load_setup_candidate(...)` must not relabel it as generic invalid. Keep immutable publication-manifest/owner/inventory divergence on `proposal-publication-recovery-required`. The activation recovery route is classification only: it must not rewrite, adopt, append, or delete any prefix byte. A malformed pristine proposal with no activation transaction artifact remains on its existing invalid or publication-recovery route.
+
 - [ ] **Step 4: Run the focused tests and verify GREEN**
 
 Run the Step 2 command.
 
-Expected: all setup, authority, and generic proposal-publication tests pass; the recap exposes each Delete fact and legacy bytes stay exact.
+Expected: all setup, authority, generic proposal-publication, and sequence-zero discovery tests pass; every exact incomplete v2 activation prefix is retry-ready, every started mixed or divergent prefix is activation-recovery-required without mutation, the recap exposes each Delete fact, and legacy bytes stay exact.
 
 - [ ] **Step 5: Commit the setup contract**
 
 ```bash
-rtk git add skills/implementing-staged-plans/scripts/program_setup.py skills/implementing-staged-plans/scripts/program_authority.py skills/implementing-staged-plans/scripts/program_activation.py skills/implementing-staged-plans/scripts/state_authority.py tests/program_bootstrap_support.py tests/test_program_setup.py tests/test_program_authority.py tests/test_program_bootstrap.py tests/test_program_activation.py tests/test_program_discovery.py tests/test_state_authority.py
+rtk git add skills/implementing-staged-plans/scripts/program_setup.py skills/implementing-staged-plans/scripts/program_authority.py skills/implementing-staged-plans/scripts/program_activation.py skills/implementing-staged-plans/scripts/program_discovery.py skills/implementing-staged-plans/scripts/state_authority.py tests/program_bootstrap_support.py tests/test_program_setup.py tests/test_program_authority.py tests/test_program_bootstrap.py tests/test_program_activation.py tests/test_program_discovery.py tests/test_state_authority.py
 rtk git commit -m "feat: add typed delete setup contracts"
 ```
 
@@ -278,7 +282,7 @@ rtk git commit -m "feat: add typed delete setup contracts"
 - Modify: `skills/implementing-staged-plans/scripts/state_authority.py`
 - Modify: `skills/implementing-staged-plans/scripts/repository_preparation.py`
 - Modify: `skills/implementing-staged-plans/scripts/program_activation.py`
-- Modify: `skills/implementing-staged-plans/scripts/program_discovery.py`
+- Modify: `skills/implementing-staged-plans/scripts/program_discovery.py` (sequence-one-and-later exact-plan routing only; preserve Task 1 sequence-zero activation routing)
 - Test: `tests/test_repository_preparation.py`
 - Test: `tests/test_program_activation.py`
 - Test: `tests/test_approval_checkpoint.py`
@@ -291,7 +295,7 @@ rtk git commit -m "feat: add typed delete setup contracts"
 - Produces: `WorkspacePathSnapshot(relative_path: str, exists: bool, sha256: str | None, mode: str | None, link_count: int | None)` and `inspect_workspace_path(workspace_root: Path, relative_path: str) -> WorkspacePathSnapshot`, the single component-by-component path-safety and containment check used at baseline and every reassessment.
 - Produces: `product_result_schema_version` on `ExecutionWorkspaceAssessment`; v1 remains `implementation-product-delta/v1`, v2 is `implementation-product-path-states/v2`.
 - Produces: v2 product states in operation-section order and exact file-map order; v1 product deltas retain their current lexical ordering and bytes.
-- Produces: manifest-v3/setup-v2 `plan-preparation-*` and `plan-materialization-*` retry/recovery classification from exact transaction prefixes before full state-authority validation or generic lifecycle routing.
+- Produces: manifest-v3/setup-v2 sequence-one-and-later `plan-preparation-*` and `plan-materialization-*` retry/recovery classification from exact transaction prefixes before full state-authority validation or generic lifecycle routing; Task 1 exclusively owns sequence-zero activation-prefix classification.
 - Produces test helpers on `ExecutionWorkspaceValidationTests`: `delete_baseline(path: str) -> ExecutionBaselineV2` and `assess_v2(baseline: ExecutionBaselineV2, state: str) -> ExecutionWorkspaceAssessment`; both use the class's temporary `workspace` path.
 - Preserves: public plan preparation/materialization and three-argument future-write signatures.
 
@@ -428,7 +432,7 @@ For v2 Create/Modify results emit `final_state: "present"` with the real digest.
 
 - [ ] **Step 5: Route exact setup-v2 plan prefixes before generic rejection**
 
-In `program_discovery.py::_load_setup_candidate(...)`, keep sequence-zero activation routing unchanged. For sequence one and later, load the allocated transaction files and relevant ledgers, derive the fresh observation, and call `_exact_plan_prefix_disposition(...)` before `validate_state_authority(...)` or any generic `resume`/invalid route. Do not accept a prefix by state name alone. For a manifest-v3/setup-v2 program, interrupt standard-mode preparation after the exact plan and awaiting-plan status, and materialization after the plan approval, v2 baseline, and action authorization. Each byte-exact incomplete prefix must return the matching `plan-preparation-retry-ready` or `plan-materialization-retry-ready`; missing/out-of-order records, changed plan bytes, a v1 baseline, or changed v2 path-state order must return the matching recovery-required disposition. After the exact authorized status is written last, discovery returns `resume` only after full state validation. `approval:pre-approve` and `approval:full-increment` must exercise their shorter exact materialization prefixes and completed-status route. The same cases for setup-v1 keep their existing bytes and disposition names.
+In `program_discovery.py::_load_setup_candidate(...)`, preserve without reimplementing the exact setup-v1/setup-v2 sequence-zero activation retry/recovery routing completed in Task 1. For sequence one and later only, load the allocated transaction files and relevant ledgers, derive the fresh observation, and call `_exact_plan_prefix_disposition(...)` before `validate_state_authority(...)` or any generic `resume`/invalid route. Do not accept a prefix by state name alone. For a manifest-v3/setup-v2 program, interrupt standard-mode preparation after the exact plan and awaiting-plan status, and materialization after the plan approval, v2 baseline, and action authorization. Each byte-exact incomplete prefix must return the matching `plan-preparation-retry-ready` or `plan-materialization-retry-ready`; missing/out-of-order records, changed plan bytes, a v1 baseline, or changed v2 path-state order must return the matching recovery-required disposition. After the exact authorized status is written last, discovery returns `resume` only after full state validation. `approval:pre-approve` and `approval:full-increment` must exercise their shorter exact materialization prefixes and completed-status route. The same cases for setup-v1 keep their existing bytes and disposition names.
 
 - [ ] **Step 6: Run the focused tests and verify GREEN**
 
