@@ -715,6 +715,64 @@ class BootstrapFixture:
         status["schema_version"] = "implementation-program-status/v3"
         self.write_json("state/status.json", status)
 
+    def configure_delete_setup_v2(
+        self,
+        *,
+        source_gate_definitions: Sequence[dict[str, object]] = (),
+        path: str = "catalog.txt",
+        additional_delete_paths: Sequence[str] = (),
+        increment_id: str = "ARCHIVE-INDEX",
+        collision: str = "existing",
+        content_disposition: str = "obsolete",
+        rationale: str = "The accepted program no longer needs the archive catalog.",
+    ) -> None:
+        """Configure the manifest-v3 fixture with the Delete-capable setup pair."""
+        self.configure_setup_v3(source_gate_definitions=source_gate_definitions)
+        manifest = self.load_json("manifest.json")
+        setup_semantics = manifest["setup_semantics"]
+        setup_semantics["schema_version"] = (
+            "implementation-program-setup-semantics/v2"
+        )
+        envelope = setup_semantics["operation_envelope"]
+        envelope["schema_version"] = "implementation-operation-envelope/v2"
+        envelope["supported_operations"] = [
+            "Create",
+            "Modify",
+            "Delete",
+            "Preserve",
+        ]
+        delete_paths = (path, *additional_delete_paths)
+        envelope["allocations"] = [
+            allocation
+            for allocation in envelope["allocations"]
+            if allocation["path"] not in delete_paths or allocation["operation"] == "Create"
+        ]
+        for delete_path in delete_paths:
+            envelope["allocations"].append(
+                {
+                    "kind": "exact-path",
+                    "path": delete_path,
+                    "operation": "Delete",
+                    "increment_ids": [increment_id],
+                    "inclusions": ["accepted obsolete archive content"],
+                    "exclusions": [],
+                    "ownership": "program",
+                    "protected": False,
+                    "user_work": False,
+                    "file_kind": "regular-file",
+                    "link_kind": "none",
+                    "mode": "100644",
+                    "collision": collision,
+                    "accepted_state": "absent",
+                    "content_disposition": content_disposition,
+                    "rationale": rationale,
+                }
+            )
+        manifest["setup_semantics_sha256"] = canonical_compact_sha256(
+            setup_semantics
+        )
+        self.write_json("manifest.json", manifest)
+
     def _configure_candidate(self) -> None:
         manifest = self.load_json("manifest.json")
         source_bytes = self.source_plan.read_bytes()
@@ -903,9 +961,32 @@ def _exact_plan_bytes(program_root: Path, observation: object) -> bytes:
     required = required_future_lifecycle_writes(
         program_root, Path(observation.path), status["current_increment_id"]
     )
-    inherited = set(
-        status.get("inherited_workspace_binding", {}).get("inherited_paths", [])
-    )
+    inherited_binding = status.get("inherited_workspace_binding", {})
+    if (
+        isinstance(inherited_binding, dict)
+        and inherited_binding.get("schema_version")
+        == "implementation-inherited-workspace/v2"
+    ):
+        inherited_states = {
+            item["path"]: bool(item["exists"])
+            for item in inherited_binding.get("inherited_path_states", [])
+            if isinstance(item, dict)
+            and isinstance(item.get("path"), str)
+            and isinstance(item.get("exists"), bool)
+        }
+        inherited = set(inherited_states)
+        inherited_present = {
+            path for path, exists in inherited_states.items() if exists
+        }
+        inherited_absent = inherited - inherited_present
+    else:
+        inherited = set(
+            inherited_binding.get("inherited_paths", [])
+            if isinstance(inherited_binding, dict)
+            else []
+        )
+        inherited_present = set(inherited)
+        inherited_absent = set()
     increment_id = str(status["current_increment_id"])
     review_root = (
         "reviews"
@@ -920,22 +1001,69 @@ def _exact_plan_bytes(program_root: Path, observation: object) -> bytes:
         "archive-output.txt",
         *raw_review_paths.values(),
     }
+    setup_v2 = (
+        manifest.get("setup_semantics", {}).get("schema_version")
+        == "implementation-program-setup-semantics/v2"
+        and manifest.get("setup_semantics", {}).get("operation_envelope", {}).get("schema_version")
+        == "implementation-operation-envelope/v2"
+    )
+    delete = sorted(
+        allocation["path"]
+        for allocation in manifest.get("setup_semantics", {})
+        .get("operation_envelope", {})
+        .get("allocations", [])
+        if allocation.get("operation") == "Delete"
+        and increment_id in allocation.get("increment_ids", [])
+        and allocation.get("kind") == "exact-path"
+    ) if setup_v2 else []
+    current_allocations = [
+        allocation
+        for allocation in manifest.get("setup_semantics", {})
+        .get("operation_envelope", {})
+        .get("allocations", [])
+        if isinstance(allocation, dict)
+        and allocation.get("kind") == "exact-path"
+        and increment_id in allocation.get("increment_ids", [])
+    ]
+    explicit_create = {
+        allocation["path"]
+        for allocation in current_allocations
+        if allocation.get("operation") == "Create"
+        and (
+            allocation["path"] in inherited_absent
+            or allocation["path"] not in inherited
+        )
+    }
+    explicit_modify = {
+        allocation["path"]
+        for allocation in current_allocations
+        if allocation.get("operation") == "Modify"
+        and allocation["path"] in inherited_present
+    }
+    product_paths -= set(delete)
     create = sorted(
         {
             *(product_paths - inherited),
+            *explicit_create,
             *(item.path for item in required if item.disposition == "Create"),
         }
     )
     modify = sorted(
         {
-            *inherited,
+            *(
+                path
+                for path in inherited_present
+                if not setup_v2
+                or path in product_paths
+                or path in explicit_modify
+            ),
             *(item.path for item in required if item.disposition == "Modify"),
         }
     )
     preserve = sorted(
         {
-            "catalog.txt",
             *(item.path for item in required if item.disposition == "Preserve"),
+            *( [] if setup_v2 else ["catalog.txt"] ),
         }
     )
     source = status["source_binding"]
@@ -961,11 +1089,11 @@ def _exact_plan_bytes(program_root: Path, observation: object) -> bytes:
         "## File map",
         "",
     ]
-    for disposition, paths in (
-        ("Create", create),
-        ("Modify", modify),
-        ("Preserve", preserve),
-    ):
+    plan_operations = [("Create", create), ("Modify", modify)]
+    if setup_v2:
+        plan_operations.append(("Delete", delete))
+    plan_operations.append(("Preserve", preserve))
+    for disposition, paths in plan_operations:
         lines.extend(
             [
                 f"### {disposition}",

@@ -616,6 +616,20 @@ class ReviewPacketTests(unittest.TestCase):
         self.assertEqual(rendered, REVIEW.render_review_packet(value))
         self.assertTrue(rendered.startswith("# Review Packet\n\n## Identity and outcome\n"))
 
+    def test_v2_packet_renders_explicit_product_result_binding(self) -> None:
+        value = packet(schema_version="implementation-review-packet/v2")
+
+        rendered = REVIEW.render_review_packet(value)
+
+        self.assertIn(
+            "Packet schema: implementation-review-packet/v2", rendered
+        )
+        self.assertIn(
+            "Product result schema: implementation-product-path-states/v2",
+            rendered,
+        )
+        self.assertIn(f"Product result SHA-256: {value.candidate_sha256}", rendered)
+
     def test_command_only_packet_is_rejected(self) -> None:
         empty = {
             name: ()
@@ -651,6 +665,21 @@ class ReviewPacketTests(unittest.TestCase):
 
 
 class IntegrationTests(unittest.TestCase):
+    def test_review_evidence_rejects_cross_family_packet_versions(self) -> None:
+        bundle = json.loads(FIXTURE_EVIDENCE.read_text(encoding="utf-8"))
+        packet_text = FIXTURE_PACKET.read_text(encoding="utf-8")
+        mixed_v1 = dict(bundle)
+        mixed_v1["review_packet"] = {
+            **bundle["review_packet"],
+            "schema_version": "implementation-review-packet/v2",
+        }
+        self.assertTrue(
+            any(
+                "v1 review evidence requires a v1 review packet" in issue
+                for issue in REVIEW.validate_review_bundle(mixed_v1, packet_text)
+            )
+        )
+
     def test_neutral_repaired_finding_bundle_matches_persisted_packet(self) -> None:
         bundle = json.loads(FIXTURE_EVIDENCE.read_text(encoding="utf-8"))
         packet_text = FIXTURE_PACKET.read_text(encoding="utf-8")

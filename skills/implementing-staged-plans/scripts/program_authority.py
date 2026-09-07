@@ -74,9 +74,12 @@ SETUP_PROGRAM_ONLY_MANIFEST_FIELDS = frozenset(
 SETUP_AUTHORITY_RECORD_SCHEMAS = frozenset(
     {
         "implementation-approval/v2",
+        "implementation-approval/v3",
         "implementation-action-authorization/v2",
+        "implementation-action-authorization/v3",
         "implementation-increment-grant/v2",
         "setup-activation-decision/v1",
+        "setup-activation-decision/v2",
         "source-gate-decision/v1",
     }
 )
@@ -1571,6 +1574,31 @@ def validate_program_authority(
     ):
         issues.append("setup-activation decision record is required")
     if manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA:
+        setup_semantics = manifest.get("setup_semantics")
+        operation_envelope = (
+            setup_semantics.get("operation_envelope")
+            if isinstance(setup_semantics, dict)
+            else None
+        )
+        setup_v2_family = (
+            isinstance(setup_semantics, dict)
+            and setup_semantics.get("schema_version")
+            == "implementation-program-setup-semantics/v2"
+            and isinstance(operation_envelope, dict)
+            and operation_envelope.get("schema_version")
+            == "implementation-operation-envelope/v2"
+        )
+        if not setup_v2_family and any(
+            record.get("schema_version") == "implementation-approval/v3"
+            for record in approvals
+        ):
+            issues.append("setup-v1 rejects v3 approval records")
+        if not setup_v2_family and any(
+            record.get("schema_version")
+            == "implementation-action-authorization/v3"
+            for record in new_ledgers.get("action_authorizations", [])
+        ):
+            issues.append("setup-v1 rejects v3 action authorization records")
         if any(
             record.get("schema_version") == "implementation-approval/v1"
             for record in approvals

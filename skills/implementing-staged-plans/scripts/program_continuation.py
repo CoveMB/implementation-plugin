@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
@@ -12,7 +13,11 @@ from pathlib import Path
 
 from diff_disposition import (
     DIFF_DISPOSITION_BINDING_SCHEMA,
+    DIFF_DISPOSITION_BINDING_SCHEMA_V2,
     DIFF_DISPOSITION_COMMAND_SCHEMA,
+    DIFF_DISPOSITION_COMMAND_SCHEMA_V2,
+    APPROVAL_SCHEMA_V3,
+    SETUP_V2_DIFF_APPROVAL_FIELDS,
     DiffAcceptanceCandidate,
     _render_accept_continue_envelope,
 )
@@ -24,23 +29,39 @@ from program_activation import (
     _without_owned_program_paths,
 )
 from program_authority import (
+    SETUP_PROGRAM_MANIFEST_SCHEMA,
     load_json_lines,
     load_json_object,
     resolve_managed_path,
     sha256_file,
 )
 from repository_preparation import (
+    EXECUTION_BASELINE_SCHEMA_V2,
+    PRODUCT_PATH_STATES_SCHEMA_V2,
     execution_baseline_from_value,
+    execution_baseline_v2_from_value,
     inspect_repository,
+    product_path_states_v2_from_value,
+    product_path_states_v2_value,
     validate_execution_workspace,
+    validate_execution_workspace_v2,
 )
 from state_authority import RepositoryObservation
 from task_prompt import parse_exact_prompt, render_exact_prompt
 
 
 SUCCESSOR_PROJECTION_SCHEMA = "implementation-successor-authority-projection/v1"
+SUCCESSOR_PROJECTION_SCHEMA_V2 = "implementation-successor-authority-projection/v2"
 ACCEPTED_STATE_CONTINUATION_SCHEMA = (
     "implementation-accepted-state-continuation-binding/v1"
+)
+ACCEPTED_STATE_CONTINUATION_SCHEMA_V2 = (
+    "implementation-accepted-state-continuation-binding/v2"
+)
+SETUP_V2_CONTINUE_APPROVAL_FIELDS = (
+    *SETUP_V2_DIFF_APPROVAL_FIELDS,
+    "successor_increment_id",
+    "successor_authority_projection_sha256",
 )
 
 
@@ -56,6 +77,8 @@ class ContinuationExtension:
     successor_increment_id: str
     successor_brief_bytes: bytes
     accepted_product_delta: tuple[ProductDeltaPath, ...]
+    accepted_product_result: Mapping[str, object] | None
+    inherited_workspace: Mapping[str, object]
     checkpoint_id: str
     rollover_authorization_id: str
     successor_grant_id: str
@@ -77,6 +100,29 @@ class ContinuationCommand:
     successor_increment_id: str
     successor_brief_sha256: str
     accepted_product_delta_sha256: str
+    successor_approval_mode: str
+    selected_workspace: Mapping[str, object]
+    inherited_workspace: Mapping[str, object]
+    allowed_conditional_action_ceiling: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ContinuationCommandV2:
+    schema_version: str
+    base_seed_sha256: str
+    checkpoint_id: str
+    rollover_authorization_id: str
+    successor_grant_id: str
+    accepted_status_sha256: str
+    accepted_status_sequence: int
+    program_id: str
+    program_revision: int
+    current_increment_id: str
+    successor_increment_id: str
+    successor_brief_sha256: str
+    product_result_schema_version: str
+    product_result_sha256: str
+    accepted_product_result: Mapping[str, object]
     successor_approval_mode: str
     selected_workspace: Mapping[str, object]
     inherited_workspace: Mapping[str, object]
@@ -176,7 +222,7 @@ def _live_product_delta(
     root: Path,
     status: dict[str, object],
     observation: RepositoryObservation,
-) -> tuple[tuple[ProductDeltaPath, ...], str]:
+) -> tuple[tuple[ProductDeltaPath, ...] | dict[str, object], str]:
     baseline_binding = status.get("execution_baseline_binding")
     if not isinstance(baseline_binding, dict):
         raise ValueError("execution baseline binding is required")
@@ -190,12 +236,34 @@ def _live_product_delta(
     baseline_value, baseline_issues = load_json_object(baseline_path)
     if baseline_value is None:
         raise ValueError("; ".join(baseline_issues))
-    baseline = execution_baseline_from_value(baseline_value)
     inspection = inspect_repository(Path(observation.path), observation.base_commit)
     inspection = replace(
         inspection,
         observation=_without_owned_program_paths(root, inspection.observation),
     )
+    if baseline_value.get("schema_version") == EXECUTION_BASELINE_SCHEMA_V2:
+        baseline = execution_baseline_v2_from_value(baseline_value)
+        assessment = validate_execution_workspace_v2(
+            root,
+            baseline,
+            inspection,
+            increment_state=str(status.get("current_increment_state")),
+        )
+        if not assessment.valid:
+            raise ValueError("; ".join(assessment.issues))
+        product_result = product_path_states_v2_value(assessment.product_states)
+        expected = status.get("execution_transition_binding")
+        if (
+            not isinstance(expected, dict)
+            or expected.get("schema_version")
+            != "implementation-execution-transition/v2"
+            or expected.get("product_path_states") != product_result
+            or expected.get("product_path_states_sha256")
+            != product_result["sha256"]
+        ):
+            raise ValueError("live accepted product result changed")
+        return product_result, str(product_result["sha256"])
+    baseline = execution_baseline_from_value(baseline_value)
     assessment = validate_execution_workspace(
         root,
         baseline,
@@ -219,6 +287,203 @@ def _live_product_delta(
         for item in assessment.product_delta
     )
     return product_delta, assessment.product_delta_sha256
+
+
+def _accepted_v2_diff_binding(
+    root: Path,
+    acceptance: DiffAcceptanceCandidate,
+    status: dict[str, object],
+    product_result: Mapping[str, object],
+    *,
+    require_persisted_approval: bool,
+) -> dict[str, object]:
+    """Require one exact approval-v3 over the reviewed v2 product result."""
+    result = product_path_states_v2_from_value(dict(product_result))
+    disposition = (
+        status.get("diff_disposition_binding")
+        if require_persisted_approval
+        else acceptance.accepted_status.get("diff_disposition_binding")
+    )
+    evidence_binding = status.get("review_evidence_binding")
+    packet_binding = status.get("review_packet_binding")
+    transition = status.get("execution_transition_binding")
+    if (
+        not isinstance(disposition, dict)
+        or disposition.get("schema_version") != DIFF_DISPOSITION_BINDING_SCHEMA_V2
+        or disposition.get("product_result_schema_version")
+        != PRODUCT_PATH_STATES_SCHEMA_V2
+        or disposition.get("product_result_sha256") != result.sha256
+        or "accepted_product_delta_sha256" in disposition
+        or not isinstance(evidence_binding, dict)
+        or not isinstance(packet_binding, dict)
+        or evidence_binding.get("product_result_schema_version")
+        != PRODUCT_PATH_STATES_SCHEMA_V2
+        or evidence_binding.get("product_result_sha256") != result.sha256
+        or packet_binding.get("product_result_schema_version")
+        != PRODUCT_PATH_STATES_SCHEMA_V2
+        or packet_binding.get("product_result_sha256") != result.sha256
+        or not isinstance(transition, dict)
+        or transition.get("product_path_states") != dict(product_result)
+        or disposition.get("review_evidence_sha256")
+        != evidence_binding.get("sha256")
+        or disposition.get("review_packet_sha256") != packet_binding.get("sha256")
+    ):
+        raise ValueError("accepted v2 diff binding does not match reviewed product")
+    manifest, manifest_issues = load_json_object(root / "manifest.json")
+    if manifest is None:
+        raise ValueError("; ".join(manifest_issues))
+    roles = manifest.get("logical_roles")
+    if not isinstance(roles, dict):
+        raise ValueError("manifest logical_roles must be an object")
+    approval_path, approval_issues = resolve_managed_path(
+        root, roles.get("approvals"), role="logical role approvals"
+    )
+    if approval_path is None:
+        raise ValueError("; ".join(approval_issues))
+    approvals, load_issues = load_json_lines(approval_path)
+    if approvals is None:
+        raise ValueError("; ".join(load_issues))
+    matches = [
+        record
+        for record in approvals
+        if record.get("event_id") == disposition.get("approval_event_id")
+        and record.get("type") == "increment-diff-approval"
+    ]
+    if require_persisted_approval and len(matches) != 1:
+        raise ValueError("accepted v2 diff approval must exist exactly once")
+    expected_approval = (
+        matches[0] if require_persisted_approval else acceptance.approval_record
+    )
+    if (
+        expected_approval.get("schema_version") != APPROVAL_SCHEMA_V3
+        or tuple(expected_approval)
+        != (
+            SETUP_V2_CONTINUE_APPROVAL_FIELDS
+            if disposition.get("decision") == "accept-continue"
+            else SETUP_V2_DIFF_APPROVAL_FIELDS
+        )
+        or expected_approval.get("diff_decision") != disposition.get("decision")
+        or expected_approval.get("base_seed_sha256")
+        != disposition.get("base_seed_sha256")
+        or expected_approval.get("product_result_schema_version")
+        != PRODUCT_PATH_STATES_SCHEMA_V2
+        or expected_approval.get("product_result_sha256") != result.sha256
+        or "accepted_product_delta_sha256" in expected_approval
+    ):
+        raise ValueError("accepted v2 diff approval does not match product result")
+    if require_persisted_approval and disposition.get("decision") == "accept-continue":
+        projection = disposition.get("successor_authority_projection")
+        if (
+            expected_approval.get("successor_increment_id")
+            != disposition.get("successor_increment_id")
+            or not isinstance(projection, dict)
+            or expected_approval.get("successor_authority_projection_sha256")
+            != _sha256_bytes(_canonical_json_bytes(projection))
+        ):
+            raise ValueError("accepted v2 continuation approval is invalid")
+    approval_bytes = (
+        json.dumps(
+            expected_approval,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+    return {
+        "diff_disposition_binding": dict(disposition),
+        "diff_approval_binding": {
+            "event_id": expected_approval["event_id"],
+            "sha256": _sha256_bytes(approval_bytes),
+        },
+        "execution_transition_binding": dict(transition),
+        "review_evidence_binding": dict(evidence_binding),
+        "review_packet_binding": dict(packet_binding),
+    }
+
+
+def _merge_inherited_workspace_v2(
+    status: Mapping[str, object],
+    selected_workspace: Mapping[str, object],
+    product_result: Mapping[str, object],
+) -> dict[str, object]:
+    """Project cumulative path state without reordering untouched history."""
+    parsed = product_path_states_v2_from_value(dict(product_result))
+    prior = status.get("inherited_workspace_binding")
+    prior_states: list[dict[str, object]] = []
+    prior_receipts: list[dict[str, object]] = []
+    if prior is not None:
+        if (
+            not isinstance(prior, Mapping)
+            or prior.get("schema_version") != "implementation-inherited-workspace/v2"
+            or not isinstance(prior.get("inherited_path_states"), list)
+            or not isinstance(prior.get("delete_quarantine_bindings"), list)
+        ):
+            raise ValueError("prior inherited workspace v2 binding is invalid")
+        prior_states = [dict(item) for item in prior["inherited_path_states"]]
+        prior_receipts = [dict(item) for item in prior["delete_quarantine_bindings"]]
+    current_states = [
+        {key: value for key, value in asdict(item).items() if key != "operation"}
+        for item in parsed.ordered_path_states
+    ]
+    current_by_path = {str(item["path"]): item for item in current_states}
+    if len(current_by_path) != len(current_states):
+        raise ValueError("accepted product result contains duplicate paths")
+    prior_paths = [item.get("path") for item in prior_states]
+    if (
+        any(not isinstance(path, str) for path in prior_paths)
+        or len(set(prior_paths)) != len(prior_paths)
+    ):
+        raise ValueError("prior inherited workspace contains duplicate paths")
+    merged_states: list[dict[str, object]] = []
+    for item in prior_states:
+        path = str(item["path"])
+        merged_states.append(current_by_path.pop(path, item))
+    merged_states.extend(
+        item for item in current_states if item["path"] in current_by_path
+    )
+    current_receipts = [dict(item) for item in parsed.delete_quarantine_bindings]
+    receipt_paths = [item.get("receipt_path") for item in prior_receipts]
+    receipt_target_paths = [item.get("path") for item in prior_receipts]
+    if (
+        any(not isinstance(path, str) for path in receipt_paths)
+        or len(set(receipt_paths)) != len(receipt_paths)
+        or any(not isinstance(path, str) for path in receipt_target_paths)
+        or len(set(receipt_target_paths)) != len(receipt_target_paths)
+    ):
+        raise ValueError("prior inherited workspace contains duplicate receipts")
+    current_receipts_by_path = {
+        str(item["path"]): item for item in current_receipts
+    }
+    if len(current_receipts_by_path) != len(current_receipts):
+        raise ValueError("accepted product result duplicates a quarantine receipt")
+    current_state_paths = {str(item["path"]) for item in current_states}
+    merged_receipts = [
+        current_receipts_by_path.pop(str(item["path"]), item)
+        for item in prior_receipts
+        if str(item.get("path")) not in current_state_paths
+        or str(item.get("path")) in current_receipts_by_path
+    ]
+    merged_receipts.extend(
+        item
+        for item in current_receipts
+        if item["path"] in current_receipts_by_path
+    )
+    cumulative = {
+        "inherited_path_states": merged_states,
+        "delete_quarantine_bindings": merged_receipts,
+    }
+    return {
+        "schema_version": "implementation-inherited-workspace/v2",
+        "selected_workspace": dict(selected_workspace),
+        "product_result_schema_version": PRODUCT_PATH_STATES_SCHEMA_V2,
+        "product_result_sha256": parsed.sha256,
+        "accepted_product_result": dict(product_result),
+        **cumulative,
+        "inherited_path_states_sha256": _sha256_bytes(
+            _canonical_json_bytes(cumulative)
+        ),
+    }
 
 
 def _successor_brief_bytes(
@@ -274,7 +539,7 @@ def _continuation_inputs(
     dict[str, object],
     str,
     bytes,
-    tuple[ProductDeltaPath, ...],
+    tuple[ProductDeltaPath, ...] | dict[str, object],
     str,
     dict[str, object],
     tuple[str, ...],
@@ -309,14 +574,27 @@ def _continuation_inputs(
     )
     if any(persisted != observed for _label, persisted, observed in selected_pairs):
         raise ValueError("selected workspace changed before continuation")
-    product_delta, product_delta_sha256 = _live_product_delta(
+    accepted_product, accepted_product_sha256 = _live_product_delta(
         root, status, observation
     )
-    inherited_workspace = {
-        "selected_workspace": selected_workspace,
-        "accepted_product_delta": [asdict(item) for item in product_delta],
-        "accepted_product_delta_sha256": product_delta_sha256,
-    }
+    if isinstance(accepted_product, dict):
+        _accepted_v2_diff_binding(
+            root,
+            acceptance,
+            status,
+            accepted_product,
+            require_persisted_approval=status.get("current_increment_state")
+            == "accepted",
+        )
+        inherited_workspace = _merge_inherited_workspace_v2(
+            status, selected_workspace, accepted_product
+        )
+    else:
+        inherited_workspace = {
+            "selected_workspace": selected_workspace,
+            "accepted_product_delta": [asdict(item) for item in accepted_product],
+            "accepted_product_delta_sha256": accepted_product_sha256,
+        }
     authority = status.get("current_increment_authority_binding")
     if not isinstance(authority, dict):
         raise ValueError("status-current increment authority is required")
@@ -350,8 +628,8 @@ def _continuation_inputs(
         workspace,
         successor,
         brief_bytes,
-        product_delta,
-        product_delta_sha256,
+        accepted_product,
+        accepted_product_sha256,
         inherited_workspace,
         tuple(allowed),
     )
@@ -396,6 +674,46 @@ def _immediate_base_seed(
     }
 
 
+def _immediate_base_seed_v2(
+    acceptance: DiffAcceptanceCandidate,
+    *,
+    successor_increment_id: str,
+    successor_brief_sha256: str,
+    product_result_sha256: str,
+    successor_approval_mode: str,
+    selected_workspace: Mapping[str, object],
+    workspace_selection_sha256: str,
+    inherited_workspace_sha256: str,
+    allowed_conditional_action_ceiling: tuple[str, ...],
+) -> dict[str, object]:
+    binding = acceptance.accepted_status["diff_disposition_binding"]
+    return {
+        "schema_domain": SUCCESSOR_PROJECTION_SCHEMA_V2,
+        "program_id": binding["program_id"],
+        "program_revision": binding["program_revision"],
+        "current_increment_id": binding["increment_id"],
+        "successor_increment_id": successor_increment_id,
+        "prior_status_sha256": binding["prior_status_sha256"],
+        "prior_status_sequence": binding["prior_status_sequence"],
+        "decision": "accept-continue",
+        "review_evidence_sha256": binding["review_evidence_sha256"],
+        "review_packet_sha256": binding["review_packet_sha256"],
+        "verification_sha256": binding["verification_sha256"],
+        "exact_file_plan_sha256": binding["exact_file_plan_sha256"],
+        "execution_baseline_sha256": binding["execution_baseline_sha256"],
+        "product_result_schema_version": PRODUCT_PATH_STATES_SCHEMA_V2,
+        "product_result_sha256": product_result_sha256,
+        "successor_brief_sha256": successor_brief_sha256,
+        "successor_approval_mode": successor_approval_mode,
+        "selected_workspace": dict(selected_workspace),
+        "workspace_selection_sha256": workspace_selection_sha256,
+        "inherited_workspace_sha256": inherited_workspace_sha256,
+        "allowed_conditional_action_ceiling": list(
+            allowed_conditional_action_ceiling
+        ),
+    }
+
+
 def _build_continuation_extension(
     program_root: Path,
     acceptance: DiffAcceptanceCandidate,
@@ -422,8 +740,8 @@ def _build_continuation_extension(
         _workspace,
         successor,
         brief_bytes,
-        product_delta,
-        product_delta_sha256,
+        accepted_product,
+        accepted_product_sha256,
         inherited_workspace,
         allowed,
     ) = _continuation_inputs(
@@ -441,17 +759,31 @@ def _build_continuation_extension(
     selected_workspace = inherited_workspace["selected_workspace"]
     brief_sha256 = _sha256_bytes(brief_bytes)
     inherited_sha256 = _sha256_bytes(_canonical_json_bytes(inherited_workspace))
-    base_seed = _immediate_base_seed(
-        acceptance,
-        successor_increment_id=successor,
-        successor_brief_sha256=brief_sha256,
-        accepted_product_delta_sha256=product_delta_sha256,
-        successor_approval_mode=str(status["approval_mode"]),
-        selected_workspace=selected_workspace,
-        workspace_selection_sha256=sha256_file(workspace_path),
-        inherited_workspace_sha256=inherited_sha256,
-        allowed_conditional_action_ceiling=allowed,
-    )
+    is_v2_result = isinstance(accepted_product, dict)
+    if is_v2_result:
+        base_seed = _immediate_base_seed_v2(
+            acceptance,
+            successor_increment_id=successor,
+            successor_brief_sha256=brief_sha256,
+            product_result_sha256=accepted_product_sha256,
+            successor_approval_mode=str(status["approval_mode"]),
+            selected_workspace=selected_workspace,
+            workspace_selection_sha256=sha256_file(workspace_path),
+            inherited_workspace_sha256=inherited_sha256,
+            allowed_conditional_action_ceiling=allowed,
+        )
+    else:
+        base_seed = _immediate_base_seed(
+            acceptance,
+            successor_increment_id=successor,
+            successor_brief_sha256=brief_sha256,
+            accepted_product_delta_sha256=accepted_product_sha256,
+            successor_approval_mode=str(status["approval_mode"]),
+            selected_workspace=selected_workspace,
+            workspace_selection_sha256=sha256_file(workspace_path),
+            inherited_workspace_sha256=inherited_sha256,
+            allowed_conditional_action_ceiling=allowed,
+        )
     base_seed_sha256 = _sha256_bytes(_canonical_json_bytes(base_seed))
     checkpoint_id = _identifier(
         "diff-checkpoint", {"base_seed_sha256": base_seed_sha256}
@@ -481,7 +813,11 @@ def _build_continuation_extension(
         },
     )
     projection = {
-        "schema_version": SUCCESSOR_PROJECTION_SCHEMA,
+        "schema_version": (
+            SUCCESSOR_PROJECTION_SCHEMA_V2
+            if is_v2_result
+            else SUCCESSOR_PROJECTION_SCHEMA
+        ),
         "program_id": status["program_id"],
         "program_revision": status["program_revision"],
         "current_increment_id": status["current_increment_id"],
@@ -491,7 +827,19 @@ def _build_continuation_extension(
         "checkpoint_id": checkpoint_id,
         "approval_event_id": approval_event_id,
         "successor_brief_sha256": brief_sha256,
-        "accepted_product_delta_sha256": product_delta_sha256,
+        **(
+            {
+                "product_result_schema_version": PRODUCT_PATH_STATES_SCHEMA_V2,
+                "product_result_sha256": accepted_product_sha256,
+                "accepted_product_result": accepted_product,
+                "delete_quarantine_bindings": accepted_product[
+                    "delete_quarantine_bindings"
+                ],
+                "inherited_workspace": inherited_workspace,
+            }
+            if is_v2_result
+            else {"accepted_product_delta_sha256": accepted_product_sha256}
+        ),
         "successor_approval_mode": status["approval_mode"],
         "selected_workspace": selected_workspace,
         "workspace_selection_sha256": sha256_file(workspace_path),
@@ -503,7 +851,11 @@ def _build_continuation_extension(
     return ContinuationExtension(
         successor_increment_id=successor,
         successor_brief_bytes=brief_bytes,
-        accepted_product_delta=product_delta,
+        accepted_product_delta=(
+            () if is_v2_result else accepted_product
+        ),
+        accepted_product_result=(accepted_product if is_v2_result else None),
+        inherited_workspace=inherited_workspace,
         checkpoint_id=checkpoint_id,
         rollover_authorization_id=rollover_authorization_id,
         successor_grant_id=successor_grant_id,
@@ -567,26 +919,47 @@ def build_accept_continue_candidate(
     if extension is None:
         raise ValueError("accept-continue requires one satisfied successor")
     projection = dict(extension.successor_projection)
-    base_seed = _immediate_base_seed(
-        acceptance,
-        successor_increment_id=extension.successor_increment_id,
-        successor_brief_sha256=str(projection["successor_brief_sha256"]),
-        accepted_product_delta_sha256=str(
-            projection["accepted_product_delta_sha256"]
-        ),
-        successor_approval_mode=str(projection["successor_approval_mode"]),
-        selected_workspace=projection["selected_workspace"],
-        workspace_selection_sha256=str(projection["workspace_selection_sha256"]),
-        inherited_workspace_sha256=str(projection["inherited_workspace_sha256"]),
-        allowed_conditional_action_ceiling=tuple(
-            str(item) for item in projection["allowed_conditional_action_ceiling"]
-        ),
-    )
+    is_v2_result = projection.get("schema_version") == SUCCESSOR_PROJECTION_SCHEMA_V2
+    if is_v2_result:
+        base_seed = _immediate_base_seed_v2(
+            acceptance,
+            successor_increment_id=extension.successor_increment_id,
+            successor_brief_sha256=str(projection["successor_brief_sha256"]),
+            product_result_sha256=str(projection["product_result_sha256"]),
+            successor_approval_mode=str(projection["successor_approval_mode"]),
+            selected_workspace=projection["selected_workspace"],
+            workspace_selection_sha256=str(projection["workspace_selection_sha256"]),
+            inherited_workspace_sha256=str(projection["inherited_workspace_sha256"]),
+            allowed_conditional_action_ceiling=tuple(
+                str(item)
+                for item in projection["allowed_conditional_action_ceiling"]
+            ),
+        )
+    else:
+        base_seed = _immediate_base_seed(
+            acceptance,
+            successor_increment_id=extension.successor_increment_id,
+            successor_brief_sha256=str(projection["successor_brief_sha256"]),
+            accepted_product_delta_sha256=str(
+                projection["accepted_product_delta_sha256"]
+            ),
+            successor_approval_mode=str(projection["successor_approval_mode"]),
+            selected_workspace=projection["selected_workspace"],
+            workspace_selection_sha256=str(projection["workspace_selection_sha256"]),
+            inherited_workspace_sha256=str(projection["inherited_workspace_sha256"]),
+            allowed_conditional_action_ceiling=tuple(
+                str(item) for item in projection["allowed_conditional_action_ceiling"]
+            ),
+        )
     base_seed_sha256 = _sha256_bytes(_canonical_json_bytes(base_seed))
     checkpoint_id = extension.checkpoint_id
     approval_event_id = str(projection["approval_event_id"])
     binding = {
-        "schema_version": DIFF_DISPOSITION_BINDING_SCHEMA,
+        "schema_version": (
+            DIFF_DISPOSITION_BINDING_SCHEMA_V2
+            if is_v2_result
+            else DIFF_DISPOSITION_BINDING_SCHEMA
+        ),
         **{
             key: value
             for key, value in acceptance.accepted_status[
@@ -609,9 +982,22 @@ def build_accept_continue_candidate(
         "successor_brief_sha256": projection["successor_brief_sha256"],
         "rollover_action_authorization_id": extension.rollover_authorization_id,
         "successor_grant_id": extension.successor_grant_id,
-        "inherited_product_delta_sha256": projection[
-            "accepted_product_delta_sha256"
-        ],
+        **(
+            {
+                "inherited_product_result_schema_version": projection[
+                    "product_result_schema_version"
+                ],
+                "inherited_product_result_sha256": projection[
+                    "product_result_sha256"
+                ],
+            }
+            if is_v2_result
+            else {
+                "inherited_product_delta_sha256": projection[
+                    "accepted_product_delta_sha256"
+                ]
+            }
+        ),
         "successor_authority_projection": projection,
     }
     accepted_status = dict(acceptance.accepted_status)
@@ -623,7 +1009,11 @@ def build_accept_continue_candidate(
     accepted_status["diff_disposition_binding"] = binding
     accepted_status_bytes = _canonical_json_bytes(accepted_status)
     command = {
-        "schema_version": DIFF_DISPOSITION_COMMAND_SCHEMA,
+        "schema_version": (
+            DIFF_DISPOSITION_COMMAND_SCHEMA_V2
+            if is_v2_result
+            else DIFF_DISPOSITION_COMMAND_SCHEMA
+        ),
         "decision": "accept-continue",
         "base_seed_sha256": base_seed_sha256,
         "checkpoint_id": checkpoint_id,
@@ -705,7 +1095,7 @@ def _build_accepted_state_command(
     program_root: Path,
     *,
     allow_unbound_rollover_suffix: bool = False,
-) -> ContinuationCommand:
+) -> ContinuationCommand | ContinuationCommandV2:
     root = Path(program_root)
     manifest, manifest_issues = load_json_object(root / "manifest.json")
     if manifest is None:
@@ -743,15 +1133,26 @@ def _build_accepted_state_command(
         )
     projection = dict(extension.successor_projection)
     selected_workspace = projection["selected_workspace"]
-    inherited_workspace = {
-        "selected_workspace": selected_workspace,
-        "accepted_product_delta": [asdict(item) for item in extension.accepted_product_delta],
-        "accepted_product_delta_sha256": projection[
-            "accepted_product_delta_sha256"
-        ],
-    }
+    is_v2_result = projection.get("schema_version") == SUCCESSOR_PROJECTION_SCHEMA_V2
+    inherited_workspace = (
+        dict(extension.inherited_workspace)
+        if is_v2_result
+        else {
+            "selected_workspace": selected_workspace,
+            "accepted_product_delta": [
+                asdict(item) for item in extension.accepted_product_delta
+            ],
+            "accepted_product_delta_sha256": projection[
+                "accepted_product_delta_sha256"
+            ],
+        }
+    )
     base_seed = {
-        "schema_domain": ACCEPTED_STATE_CONTINUATION_SCHEMA,
+        "schema_domain": (
+            ACCEPTED_STATE_CONTINUATION_SCHEMA_V2
+            if is_v2_result
+            else ACCEPTED_STATE_CONTINUATION_SCHEMA
+        ),
         "accepted_status_sha256": sha256_file(status_path),
         "accepted_status_sequence": status["state_sequence"],
         "program_id": status["program_id"],
@@ -759,9 +1160,21 @@ def _build_accepted_state_command(
         "current_increment_id": status["current_increment_id"],
         "successor_increment_id": extension.successor_increment_id,
         "successor_brief_sha256": projection["successor_brief_sha256"],
-        "accepted_product_delta_sha256": projection[
-            "accepted_product_delta_sha256"
-        ],
+        **(
+            {
+                "product_result_schema_version": projection[
+                    "product_result_schema_version"
+                ],
+                "product_result_sha256": projection["product_result_sha256"],
+                "accepted_product_result": projection["accepted_product_result"],
+            }
+            if is_v2_result
+            else {
+                "accepted_product_delta_sha256": projection[
+                    "accepted_product_delta_sha256"
+                ]
+            }
+        ),
         "successor_approval_mode": projection["successor_approval_mode"],
         "selected_workspace": selected_workspace,
         "workspace_selection_sha256": sha256_file(workspace_path),
@@ -790,6 +1203,31 @@ def _build_accepted_state_command(
             "rollover_authorization_id": rollover_authorization_id,
         },
     )
+    if is_v2_result:
+        return ContinuationCommandV2(
+            schema_version=ACCEPTED_STATE_CONTINUATION_SCHEMA_V2,
+            base_seed_sha256=base_seed_sha256,
+            checkpoint_id=checkpoint_id,
+            rollover_authorization_id=rollover_authorization_id,
+            successor_grant_id=successor_grant_id,
+            accepted_status_sha256=sha256_file(status_path),
+            accepted_status_sequence=int(status["state_sequence"]),
+            program_id=str(status["program_id"]),
+            program_revision=int(status["program_revision"]),
+            current_increment_id=str(status["current_increment_id"]),
+            successor_increment_id=extension.successor_increment_id,
+            successor_brief_sha256=str(projection["successor_brief_sha256"]),
+            product_result_schema_version=PRODUCT_PATH_STATES_SCHEMA_V2,
+            product_result_sha256=str(projection["product_result_sha256"]),
+            accepted_product_result=dict(projection["accepted_product_result"]),
+            successor_approval_mode=str(projection["successor_approval_mode"]),
+            selected_workspace=selected_workspace,
+            inherited_workspace=inherited_workspace,
+            allowed_conditional_action_ceiling=tuple(
+                str(item)
+                for item in projection["allowed_conditional_action_ceiling"]
+            ),
+        )
     return ContinuationCommand(
         schema_version=ACCEPTED_STATE_CONTINUATION_SCHEMA,
         base_seed_sha256=base_seed_sha256,
@@ -834,9 +1272,9 @@ def render_accepted_state_continuation_prompt(program_root: Path) -> str:
 def validate_submitted_continuation_prompt(
     program_root: Path,
     submitted_prompt: str,
-) -> ContinuationCommand:
-    parse_exact_prompt(submitted_prompt, ACCEPTED_STATE_CONTINUATION_SCHEMA)
+) -> ContinuationCommand | ContinuationCommandV2:
     expected = _build_accepted_state_command(program_root)
+    parse_exact_prompt(submitted_prompt, expected.schema_version)
     if render_exact_prompt(asdict(expected)) != submitted_prompt:
         raise ValueError("submitted accepted-state continuation prompt is stale")
     return expected
@@ -845,12 +1283,12 @@ def validate_submitted_continuation_prompt(
 def _validate_submitted_continuation_prompt_for_rollover_retry(
     program_root: Path,
     submitted_prompt: str,
-) -> ContinuationCommand:
-    parse_exact_prompt(submitted_prompt, ACCEPTED_STATE_CONTINUATION_SCHEMA)
+) -> ContinuationCommand | ContinuationCommandV2:
     expected = _build_accepted_state_command(
         program_root,
         allow_unbound_rollover_suffix=True,
     )
+    parse_exact_prompt(submitted_prompt, expected.schema_version)
     if render_exact_prompt(asdict(expected)) != submitted_prompt:
         raise ValueError("submitted accepted-state continuation prompt is stale")
     return expected

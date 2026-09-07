@@ -65,6 +65,12 @@ Every requirement must be allocated. A group-level allocation may guide preparat
 
 Make the current outcome exact enough to execute and review. Preserve later outcomes semantically while deferring repository-specific file choices. When new evidence changes an approved outcome, acceptance condition, sequence, public contract, authority, or risk posture, stop for a recorded program amendment. Ordinary implementation detail may be elaborated within approved bounds.
 
+## Select one operation family
+
+The exact setup pair owns the available product operations. `implementation-program-setup-semantics/v1` with `implementation-operation-envelope/v1` supports `Create`, `Modify`, and `Preserve`. `implementation-program-setup-semantics/v2` with `implementation-operation-envelope/v2` adds `Delete`; never mix either member of the v1 and v2 pairs or reinterpret accepted v1 bytes.
+
+A v2 `Delete` allocation names one exact program-owned regular-file path, an `absent` accepted state, a supported content disposition (`migrated`, `obsolete`, or `intentional-discard`), and a rationale. It cannot collide with another allocation. When the path is created by an earlier increment, that `Create` must be its strict accepted predecessor; otherwise the live descriptor-bound baseline must establish the file before Delete authorization.
+
 ## Revise without rewriting history
 
 A new source or program revision receives new immutable paths and digests. Its traceability declares the prior source, program, traceability, and accepted evidence records it preserves. Validate every declared prior digest.

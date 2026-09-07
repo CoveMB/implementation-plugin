@@ -16,7 +16,12 @@ from tests.program_bootstrap_support import (
     repository_snapshot,
 )
 from tests.script_module_support import load_script_module
-from tests.test_program_activation import activated_program
+from tests.test_program_activation import (
+    ACTIVATION as PROGRAM_ACTIVATION,
+    SETUP as PROGRAM_SETUP,
+    activated_program,
+    proposal_observation,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -33,7 +38,10 @@ STATE_OVERLAY = (
 
 AUTHORITY = load_script_module("state_authority", STATE_AUTHORITY_PATH)
 
-from tests.test_diff_disposition import awaiting_diff_program
+from tests.test_diff_disposition import (
+    awaiting_diff_program,
+    delete_setup_v2_awaiting_diff_program,
+)
 from tests.test_blocked_recovery import BLOCKED, block_request, implementing_program
 from tests.test_program_rollover import ROLLOVER, accepted_continuation_program
 
@@ -62,6 +70,198 @@ class ManagedLifecycleWriteTests(unittest.TestCase):
 
     def test_blocked_resume_is_a_supported_distinct_lifecycle_action(self) -> None:
         self.assertIn("resume-blocked-program", AUTHORITY.ACTION_NAMES)
+
+    def test_v2_delete_result_and_quarantine_tampering_requires_recovery(self) -> None:
+        fixture, program_root, observation = delete_setup_v2_awaiting_diff_program()
+        try:
+            authority_observation = PROGRAM_ACTIVATION._without_owned_program_paths(
+                program_root, observation
+            )
+            status_path = program_root / "state/status.json"
+            original_status = status_path.read_bytes()
+            status = json.loads(original_status)
+            transition = status["execution_transition_binding"]
+            baseline = json.loads(
+                (program_root / "increments/ARCHIVE-INDEX/execution-baseline.json").read_text()
+            )
+            binding = baseline["delete_quarantine_bindings"][0]
+            entry_path = program_root / binding["entry_path"]
+            receipt_path = program_root / binding["receipt_path"]
+            original_entry = entry_path.read_bytes()
+            original_receipt = receipt_path.read_bytes()
+
+            def reorder(value: dict[str, object]) -> None:
+                states = value["execution_transition_binding"]["product_path_states"]["ordered_path_states"]
+                states[0], states[1] = states[1], states[0]
+
+            def omit(value: dict[str, object]) -> None:
+                value["execution_transition_binding"]["product_path_states"]["ordered_path_states"].pop()
+
+            def stale_receipt_binding(value: dict[str, object]) -> None:
+                value["execution_transition_binding"]["product_path_states"]["delete_quarantine_bindings"][0]["receipt_path"] = "increments/ARCHIVE-INDEX/delete-quarantine/wrong.receipt.json"
+
+            def stale_remediation(value: dict[str, object]) -> None:
+                value["review_preparation_binding"] = {
+                    **value["review_preparation_binding"],
+                    "product_result_sha256": "0" * 64,
+                }
+
+            def stale_preparation_schema(value: dict[str, object]) -> None:
+                value["review_preparation_binding"] = {
+                    **value["review_preparation_binding"],
+                    "product_result_schema_version": "implementation-product-path-states/v1",
+                }
+
+            def stale_evidence_digest(value: dict[str, object]) -> None:
+                value["review_evidence_binding"] = {
+                    **value["review_evidence_binding"],
+                    "product_result_sha256": "0" * 64,
+                }
+
+            def stale_evidence_schema(value: dict[str, object]) -> None:
+                value["review_evidence_binding"] = {
+                    **value["review_evidence_binding"],
+                    "product_result_schema_version": "implementation-product-path-states/v1",
+                }
+
+            def stale_packet_digest(value: dict[str, object]) -> None:
+                value["review_packet_binding"] = {
+                    **value["review_packet_binding"],
+                    "product_result_sha256": "0" * 64,
+                }
+
+            def stale_packet_schema(value: dict[str, object]) -> None:
+                value["review_packet_binding"] = {
+                    **value["review_packet_binding"],
+                    "product_result_schema_version": "implementation-product-path-states/v1",
+                }
+
+            cases = (
+                ("reordered states", reorder, None, None),
+                ("omitted state", omit, None, None),
+                ("stale receipt binding", stale_receipt_binding, None, None),
+                ("stale remediation binding", stale_remediation, None, None),
+                ("stale preparation schema", stale_preparation_schema, None, "review preparation product result binding"),
+                ("stale evidence digest", stale_evidence_digest, None, "review evidence product result binding"),
+                ("stale evidence schema", stale_evidence_schema, None, "review evidence product result binding"),
+                ("stale packet digest", stale_packet_digest, None, "review packet product result binding"),
+                ("stale packet schema", stale_packet_schema, None, "review packet product result binding"),
+                ("wrong quarantine entry bytes", None, entry_path, None),
+                ("wrong receipt bytes", None, receipt_path, None),
+            )
+            for label, mutate_status, mutate_file, expected_issue in cases:
+                with self.subTest(case=label):
+                    status_path.write_bytes(original_status)
+                    entry_path.write_bytes(original_entry)
+                    receipt_path.write_bytes(original_receipt)
+                    if mutate_status is not None:
+                        value = json.loads(original_status)
+                        mutate_status(value)
+                        status_path.write_bytes(canonical_json(value))
+                    else:
+                        mutate_file.write_bytes(mutate_file.read_bytes() + b"tampered")
+                    issues = AUTHORITY.validate_state_authority(
+                        program_root, authority_observation
+                    )
+                    self.assertTrue(issues, label)
+                    if expected_issue is not None:
+                        self.assertTrue(
+                            any(expected_issue in issue for issue in issues), issues
+                        )
+        finally:
+            fixture.close()
+
+    def test_setup_v2_accepted_state_rejects_coordinated_review_downgrade(
+        self,
+    ) -> None:
+        fixture, program_root, observation = delete_setup_v2_awaiting_diff_program()
+        try:
+            from tests.test_diff_disposition import DIFF
+
+            candidate = DIFF.build_diff_acceptance_candidate(
+                program_root, observation
+            )
+            DIFF.persist_accept_stop(
+                program_root,
+                f"Accept and stop.\n\n{candidate.prompt}",
+                observation,
+            )
+            status_path = program_root / "state/status.json"
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            result_sha256 = status["execution_transition_binding"][
+                "product_path_states_sha256"
+            ]
+            preparation = status["review_preparation_binding"]
+            preparation["schema_version"] = (
+                "implementation-review-preparation/v1"
+            )
+            preparation["product_delta_sha256"] = result_sha256
+            preparation.pop("product_result_schema_version")
+            preparation.pop("product_result_sha256")
+            for label in ("review_evidence_binding", "review_packet_binding"):
+                status[label].pop("product_result_schema_version")
+                status[label].pop("product_result_sha256")
+            disposition = status["diff_disposition_binding"]
+            disposition["schema_version"] = (
+                "implementation-diff-disposition-binding/v1"
+            )
+            disposition["accepted_product_delta_sha256"] = result_sha256
+            disposition.pop("product_result_schema_version")
+            disposition.pop("product_result_sha256")
+            status_path.write_bytes(canonical_json(status))
+
+            issues = AUTHORITY.validate_state_authority(
+                program_root, observation
+            )
+
+            self.assertIn(
+                "accepted status family does not match controlling setup family",
+                issues,
+            )
+        finally:
+            fixture.close()
+
+
+    def test_setup_activation_records_cannot_substitute_across_setup_families(
+        self,
+    ) -> None:
+        cases = (
+            (False, "setup-activation-decision/v2"),
+            (True, "setup-activation-decision/v1"),
+        )
+        for delete_capable, foreign_schema in cases:
+            with self.subTest(delete_capable=delete_capable):
+                fixture = BootstrapFixture()
+                try:
+                    if delete_capable:
+                        fixture.configure_delete_setup_v2()
+                    else:
+                        fixture.configure_setup_v3()
+                    observation = proposal_observation(fixture)
+                    decision = PROGRAM_SETUP.adapt_setup_decision(
+                        fixture.candidate,
+                        "Yes",
+                        role="user",
+                        provenance="direct-user-message",
+                    )
+                    PROGRAM_ACTIVATION.activate_program(
+                        fixture.candidate, decision, observation
+                    )
+                    setup_path = (
+                        fixture.candidate / "state/setup-activation-decision.json"
+                    )
+                    setup = json.loads(setup_path.read_text(encoding="utf-8"))
+                    setup["schema_version"] = foreign_schema
+                    setup_path.write_bytes(canonical_json(setup))
+
+                    issues = AUTHORITY.validate_state_authority(
+                        fixture.candidate, observation
+                    )
+
+                    self.assertTrue(issues)
+                    self.assertIn("setup-activation decision", " ".join(issues))
+                finally:
+                    fixture.close()
 
     def test_status_brief_must_match_the_status_current_increment_grant(self) -> None:
         fixture = BootstrapFixture()
@@ -375,6 +575,515 @@ class RolloverHistoryAuthorityTests(unittest.TestCase):
             self.assertEqual(repository_snapshot(program_root), before)
         finally:
             fixture.close()
+
+
+class DescriptorRelativeWorkspacePathTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.workspace = Path(tempfile.mkdtemp(prefix="descriptor-workspace-"))
+        (self.workspace / "src").mkdir()
+        (self.workspace / "src/file.txt").write_bytes(b"descriptor-bound bytes\n")
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.workspace)
+
+    def test_inspector_returns_descriptor_bound_regular_file_snapshot(self) -> None:
+        snapshot = AUTHORITY.inspect_workspace_path(self.workspace, "src/file.txt")
+
+        self.assertEqual(snapshot.path, "src/file.txt")
+        self.assertTrue(snapshot.exists)
+        self.assertEqual(
+            snapshot.sha256,
+            hashlib.sha256(b"descriptor-bound bytes\n").hexdigest(),
+        )
+        self.assertEqual(snapshot.mode, "100644")
+        self.assertIsInstance(snapshot.device, int)
+        self.assertIsInstance(snapshot.inode, int)
+        self.assertEqual(snapshot.link_count, 1)
+
+    def test_inspector_returns_typed_absence_for_descriptor_relative_enoent(self) -> None:
+        snapshot = AUTHORITY.inspect_workspace_path(self.workspace, "src/missing.txt")
+
+        self.assertEqual(
+            snapshot,
+            AUTHORITY.WorkspacePathSnapshot(
+                path="src/missing.txt",
+                exists=False,
+                sha256=None,
+                mode=None,
+                device=None,
+                inode=None,
+                link_count=None,
+            ),
+        )
+
+    def test_inspector_rejects_unsafe_paths_and_file_kinds(self) -> None:
+        (self.workspace / "src/link.txt").symlink_to("file.txt")
+        (self.workspace / "src/dir").mkdir()
+        cases = (
+            "/src/file.txt",
+            "src/./file.txt",
+            "src/../file.txt",
+            "src\\file.txt",
+            ".git/config",
+            "src/link.txt",
+            "src/dir",
+        )
+        for path in cases:
+            with self.subTest(path=path):
+                with self.assertRaises(ValueError):
+                    AUTHORITY.inspect_workspace_path(self.workspace, path)
+
+    def test_inspector_rejects_hardlink_and_protected_identity_aliases(self) -> None:
+        alias = self.workspace / "src/alias.txt"
+        alias.hardlink_to(self.workspace / "src/file.txt")
+        alias_stat = alias.stat(follow_symlinks=False)
+        identity = (alias_stat.st_dev, alias_stat.st_ino)
+
+        with self.assertRaises(ValueError):
+            AUTHORITY.inspect_workspace_path(self.workspace, "src/alias.txt")
+        with self.assertRaises(ValueError):
+            AUTHORITY.inspect_workspace_path(
+                self.workspace,
+                "src/file.txt",
+                protected_identities=(identity,),
+            )
+
+    def test_inspector_rejects_protected_paths_and_git_components_but_allows_git_names(self) -> None:
+        (self.workspace / ".github").mkdir()
+        (self.workspace / ".github/workflow.git.txt").write_bytes(b"ok")
+        (self.workspace / "git-not-metadata.txt").write_bytes(b"ok")
+
+        self.assertTrue(
+            AUTHORITY.inspect_workspace_path(
+                self.workspace, ".github/workflow.git.txt"
+            ).exists
+        )
+        self.assertTrue(
+            AUTHORITY.inspect_workspace_path(
+                self.workspace, "git-not-metadata.txt"
+            ).exists
+        )
+        with self.assertRaises(ValueError):
+            AUTHORITY.inspect_workspace_path(
+                self.workspace,
+                "src/file.txt",
+                protected_paths=("src",),
+            )
+
+
+class DeleteQuarantineTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.workspace = Path(tempfile.mkdtemp(prefix="delete-workspace-"))
+        self.program_root = self.workspace / "implementation-programs/DELETE-PROGRAM"
+        self.program_root.mkdir(parents=True)
+        self.target = self.workspace / "legacy.ts"
+        self.target.write_bytes(b"bytes retained by quarantine\n")
+        write_json(
+            self.program_root / "manifest.json",
+            {
+                "schema_version": "implementation-program-manifest/v3",
+                "program_id": "DELETE-PROGRAM",
+                "program_revision": 7,
+                "logical_roles": {"status": "state/status.json"},
+                "increment_storage": {
+                    "schema_version": "implementation-increment-storage/v1",
+                    "root": "increments",
+                    "brief_filename": "brief.md",
+                    "exact_file_plan_filename": "exact-file-plan.md",
+                    "execution_baseline_filename": "execution-baseline.json",
+                    "review_evidence_filename": "review-evidence.json",
+                    "review_packet_filename": "review-packet.md",
+                    "handoff_filename": "handoff.md",
+                },
+            },
+        )
+        write_json(
+            self.program_root / "state/status.json",
+            {
+                "current_increment_id": "DELETE-1",
+                "current_increment_authority_binding": {"grant_id": "DELETE-GRANT"},
+            },
+        )
+        self.baseline = AUTHORITY.inspect_workspace_path(self.workspace, "legacy.ts")
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.workspace)
+
+    def allocate(self, baseline: dict[str, object]) -> object:
+        allocation = AUTHORITY.delete_quarantine_allocation(
+            self.program_root, self.workspace, "legacy.ts", baseline
+        )
+        baseline.update(
+            quarantine_root_path=allocation.root_path,
+            quarantine_root_device=allocation.root_device,
+            quarantine_root_inode=allocation.root_inode,
+            quarantine_root_mode=allocation.root_mode,
+            quarantine_root_owner=allocation.root_owner,
+        )
+        return allocation
+
+    def test_allocation_is_manifest_owned_and_deterministic(self) -> None:
+        first = AUTHORITY.delete_quarantine_allocation(
+            self.program_root,
+            self.workspace,
+            "legacy.ts",
+            {
+                **self.baseline.__dict__,
+                "program_id": "DELETE-PROGRAM",
+                "program_revision": 7,
+                "increment_id": "DELETE-1",
+            },
+        )
+        second = AUTHORITY.delete_quarantine_allocation(
+            self.program_root,
+            self.workspace,
+            "legacy.ts",
+            {
+                **self.baseline.__dict__,
+                "program_id": "DELETE-PROGRAM",
+                "program_revision": 7,
+                "increment_id": "DELETE-1",
+            },
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(first.root_path, "increments/DELETE-1/delete-quarantine")
+        self.assertNotIn("legacy.ts", first.quarantine_path)
+        self.assertFalse(Path(first.quarantine_path).is_absolute())
+        self.assertTrue((self.program_root / first.root_path).is_dir())
+
+    def test_direct_mutation_without_preallocated_root_fails_before_target_movement(self) -> None:
+        baseline = {
+            **self.baseline.__dict__,
+            "program_id": "DELETE-PROGRAM",
+            "program_revision": 7,
+            "increment_id": "DELETE-1",
+        }
+        with self.assertRaisesRegex(ValueError, "allocation is missing"):
+            AUTHORITY.quarantine_bound_regular_file(
+                self.program_root, self.workspace, "legacy.ts", baseline
+            )
+        self.assertTrue(self.target.exists())
+        self.assertEqual(self.target.read_bytes(), b"bytes retained by quarantine\n")
+        self.assertFalse((self.program_root / "increments").exists())
+
+    def test_bound_regular_file_moves_without_unlink_and_writes_receipt(self) -> None:
+        baseline = {
+            **self.baseline.__dict__,
+            "program_id": "DELETE-PROGRAM",
+            "program_revision": 7,
+            "increment_id": "DELETE-1",
+        }
+        self.allocate(baseline)
+        receipt = AUTHORITY.quarantine_bound_regular_file(
+            self.program_root,
+            self.workspace,
+            "legacy.ts",
+            baseline,
+        )
+
+        self.assertFalse(self.target.exists())
+        quarantine = self.program_root / receipt.quarantine_path
+        self.assertEqual(quarantine.read_bytes(), b"bytes retained by quarantine\n")
+        self.assertEqual(receipt.schema_version, AUTHORITY.DELETE_QUARANTINE_RECEIPT_SCHEMA_V1)
+        self.assertEqual(receipt.final_state, "absent")
+        self.assertEqual(receipt.baseline_sha256, self.baseline.sha256)
+        self.assertEqual(receipt.quarantine_sha256, self.baseline.sha256)
+        recovery = AUTHORITY.classify_delete_quarantine_recovery(
+            self.program_root, self.workspace, "legacy.ts", baseline
+        )
+        self.assertEqual(recovery.disposition, "resume")
+        self.assertEqual(recovery.receipt, receipt)
+
+    def test_symlinked_or_wrong_mode_quarantine_root_fails_before_move(self) -> None:
+        root = self.program_root / "increments/DELETE-1"
+        root.mkdir(parents=True)
+        outside = self.workspace / "outside"
+        outside.mkdir()
+        (root / "delete-quarantine").symlink_to(outside, target_is_directory=True)
+        baseline = {
+            **self.baseline.__dict__,
+            "program_id": "DELETE-PROGRAM",
+            "program_revision": 7,
+            "increment_id": "DELETE-1",
+        }
+        with self.assertRaises(ValueError):
+            AUTHORITY.quarantine_bound_regular_file(
+                self.program_root, self.workspace, "legacy.ts", baseline
+            )
+        self.assertEqual(self.target.read_bytes(), b"bytes retained by quarantine\n")
+
+    def test_relocated_program_root_ancestor_fails_before_move(self) -> None:
+        baseline = {
+            **self.baseline.__dict__,
+            "program_id": "DELETE-PROGRAM",
+            "program_revision": 7,
+            "increment_id": "DELETE-1",
+        }
+        self.allocate(baseline)
+        outside = Path(tempfile.mkdtemp(prefix="delete-program-outside-"))
+        self.addCleanup(shutil.rmtree, outside)
+        programs = self.workspace / "implementation-programs"
+        relocated = outside / programs.name
+        programs.rename(relocated)
+        programs.symlink_to(relocated, target_is_directory=True)
+
+        with self.assertRaises(ValueError):
+            AUTHORITY.quarantine_bound_regular_file(
+                self.program_root, self.workspace, "legacy.ts", baseline
+            )
+
+        self.assertEqual(self.target.read_bytes(), b"bytes retained by quarantine\n")
+        self.assertFalse(any((relocated / "DELETE-PROGRAM").glob("**/*.receipt.json")))
+
+    def test_program_root_ancestor_race_fails_before_move(self) -> None:
+        baseline = {
+            **self.baseline.__dict__,
+            "program_id": "DELETE-PROGRAM",
+            "program_revision": 7,
+            "increment_id": "DELETE-1",
+        }
+        self.allocate(baseline)
+        outside = Path(tempfile.mkdtemp(prefix="delete-program-race-"))
+        self.addCleanup(shutil.rmtree, outside)
+        programs = self.workspace / "implementation-programs"
+        relocated = outside / programs.name
+        original_revalidate = AUTHORITY._revalidate_held_delete_target
+
+        def relocate_program_root(held: object) -> None:
+            original_revalidate(held)
+            programs.rename(relocated)
+            programs.symlink_to(relocated, target_is_directory=True)
+
+        with mock.patch.object(
+            AUTHORITY,
+            "_revalidate_held_delete_target",
+            side_effect=relocate_program_root,
+        ):
+            with self.assertRaisesRegex(ValueError, "path changed before rename"):
+                AUTHORITY.quarantine_bound_regular_file(
+                    self.program_root, self.workspace, "legacy.ts", baseline
+                )
+
+        self.assertEqual(self.target.read_bytes(), b"bytes retained by quarantine\n")
+        self.assertFalse(any((relocated / "DELETE-PROGRAM").glob("**/*.receipt.json")))
+
+    def test_quarantine_destination_collision_fails_without_replacing_bytes(self) -> None:
+        baseline = {
+            **self.baseline.__dict__,
+            "program_id": "DELETE-PROGRAM",
+            "program_revision": 7,
+            "increment_id": "DELETE-1",
+        }
+        allocation = self.allocate(baseline)
+        destination = self.program_root / allocation.quarantine_path
+        destination.write_bytes(b"attacker bytes\n")
+        with self.assertRaises(ValueError):
+            AUTHORITY.quarantine_bound_regular_file(
+                self.program_root, self.workspace, "legacy.ts", baseline
+            )
+        self.assertEqual(self.target.read_bytes(), b"bytes retained by quarantine\n")
+        self.assertEqual(destination.read_bytes(), b"attacker bytes\n")
+        recovery = AUTHORITY.classify_delete_quarantine_recovery(
+            self.program_root, self.workspace, "legacy.ts", baseline
+        )
+        self.assertEqual(recovery.disposition, "recovery-required")
+
+        shutil.rmtree(self.workspace)
+        self.setUp()
+        root = self.program_root / "increments/DELETE-1"
+        root.mkdir(parents=True)
+        (root / "delete-quarantine").mkdir(mode=0o755)
+        with self.assertRaises(ValueError):
+            AUTHORITY.quarantine_bound_regular_file(
+                self.program_root, self.workspace, "legacy.ts", baseline
+            )
+        self.assertEqual(self.target.read_bytes(), b"bytes retained by quarantine\n")
+
+    def test_rename_failure_is_fail_closed_and_recovery_reports_exact_snapshots(self) -> None:
+        baseline = {
+            **self.baseline.__dict__,
+            "program_id": "DELETE-PROGRAM",
+            "program_revision": 7,
+            "increment_id": "DELETE-1",
+        }
+        self.allocate(baseline)
+        original_supports_dir_fd = AUTHORITY.os.supports_dir_fd
+        with mock.patch.object(
+            AUTHORITY.os, "rename", side_effect=OSError(18, "cross-device")
+        ):
+            with mock.patch.object(
+                AUTHORITY.os,
+                "supports_dir_fd",
+                frozenset((*original_supports_dir_fd, AUTHORITY.os.rename)),
+            ):
+                with self.assertRaisesRegex(
+                    OSError,
+                    AUTHORITY.DESCRIPTOR_RELATIVE_DELETE_UNSUPPORTED,
+                ):
+                    AUTHORITY.quarantine_bound_regular_file(
+                        self.program_root, self.workspace, "legacy.ts", baseline
+                    )
+        self.assertEqual(self.target.read_bytes(), b"bytes retained by quarantine\n")
+        recovery = AUTHORITY.classify_delete_quarantine_recovery(
+            self.program_root, self.workspace, "legacy.ts", baseline
+        )
+        self.assertEqual(recovery.disposition, "retry-ready")
+        self.assertTrue(recovery.source.exists)
+        self.assertFalse(recovery.quarantine.exists)
+
+    def test_missing_descriptor_primitives_fail_before_allocation(self) -> None:
+        baseline = {
+            **self.baseline.__dict__,
+            "program_id": "DELETE-PROGRAM",
+            "program_revision": 7,
+            "increment_id": "DELETE-1",
+        }
+        with mock.patch.object(AUTHORITY.os, "supports_dir_fd", frozenset()):
+            with self.assertRaisesRegex(
+                OSError,
+                AUTHORITY.DESCRIPTOR_RELATIVE_DELETE_UNSUPPORTED,
+            ):
+                AUTHORITY.quarantine_bound_regular_file(
+                    self.program_root, self.workspace, "legacy.ts", baseline
+                )
+        self.assertEqual(self.target.read_bytes(), b"bytes retained by quarantine\n")
+        self.assertFalse((self.program_root / "increments").exists())
+
+    def test_receipt_write_interrupt_leaves_adoption_ready_quarantine(self) -> None:
+        baseline = {
+            **self.baseline.__dict__,
+            "program_id": "DELETE-PROGRAM",
+            "program_revision": 7,
+            "increment_id": "DELETE-1",
+        }
+        self.allocate(baseline)
+        with mock.patch.object(
+            AUTHORITY, "_write_delete_receipt", side_effect=RuntimeError("interrupt")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "interrupt"):
+                AUTHORITY.quarantine_bound_regular_file(
+                    self.program_root, self.workspace, "legacy.ts", baseline
+                )
+        recovery = AUTHORITY.classify_delete_quarantine_recovery(
+            self.program_root, self.workspace, "legacy.ts", baseline
+        )
+        self.assertEqual(recovery.disposition, "receipt-adoption-ready")
+        self.assertFalse(recovery.source.exists)
+        self.assertTrue(recovery.quarantine.exists)
+        self.assertEqual(recovery.quarantine.sha256, self.baseline.sha256)
+
+    def test_receipt_adoption_rechecks_source_absence_before_publish(self) -> None:
+        baseline = {
+            **self.baseline.__dict__,
+            "program_id": "DELETE-PROGRAM",
+            "program_revision": 7,
+            "increment_id": "DELETE-1",
+        }
+        allocation = self.allocate(baseline)
+        moved = AUTHORITY.os.rename
+        workspace_fd = os.open(self.workspace, os.O_RDONLY)
+        root_fd = os.open(self.program_root / allocation.root_path, os.O_RDONLY)
+        try:
+            moved(
+                "legacy.ts",
+                allocation.quarantine_name,
+                src_dir_fd=workspace_fd,
+                dst_dir_fd=root_fd,
+            )
+        finally:
+            os.close(workspace_fd)
+            os.close(root_fd)
+        original_write = AUTHORITY._write_delete_receipt
+
+        def write_then_replace(*args: object, **kwargs: object) -> None:
+            original_write(*args, **kwargs)
+            self.target.write_bytes(b"replacement during adoption\n")
+
+        original_supports_dir_fd = AUTHORITY.os.supports_dir_fd
+        with mock.patch.object(AUTHORITY, "_write_delete_receipt", side_effect=write_then_replace):
+            with mock.patch.object(
+                AUTHORITY.os,
+                "supports_dir_fd",
+                frozenset((*original_supports_dir_fd, AUTHORITY.os.rename)),
+            ):
+                with self.assertRaisesRegex(ValueError, "replacement appeared after receipt adoption"):
+                    AUTHORITY.adopt_delete_quarantine_receipt(
+                        self.program_root, self.workspace, "legacy.ts", baseline
+                    )
+        self.assertTrue((self.program_root / allocation.receipt_path).exists())
+        self.assertEqual(self.target.read_bytes(), b"replacement during adoption\n")
+
+    def test_post_rename_source_replacement_is_recovery_required_without_loss(self) -> None:
+        baseline = {
+            **self.baseline.__dict__,
+            "program_id": "DELETE-PROGRAM",
+            "program_revision": 7,
+            "increment_id": "DELETE-1",
+        }
+        self.allocate(baseline)
+        real_rename = AUTHORITY.os.rename
+
+        def move_then_replace(*args: object, **kwargs: object) -> None:
+            real_rename(*args, **kwargs)
+            self.target.write_bytes(b"raced replacement\n")
+
+        original_supports_dir_fd = AUTHORITY.os.supports_dir_fd
+        with mock.patch.object(AUTHORITY.os, "rename", side_effect=move_then_replace):
+            with mock.patch.object(
+                AUTHORITY.os,
+                "supports_dir_fd",
+                frozenset((*original_supports_dir_fd, AUTHORITY.os.rename)),
+            ):
+                with self.assertRaisesRegex(ValueError, "replacement appeared"):
+                    AUTHORITY.quarantine_bound_regular_file(
+                        self.program_root, self.workspace, "legacy.ts", baseline
+                    )
+        recovery = AUTHORITY.classify_delete_quarantine_recovery(
+            self.program_root, self.workspace, "legacy.ts", baseline
+        )
+        self.assertEqual(recovery.disposition, "recovery-required")
+        self.assertTrue(recovery.source.exists)
+        self.assertTrue(recovery.quarantine.exists)
+        self.assertEqual(self.target.read_bytes(), b"raced replacement\n")
+
+    def test_wrong_receipt_and_quarantine_bytes_are_recovery_required(self) -> None:
+        baseline = {
+            **self.baseline.__dict__,
+            "program_id": "DELETE-PROGRAM",
+            "program_revision": 7,
+            "increment_id": "DELETE-1",
+        }
+        allocation = AUTHORITY.delete_quarantine_allocation(
+            self.program_root, self.workspace, "legacy.ts", baseline
+        )
+        quarantine = self.program_root / allocation.quarantine_path
+        quarantine.write_bytes(b"wrong bytes\n")
+        recovery = AUTHORITY.classify_delete_quarantine_recovery(
+            self.program_root, self.workspace, "legacy.ts", baseline
+        )
+        self.assertEqual(recovery.disposition, "recovery-required")
+
+        shutil.rmtree(self.workspace)
+        self.setUp()
+        baseline = {
+            **self.baseline.__dict__,
+            "program_id": "DELETE-PROGRAM",
+            "program_revision": 7,
+            "increment_id": "DELETE-1",
+        }
+        self.allocate(baseline)
+        receipt = AUTHORITY.quarantine_bound_regular_file(
+            self.program_root, self.workspace, "legacy.ts", baseline
+        )
+        receipt_file = self.program_root / receipt.quarantine_path.replace(
+            ".bin", ".receipt.json"
+        )
+        receipt_file.write_bytes(b"not a receipt\n")
+        recovery = AUTHORITY.classify_delete_quarantine_recovery(
+            self.program_root, self.workspace, "legacy.ts", baseline
+        )
+        self.assertEqual(recovery.disposition, "recovery-required")
 
 
 class DeferredMutationGuardTests(unittest.TestCase):

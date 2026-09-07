@@ -12,7 +12,10 @@ from contextlib import redirect_stdout
 from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
-from tests.program_bootstrap_support import BootstrapFixture
+from tests.program_bootstrap_support import (
+    BootstrapFixture,
+    canonical_compact_sha256,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -1096,6 +1099,39 @@ class SetupV3AuthorityTests(unittest.TestCase):
         issues = self.validate(AUTHORITY.PROPOSAL_VALIDATION_MODE)
         self.assertIn("setup_semantics digest mismatch", issues)
 
+    def test_setup_and_envelope_schema_families_cannot_be_mixed(self) -> None:
+        cases = (
+            (
+                "implementation-program-setup-semantics/v1",
+                "implementation-operation-envelope/v2",
+            ),
+            (
+                "implementation-program-setup-semantics/v2",
+                "implementation-operation-envelope/v1",
+            ),
+        )
+        for setup_schema, envelope_schema in cases:
+            with self.subTest(
+                setup_schema=setup_schema, envelope_schema=envelope_schema
+            ):
+                self.tearDown()
+                self.setUp()
+                manifest = self.fixture.load_json("manifest.json")
+                semantics = manifest["setup_semantics"]
+                semantics["schema_version"] = setup_schema
+                semantics["operation_envelope"]["schema_version"] = envelope_schema
+                manifest["setup_semantics_sha256"] = canonical_compact_sha256(
+                    semantics
+                )
+                self.fixture.write_json("manifest.json", manifest)
+
+                issues = self.validate(AUTHORITY.PROPOSAL_VALIDATION_MODE)
+
+                self.assertIn(
+                    "setup semantics and operation envelope schemas must be an exact supported pair",
+                    issues,
+                )
+
     def test_v3_cross_family_ledger_artifact_is_rejected(self) -> None:
         cases = (
             (
@@ -1126,6 +1162,17 @@ class SetupV3AuthorityTests(unittest.TestCase):
                 issues = self.validate(AUTHORITY.PROPOSAL_VALIDATION_MODE)
 
                 self.assertIn(expected_issue, issues)
+
+    def test_setup_v1_rejects_setup_v2_only_diff_approval(self) -> None:
+        approval_path = self.fixture.candidate / "state/approvals.jsonl"
+        approval_path.write_text(
+            '{"schema_version":"implementation-approval/v3"}\n',
+            encoding="utf-8",
+        )
+
+        issues = self.validate(AUTHORITY.PROPOSAL_VALIDATION_MODE)
+
+        self.assertIn("setup-v1 rejects v3 approval records", issues)
 
 
 if __name__ == "__main__":

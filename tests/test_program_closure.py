@@ -77,6 +77,9 @@ class ProgramClosureTests(unittest.TestCase):
             status = json.loads(status_path.read_text(encoding="utf-8"))
             evidence_sha256 = CLOSURE.sha256_file(evidence_path)
             status["review_evidence_binding"]["sha256"] = evidence_sha256
+            status["review_preparation_binding"]["evidence_sha256"] = (
+                evidence_sha256
+            )
             status["diff_disposition_binding"]["review_evidence_sha256"] = (
                 evidence_sha256
             )
@@ -134,6 +137,9 @@ class ProgramClosureTests(unittest.TestCase):
                     status = json.loads(status_path.read_text(encoding="utf-8"))
                     evidence_sha256 = CLOSURE.sha256_file(evidence_path)
                     status["review_evidence_binding"]["sha256"] = evidence_sha256
+                    status["review_preparation_binding"]["evidence_sha256"] = (
+                        evidence_sha256
+                    )
                     status["diff_disposition_binding"]["review_evidence_sha256"] = (
                         evidence_sha256
                     )

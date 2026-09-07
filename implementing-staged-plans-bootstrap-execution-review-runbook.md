@@ -1,6 +1,6 @@
 # Implementing Staged Plans — Bootstrap, Execution, and Review Runbook
 
-**Version boundary:** Plan A 0.1.1 plus Plan B 0.1.2
+**Version boundary:** Plan A 0.1.1, Plan B 0.1.2, plus PLUG-001 0.1.3
 **Purpose:** Operate the implemented multi-increment lifecycle without claiming
 unsupported program revision, supersession, or cancellation routes.
 
@@ -36,16 +36,19 @@ Review the source snapshot, traceability, proposed program, workspace
 observation, first brief, approval mode, and initial status. Then submit the one
 copy-ready launch prompt directly and without editing it.
 
-Activation appends or adopts these separate typed receipts in order:
+For manifest v3, activation appends or adopts these separate typed records in
+order:
 
-1. program approval;
-2. workspace-selection approval;
-3. first-increment grant; and
-4. active/preparing status last.
+1. setup decision;
+2. program approval;
+3. workspace-selection approval; and
+4. active/awaiting-first-increment status last.
 
-One prompt can carry the fully bound decision without collapsing the receipts.
-Only the direct submission is activation authority. A generated or quoted
-prompt that the user did not submit is not authority.
+The returned semantic handoff is navigation only. Its direct submission in a
+fresh task can append or adopt the first-increment grant and write
+active/preparing status last. Existing manifest-v2 proposals retain their
+byte-exact combined activation route. Only direct submission is authority; a
+generated or quoted prompt that the user did not submit is not authority.
 
 ## Before Production Modification
 
@@ -54,15 +57,25 @@ increment, user-owned work, and immutable manifest storage descriptors. The
 file map must include all required future lifecycle owners even though
 allocation does not authorize their use.
 
+The v1 setup/envelope family supports `Create`, `Modify`, and `Preserve`. The
+exact v2 family adds `Delete`. A Delete names one exact program-owned regular
+file and a descriptor-bound quarantine allocation inside the selected local
+repository. Git metadata, program/control paths, quarantine paths and held
+identities remain protected. A symlink, collision, source change, unsupported
+descriptor capability, or cross-device allocation stops before mutation.
+
 Under `approval:standard`, stop for exact plan approval. Under pre-approve and
 full-increment policy, omit only the routine plan pause. Every mode still needs
 the status-current increment grant, execution baseline, and plan-bound action
 authorization. Persist the baseline and authorization before authorized status.
 Authorized status permits no product delta.
 
-Implement only the exact product map. Preserve all baseline user work. Advance
-to reviewing only when the observed product delta exactly matches its status
-binding.
+Implement only the exact product map. Preserve all baseline user work. V2
+Delete holds the source and quarantine identities, atomically renames on the
+same filesystem, and does not unlink, overwrite, or restore either name. Its
+typed result is `absent`, with no product digest, plus an exact receipt bound to
+retained quarantine bytes. Advance to reviewing only when the observed product
+result exactly matches its status binding.
 
 ## Prepare Review and Diff Disposition
 
@@ -71,6 +84,11 @@ and test evidence. Preserve those reports. Typed review preparation validates
 their identities, scopes, findings, risk predicates, product-delta binding, and
 fresh final verification. It creates review evidence, then the review packet,
 then writes verified and awaiting-diff statuses in order.
+
+For setup/envelope v2, transition, review evidence, review packet, and diff
+disposition reproduce the ordered product-path result and quarantine receipts.
+The uniquely ordered approval-v3 binds that exact family; omission, reordering,
+reappearance, receipt drift, quarantine-byte drift, or legacy mixing stops.
 
 Every new-model typed exact disposition preserves the Plan A stop choice.
 Already persisted legacy programs using `approval:full` or `approval:full-diff`
@@ -94,18 +112,22 @@ rendering another exact disposition.
 
 An accepted-stop status never continues by replay. A later fresh task uses the
 distinct `accepted-state-continuation` prompt derived from current status and the
-one canonical successor. The handoff is navigation only. Persist or adopt the
-rollover action, successor grant, handoff, successor brief, rollover record, and
-successor status in that order. Status last binds
+one canonical successor. The existing handoff is reused as navigation only;
+no addendum is authored. Persist or adopt the result-bound action-v3, successor
+grant, handoff, successor brief, rollover record, and successor status in that
+order. Status last binds
 `current_increment_authority_binding` and leaves the manifest byte-identical.
 
 ## Authorize a Successor Increment
 
 Every successor repeats Plan A's exact-plan allocation and materialization
-contract. The successor baseline uses the existing `inherited_paths` field only
-for accepted product bytes proven by the canonical rollover chain and owned as
-`Modify` or `Preserve`. It keeps those bytes separate from user-work baselines.
-All first-increment and frozen 0.1.1 baselines retain `inherited_paths: []`.
+contract. The successor baseline uses `inherited_paths` only for ordered product
+states proven by the canonical rollover chain and exactly owned by the current
+plan. An inherited Delete remains an absent tombstone with its quarantine
+receipt. Only an explicit successor `Create` may recreate that path; it removes
+the active receipt binding but preserves historical quarantine evidence. Keep
+inherited state separate from user-work baselines. All first-increment and
+frozen 0.1.1 baselines retain `inherited_paths: []`.
 
 ## Resolve a Blocked Program
 
@@ -149,9 +171,9 @@ After interruption:
 
 ## Unsupported routes
 
-Version 0.1.2 implements typed successor rollover and blocked recovery. It does
-not implement program revision, supersession, or cancellation, and it does not
-reactivate legacy automatic rollover.
+Version 0.1.3 implements exact regular-file Delete, typed successor rollover,
+and blocked recovery. It does not implement program revision, supersession, or
+cancellation, and it does not reactivate legacy automatic rollover.
 
 | Requested operation | Mandatory result |
 | --- | --- |
@@ -164,9 +186,14 @@ These are persistence-sink guards, not advisory prose. Preserve accepted legacy
 state and historical terminal records as readable evidence. Do not edit status
 or invoke a generic transition to bypass the stop.
 
+PLUG-001 preserves quarantine and has no secure-erasure claim. It does not own
+requirement-specific accepted-chain evidence, quarantine disposal, or terminal closure.
+PLUG-002 must add and authorize all three before any disposal or final
+Delete-completion claim.
+
 ## Review checklist
 
-Before accepting the 0.1.2 candidate, verify:
+Before accepting the 0.1.3 candidate, verify:
 
 1. the source, branch, HEAD, workspace, and dirty-state bindings are current;
 2. every product change appears in the exact plan and execution baseline;
@@ -180,12 +207,14 @@ Before accepting the 0.1.2 candidate, verify:
 8. Plan A closure is final-only and uses only manifest-derived paths;
 9. interruption tests cover every durable write boundary;
 10. unsupported mutation calls preserve every repository byte; and
-11. no test or static document check is described as proof of live provider,
-   deployment, accessibility, human-review, or production behavior.
+11. every Delete remains bound to an exact absent result, retained quarantine
+    bytes, receipt, rollover tombstone, and explicit-recreation rule; and
+12. no test or static document check is described as proof of live provider,
+    deployment, accessibility, human-review, or production behavior.
 
 ## Verification commands
 
-Run focused checks while implementing each task. On the final unchanged 0.1.2
+Run focused checks while implementing each task. On the final unchanged 0.1.3
 candidate, run package validation and the full deterministic suite exactly once,
 then obtain one bounded independent material review. A review finding is repair
 authority only when the controller validates it as material and in scope.

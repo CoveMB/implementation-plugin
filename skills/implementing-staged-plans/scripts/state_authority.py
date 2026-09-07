@@ -3,6 +3,7 @@
 
 import argparse
 import ctypes as _ctypes
+import errno
 import hashlib
 import json
 import os
@@ -14,8 +15,22 @@ from collections.abc import Sequence
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
+
+_ORIGINAL_OS_RENAME = os.rename
+_LIBC = _ctypes.CDLL(None, use_errno=True)
+_RENAMEATX_NP = getattr(_LIBC, "renameatx_np", None)
+if _RENAMEATX_NP is not None:
+    _RENAMEATX_NP.argtypes = [
+        _ctypes.c_int,
+        _ctypes.c_char_p,
+        _ctypes.c_int,
+        _ctypes.c_char_p,
+        _ctypes.c_uint,
+    ]
+    _RENAMEATX_NP.restype = _ctypes.c_int
+_RENAME_EXCL = 0x00000004
 
 try:
     import fcntl as _fcntl
@@ -60,6 +75,34 @@ STATUS_SCHEMAS = frozenset({STATUS_SCHEMA, STATUS_SCHEMA_V2, STATUS_SCHEMA_V3})
 WORKSPACE_SCHEMA = "implementation-workspace/v1"
 WORKSPACE_SCHEMA_V2 = "implementation-workspace/v2"
 WORKSPACE_SCHEMAS = frozenset({WORKSPACE_SCHEMA, WORKSPACE_SCHEMA_V2})
+EXACT_FILE_MAP_SCHEMA_V2 = "implementation-exact-file-map/v2"
+EXECUTION_BASELINE_SCHEMA_V2 = "implementation-execution-baseline/v2"
+PRODUCT_PATH_STATES_SCHEMA_V2 = "implementation-product-path-states/v2"
+EXECUTION_TRANSITION_SCHEMA_V2 = "implementation-execution-transition/v2"
+APPROVAL_SCHEMA_V3 = "implementation-approval/v3"
+SETUP_V2_DIFF_APPROVAL_FIELDS = (
+    "schema_version", "event_id", "type", "decision", "scope",
+    "diff_decision", "checkpoint_id", "base_seed_sha256",
+    "submitted_prompt_sha256", "program_id", "program_revision",
+    "source_id", "source_sha256", "program_sha256",
+    "semantic_requirements_sha256", "increment_id", "brief_sha256",
+    "exact_file_plan_sha256", "approval_mode", "workspace",
+    "review_evidence_sha256", "review_packet_sha256",
+    "verification_sha256", "execution_baseline_sha256",
+    "product_result_schema_version", "product_result_sha256",
+    "setup_activation_decision_id", "setup_activation_decision_sha256",
+    "increment_grant_id", "increment_grant_sha256",
+    "source_gate_satisfaction",
+)
+SETUP_V2_CONTINUE_APPROVAL_FIELDS = (
+    *SETUP_V2_DIFF_APPROVAL_FIELDS,
+    "successor_increment_id",
+    "successor_authority_projection_sha256",
+)
+DELETE_QUARANTINE_RECEIPT_SCHEMA_V1 = "implementation-delete-quarantine-receipt/v1"
+DESCRIPTOR_RELATIVE_DELETE_UNSUPPORTED = (
+    "descriptor-relative no-follow Delete quarantine is unsupported on this platform"
+)
 APPROVAL_SCHEMA = "implementation-approval/v1"
 ACTION_AUTHORIZATION_SCHEMA = "implementation-action-authorization/v1"
 SETUP_ONLY_STATUS_SCHEMAS = frozenset(
@@ -71,6 +114,7 @@ SETUP_ONLY_STATUS_SCHEMAS = frozenset(
         "implementation-increment-grant/v2",
         "implementation-setup-activation-status-binding/v1",
         "setup-activation-decision/v1",
+        "setup-activation-decision/v2",
         "source-gate-decision/v1",
         "source-gate-satisfaction/v1",
     }
@@ -235,6 +279,62 @@ class ExactFileMap:
     preserve: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class ExactFileMapV2:
+    create: tuple[str, ...]
+    modify: tuple[str, ...]
+    delete: tuple[str, ...]
+    preserve: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class WorkspacePathSnapshot:
+    path: str
+    exists: bool
+    sha256: str | None
+    mode: str | None
+    device: int | None
+    inode: int | None
+    link_count: int | None
+
+
+@dataclass(frozen=True)
+class DeleteQuarantineReceipt:
+    schema_version: str
+    program_id: str
+    program_revision: int
+    increment_id: str
+    path: str
+    baseline_sha256: str
+    device: int
+    inode: int
+    quarantine_path: str
+    quarantine_sha256: str
+    final_state: str
+
+
+@dataclass(frozen=True)
+class DeleteQuarantineAllocation:
+    root_path: str
+    quarantine_path: str
+    receipt_path: str
+    quarantine_name: str
+    receipt_name: str
+    root_device: int | None
+    root_inode: int | None
+    root_mode: str | None
+    root_owner: int | None
+
+
+@dataclass(frozen=True)
+class DeleteQuarantineRecovery:
+    disposition: str
+    source: WorkspacePathSnapshot
+    quarantine: WorkspacePathSnapshot
+    receipt: DeleteQuarantineReceipt | None
+    issues: tuple[str, ...]
+
+
 def _workspace_relative_path(workspace_root: Path, path: Path) -> str:
     workspace = Path(workspace_root).resolve()
     resolved = Path(path).resolve(strict=False)
@@ -296,6 +396,8 @@ def required_future_lifecycle_writes(
     program_root: Path,
     workspace_root: Path,
     increment_id: str,
+    *,
+    delete_quarantine_bindings: Sequence[dict[str, object]] = (),
 ) -> tuple[ManagedWriteRequirement, ...]:
     """Derive disposition-aware current and future control-plane allocations."""
     if (
@@ -434,6 +536,20 @@ def required_future_lifecycle_writes(
                     _workspace_relative_path(workspace_root, path), "Create"
                 )
             )
+    for binding in delete_quarantine_bindings:
+        if not isinstance(binding, dict):
+            raise ValueError("Delete quarantine binding must be an object")
+        for field in ("root_path", "entry_path", "receipt_path"):
+            value = binding.get(field)
+            if not isinstance(value, str):
+                raise ValueError("Delete quarantine binding paths must be strings")
+            _descriptor_relative_path(value)
+            requirements.append(
+                ManagedWriteRequirement(
+                    _workspace_relative_path(workspace_root, root / value),
+                    "Control",
+                )
+            )
     return tuple(sorted(requirements, key=lambda item: (item.path, item.disposition)))
 
 
@@ -447,8 +563,13 @@ def validate_required_managed_file_map(
         "Modify": set(file_map.modify),
         "Preserve": set(file_map.preserve),
     }
+    delete_paths = getattr(file_map, "delete", None)
+    if delete_paths is not None:
+        declared["Delete"] = set(delete_paths)
     issues: list[str] = []
     for requirement in required:
+        if requirement.disposition == "Control":
+            continue
         if requirement.disposition not in declared:
             issues.append(
                 f"unsupported managed-write disposition {requirement.disposition!r}"
@@ -1223,6 +1344,7 @@ def _validate_setup_program_state(
     program_root: Path,
     manifest: dict[str, object],
     status: dict[str, object],
+    observation: RepositoryObservation | None = None,
 ) -> list[str]:
     """Validate the two v3 bootstrap states and their exact authority family."""
     issues: list[str] = []
@@ -1497,6 +1619,12 @@ def _validate_setup_program_state(
             if not isinstance(disposition, dict):
                 issues.append("v3 accepted status lacks diff disposition binding")
             else:
+                expected_diff_approval_schema = (
+                    APPROVAL_SCHEMA_V3
+                    if disposition.get("schema_version")
+                    == "implementation-diff-disposition-binding/v2"
+                    else "implementation-approval/v2"
+                )
                 approvals_path, approval_path_issues = resolve_managed_path(
                     program_root,
                     logical_roles.get("approvals"),
@@ -1521,7 +1649,7 @@ def _validate_setup_program_state(
                         diff_matches
                         and (
                             diff_matches[0].get("schema_version")
-                            != "implementation-approval/v2"
+                            != expected_diff_approval_schema
                             or diff_matches[0].get("source_gate_satisfaction")
                             != diff_gate
                             or diff_matches[0].get("increment_grant_id")
@@ -1529,6 +1657,185 @@ def _validate_setup_program_state(
                         )
                     ):
                         issues.append("v3 diff approval authority binding mismatch")
+                    elif expected_diff_approval_schema == APPROVAL_SCHEMA_V3:
+                        approval = diff_matches[0]
+                        diff_decision = disposition.get("decision")
+                        raw_approval = None
+                        try:
+                            for line in approvals_path.read_text(encoding="utf-8").splitlines():
+                                candidate_record = json.loads(line)
+                                if (
+                                    isinstance(candidate_record, dict)
+                                    and candidate_record.get("event_id")
+                                    == disposition.get("approval_event_id")
+                                ):
+                                    raw_approval = candidate_record
+                                    break
+                        except (OSError, UnicodeError, json.JSONDecodeError):
+                            raw_approval = None
+                        if (
+                            raw_approval is None
+                            or tuple(raw_approval)
+                            != (
+                                SETUP_V2_CONTINUE_APPROVAL_FIELDS
+                                if diff_decision == "accept-continue"
+                                else SETUP_V2_DIFF_APPROVAL_FIELDS
+                            )
+                        ):
+                            issues.append("v3 diff approval fields or order mismatch")
+                        if (
+                            approval.get("product_result_schema_version")
+                            != disposition.get("product_result_schema_version")
+                            or approval.get("product_result_sha256")
+                            != disposition.get("product_result_sha256")
+                            or "accepted_product_delta_sha256" in approval
+                        ):
+                            issues.append("v3 diff approval product result binding mismatch")
+                        expected_approval_values = {
+                            "schema_version": APPROVAL_SCHEMA_V3,
+                            "event_id": disposition.get("approval_event_id"),
+                            "type": "increment-diff-approval",
+                            "decision": "approved",
+                            "scope": [
+                                (
+                                    "accept the bound current increment and continue "
+                                    "to the bound successor"
+                                    if diff_decision == "accept-continue"
+                                    else "accept the bound current increment and stop"
+                                )
+                            ],
+                            "diff_decision": diff_decision,
+                            "checkpoint_id": disposition.get("checkpoint_id"),
+                            "base_seed_sha256": disposition.get("base_seed_sha256"),
+                            "program_id": status.get("program_id"),
+                            "program_revision": status.get("program_revision"),
+                            "source_id": status.get("source_binding", {}).get("source_id")
+                            if isinstance(status.get("source_binding"), dict)
+                            else None,
+                            "source_sha256": status.get("source_binding", {}).get("sha256")
+                            if isinstance(status.get("source_binding"), dict)
+                            else None,
+                            "program_sha256": status.get("program_binding", {}).get("sha256")
+                            if isinstance(status.get("program_binding"), dict)
+                            else None,
+                            "semantic_requirements_sha256": status.get("program_binding", {}).get(
+                                "semantic_requirements_sha256"
+                            )
+                            if isinstance(status.get("program_binding"), dict)
+                            else None,
+                            "increment_id": status.get("current_increment_id"),
+                            "brief_sha256": status.get("brief_binding", {}).get("sha256")
+                            if isinstance(status.get("brief_binding"), dict)
+                            else None,
+                            "exact_file_plan_sha256": status.get(
+                                "approved_exact_file_plan_sha256"
+                            ),
+                            "approval_mode": status.get("approval_mode"),
+                            "review_evidence_sha256": status.get(
+                                "review_evidence_binding", {}
+                            ).get("sha256")
+                            if isinstance(status.get("review_evidence_binding"), dict)
+                            else None,
+                            "review_packet_sha256": status.get(
+                                "review_packet_binding", {}
+                            ).get("sha256")
+                            if isinstance(status.get("review_packet_binding"), dict)
+                            else None,
+                            "execution_baseline_sha256": baseline_binding.get("sha256")
+                            if isinstance(baseline_binding, dict)
+                            else None,
+                            "setup_activation_decision_id": status.get(
+                                "setup_activation_binding", {}
+                            ).get("setup_activation_decision_id")
+                            if isinstance(status.get("setup_activation_binding"), dict)
+                            else None,
+                            "setup_activation_decision_sha256": status.get(
+                                "setup_activation_binding", {}
+                            ).get("setup_activation_decision_sha256")
+                            if isinstance(status.get("setup_activation_binding"), dict)
+                            else None,
+                            "increment_grant_id": authority.get("grant_id"),
+                            "increment_grant_sha256": authority.get("grant_sha256"),
+                        }
+                        workspace_binding = status.get("workspace_binding")
+                        if observation is not None:
+                            expected_approval_values["workspace"] = {
+                                "path": observation.path,
+                                "branch": observation.branch,
+                                "base_commit": observation.base_commit,
+                                "head_commit": observation.head_commit,
+                            }
+                        evidence_binding = status.get("review_evidence_binding")
+                        if isinstance(evidence_binding, dict):
+                            evidence_path, _ = resolve_managed_path(
+                                program_root,
+                                evidence_binding.get("path"),
+                                role="status v2 review evidence",
+                            )
+                            if evidence_path is not None:
+                                evidence_value, _ = load_json_object(evidence_path)
+                                if isinstance(evidence_value, dict):
+                                    final_verification = evidence_value.get(
+                                        "final_verification"
+                                    )
+                                    expected_approval_values["verification_sha256"] = hashlib.sha256(
+                                        _canonical_json_bytes(final_verification)
+                                    ).hexdigest()
+                        try:
+                            from task_prompt import render_exact_prompt
+
+                            command = {
+                                "schema_version": "implementation-diff-disposition-command/v2",
+                                "decision": diff_decision,
+                                "base_seed_sha256": disposition.get("base_seed_sha256"),
+                                "checkpoint_id": disposition.get("checkpoint_id"),
+                                "approval_event_id": disposition.get("approval_event_id"),
+                                "accepted_status_sha256": hashlib.sha256(
+                                    _canonical_json_bytes(status)
+                                ).hexdigest(),
+                            }
+                            if diff_decision == "accept-continue":
+                                command["successor_authority_projection"] = (
+                                    disposition.get("successor_authority_projection")
+                                )
+                            else:
+                                for field in (
+                                    "program_id", "program_revision", "increment_id",
+                                    "prior_status_sha256", "prior_status_sequence",
+                                    "decision", "review_evidence_sha256",
+                                    "review_packet_sha256", "verification_sha256",
+                                    "exact_file_plan_sha256", "execution_baseline_sha256",
+                                    "product_result_schema_version", "product_result_sha256",
+                                ):
+                                    if field in disposition:
+                                        command[field] = disposition[field]
+                            expected_approval_values["submitted_prompt_sha256"] = hashlib.sha256(
+                                render_exact_prompt(command).encode("utf-8")
+                            ).hexdigest()
+                        except (ImportError, KeyError, TypeError, ValueError):
+                            expected_approval_values["submitted_prompt_sha256"] = None
+                        expected_approval_values["source_gate_satisfaction"] = diff_gate
+                        if diff_decision == "accept-continue":
+                            projection = disposition.get(
+                                "successor_authority_projection"
+                            )
+                            expected_approval_values["successor_increment_id"] = (
+                                disposition.get("successor_increment_id")
+                            )
+                            expected_approval_values[
+                                "successor_authority_projection_sha256"
+                            ] = (
+                                hashlib.sha256(
+                                    _canonical_json_bytes(projection)
+                                ).hexdigest()
+                                if isinstance(projection, dict)
+                                else None
+                            )
+                        if any(
+                            approval.get(key) != expected
+                            for key, expected in expected_approval_values.items()
+                        ):
+                            issues.append("v3 diff approval deterministic binding mismatch")
             if effective_program_state == "closed":
                 command = status.get("closure_command_binding")
                 closure_gate = None
@@ -1753,7 +2060,9 @@ def validate_state(
                 )
             except ImportError as error:
                 issues.append(str(error))
-        issues.extend(_validate_setup_program_state(program_root, manifest, status))
+        issues.extend(
+            _validate_setup_program_state(program_root, manifest, status, observation)
+        )
         return sorted(set(issues))
     if manifest.get("schema_version") == NEW_PROGRAM_MANIFEST_SCHEMA:
         if status.get("program_state") == "blocked" or status.get(
@@ -2063,6 +2372,75 @@ def decide_action_authorization(
     return AuthorizationDecision(True, authorization_id, ())
 
 
+def _product_v2_result_matches_baseline(baseline: object, product: object) -> bool:
+    """Reject self-consistent v2 results whose paths or operations leave the baseline."""
+    protected = set(getattr(baseline, "protected_control_allocations", ()))
+    expected: list[tuple[str, str]] = []
+    for operation, paths in (
+        ("Create", getattr(baseline.file_map, "create", ())),
+        ("Modify", getattr(baseline.file_map, "modify", ())),
+        ("Delete", getattr(baseline.file_map, "delete", ())),
+        ("Preserve", getattr(baseline.file_map, "preserve", ())),
+    ):
+        expected.extend((path, operation) for path in paths if path not in protected)
+    states = getattr(product, "ordered_path_states", ())
+    if [state.path for state in states] != [path for path, _ in expected]:
+        return False
+    expected_by_path = dict(expected)
+    baseline_by_path = {item["path"]: item for item in baseline.path_baselines}
+    for state in states:
+        operation = expected_by_path[state.path]
+        if operation == "Delete":
+            if state.operation != "Delete" or state.exists:
+                return False
+            continue
+        if state.operation not in {"", operation}:
+            return False
+        expected_snapshot = baseline_by_path[state.path]["snapshot"]
+        if operation == "Preserve" and (
+            state.exists != expected_snapshot.exists
+            or state.sha256 != expected_snapshot.sha256
+            or state.mode != expected_snapshot.mode
+            or state.device != expected_snapshot.device
+            or state.inode != expected_snapshot.inode
+            or state.link_count != expected_snapshot.link_count
+        ):
+            return False
+        if operation == "Modify" and not state.exists:
+            return False
+    binding_by_path = {item["path"]: item for item in baseline.delete_quarantine_bindings}
+    for binding in getattr(product, "delete_quarantine_bindings", ()):
+        expected_binding = binding_by_path.get(binding.get("path"))
+        if expected_binding is None or binding.get("receipt_path") != expected_binding.get("receipt_path"):
+            return False
+    return True
+
+
+def _valid_v2_remediation_initial_result(binding: object) -> bool:
+    """Bind typed remediation history to its original reviewed candidate."""
+    if not isinstance(binding, dict):
+        return False
+    try:
+        from repository_preparation import product_path_states_v2_from_value
+
+        product = product_path_states_v2_from_value(
+            binding["initial_product_result"]
+        )
+    except (ImportError, KeyError, TypeError, ValueError):
+        return False
+    reports = binding.get("initial_reports")
+    return (
+        product.sha256 == binding.get("initial_product_result_sha256")
+        and isinstance(reports, list)
+        and bool(reports)
+        and all(
+            isinstance(report, dict)
+            and report.get("reviewed_candidate_sha256") == product.sha256
+            for report in reports
+        )
+    )
+
+
 def validate_state_authority(
     program_root: Path, observation: RepositoryObservation
 ) -> list[str]:
@@ -2180,10 +2558,20 @@ def validate_state_authority(
                             REPOSITORY_INSPECTION_SCHEMA,
                             RepositoryInspection,
                             execution_baseline_from_value,
+                            execution_baseline_v2_from_value,
                             validate_execution_workspace,
+                            validate_execution_workspace_v2,
                         )
-
-                        baseline = execution_baseline_from_value(baseline_value)
+                        is_v2_baseline = (
+                            isinstance(baseline_value, dict)
+                            and baseline_value.get("schema_version")
+                            == EXECUTION_BASELINE_SCHEMA_V2
+                        )
+                        baseline = (
+                            execution_baseline_v2_from_value(baseline_value)
+                            if is_v2_baseline
+                            else execution_baseline_from_value(baseline_value)
+                        )
                     except (ImportError, ValueError) as error:
                         issues.append(str(error))
                     else:
@@ -2201,19 +2589,49 @@ def validate_state_authority(
                             "current_increment_authority_binding"
                         ):
                             issues.append("execution baseline grant binding mismatch")
-                        inspection = RepositoryInspection(
-                            schema_version=REPOSITORY_INSPECTION_SCHEMA,
-                            observation=observation,
-                            git_directory="",
-                            git_common_directory="",
-                            selected_base_is_ancestor=True,
-                            status_format="porcelain-v2-z",
+                        setup_semantics = manifest.get("setup_semantics")
+                        setup_envelope = (
+                            setup_semantics.get("operation_envelope")
+                            if isinstance(setup_semantics, dict)
+                            else None
                         )
-                        assessment = validate_execution_workspace(
-                            root,
-                            baseline,
-                            inspection,
-                            increment_state=str(status["current_increment_state"]),
+                        is_v2_setup = (
+                            isinstance(setup_semantics, dict)
+                            and setup_semantics.get("schema_version")
+                            == "implementation-program-setup-semantics/v2"
+                            and isinstance(setup_envelope, dict)
+                            and setup_envelope.get("schema_version")
+                            == "implementation-operation-envelope/v2"
+                        )
+                        if is_v2_baseline != is_v2_setup:
+                            issues.append("execution v2 baseline/setup/envelope family mismatch")
+                        from repository_preparation import inspect_repository
+
+                        inspection = inspect_repository(
+                            Path(observation.path), observation.base_commit
+                        )
+                        inspection = replace(inspection, observation=observation)
+                        protected_paths, protected_identities = descriptor_protection_context(
+                            Path(observation.path),
+                            program_root=root,
+                            inspection=inspection,
+                        )
+                        assessment = (
+                            validate_execution_workspace_v2(
+                                root,
+                                baseline,
+                                inspection,
+                                increment_state=str(status["current_increment_state"]),
+                                protected_paths=protected_paths,
+                                protected_identities=protected_identities,
+                            )
+                            if is_v2_baseline
+                            else validate_execution_workspace(
+                                root,
+                                baseline,
+                                inspection,
+                                increment_state=str(status["current_increment_state"]),
+                            )
                         )
                         issues.extend(assessment.issues)
                         execution_transition = status.get(
@@ -2248,7 +2666,49 @@ def validate_state_authority(
                                 if isinstance(execution_authorization, dict)
                                 else None
                             )
-                            transition_valid = (
+                            if is_v2_baseline:
+                                from repository_preparation import product_path_states_v2_value
+
+                                expected_product = product_path_states_v2_value(assessment.product_states)
+                                persisted_product = execution_transition.get("product_path_states") if isinstance(execution_transition, dict) else None
+                                persisted_product_valid = False
+                                if persisted_product is not None:
+                                    try:
+                                        from repository_preparation import product_path_states_v2_from_value
+
+                                        parsed_product = product_path_states_v2_from_value(persisted_product)
+                                        persisted_product_valid = (
+                                            parsed_product.sha256
+                                            == execution_transition.get("product_path_states_sha256")
+                                            and _product_v2_result_matches_baseline(baseline, parsed_product)
+                                        )
+                                    except (ImportError, ValueError):
+                                        persisted_product_valid = False
+                                transition_valid = (
+                                    isinstance(execution_transition, dict)
+                                    and execution_transition.get("schema_version") == EXECUTION_TRANSITION_SCHEMA_V2
+                                    and execution_transition.get("prior_increment_state") in allowed_prior_states
+                                    and execution_transition.get("target_increment_state") == expected_target
+                                    and execution_transition.get("authorization_id") == authorization_id
+                                    and isinstance(execution_transition.get("prior_status_sha256"), str)
+                                    and len(execution_transition["prior_status_sha256"]) == 64
+                                    and persisted_product_valid
+                                    and (
+                                        current_increment_state in {
+                                            "implementing",
+                                            "remediating",
+                                        }
+                                        or (
+                                            execution_transition.get("product_path_states_sha256")
+                                            == assessment.product_states.sha256
+                                            and execution_transition.get("product_path_states")
+                                            == expected_product
+                                        )
+                                    )
+                                    and "product_delta_sha256" not in execution_transition
+                                )
+                            else:
+                                transition_valid = (
                                 isinstance(execution_transition, dict)
                                 and execution_transition.get("schema_version")
                                 == "implementation-execution-transition/v1"
@@ -2286,7 +2746,7 @@ def validate_state_authority(
                                     )
                                     == assessment.product_delta_sha256
                                 )
-                            )
+                                )
                             if transition_valid:
                                 event_seed = {
                                     "program_id": status["program_id"],
@@ -2303,11 +2763,17 @@ def validate_state_authority(
                                         "prior_increment_state"
                                     ],
                                     "target_increment_state": expected_target,
-                                    "product_delta_sha256": execution_transition[
-                                        "product_delta_sha256"
-                                    ],
                                     "authorization_id": authorization_id,
                                 }
+                                event_seed[
+                                    "product_path_states_sha256"
+                                    if is_v2_baseline
+                                    else "product_delta_sha256"
+                                ] = execution_transition[
+                                    "product_path_states_sha256"
+                                    if is_v2_baseline
+                                    else "product_delta_sha256"
+                                ]
                                 if (
                                     execution_transition.get(
                                         "prior_increment_state"
@@ -2330,7 +2796,8 @@ def validate_state_authority(
                                     "execution transition binding is invalid"
                                 )
                         if (
-                            status.get("current_increment_state")
+                            not is_v2_baseline
+                            and status.get("current_increment_state")
                             in {
                                 "reviewing",
                                 "verified",
@@ -2371,13 +2838,24 @@ def validate_state_authority(
                                 post_remediation_transition
                                 and isinstance(remediation_history, dict)
                                 and remediation_history.get("schema_version")
-                                == "implementation-review-remediation/v1"
+                                == (
+                                    "implementation-review-remediation/v2"
+                                    if is_v2_baseline
+                                    else "implementation-review-remediation/v1"
+                                )
                                 and execution_transition.get(
                                     "review_remediation_sha256"
                                 )
                                 == hashlib.sha256(
                                     _canonical_json_bytes(remediation_history)
                                 ).hexdigest()
+                                and (
+                                    _valid_v2_remediation_initial_result(
+                                        remediation_history
+                                    )
+                                    if is_v2_baseline
+                                    else True
+                                )
                             )
                             if not remediation_history_valid:
                                 issues.append(
@@ -2399,17 +2877,57 @@ def validate_state_authority(
                                 if isinstance(remediation, dict)
                                 else None
                             )
+                            remediation_v2 = (
+                                isinstance(remediation, dict)
+                                and remediation.get("schema_version")
+                                == "implementation-review-remediation/v2"
+                            )
+                            initial_product_result = (
+                                remediation.get("initial_product_result")
+                                if remediation_v2
+                                else None
+                            )
+                            initial_result_valid = False
+                            if remediation_v2:
+                                initial_result_valid = (
+                                    _valid_v2_remediation_initial_result(remediation)
+                                    and isinstance(execution_transition, dict)
+                                    and execution_transition.get(
+                                        "product_path_states"
+                                    )
+                                    == initial_product_result
+                                    and execution_transition.get(
+                                        "product_path_states_sha256"
+                                    )
+                                    == remediation.get(
+                                        "initial_product_result_sha256"
+                                    )
+                                )
                             remediation_valid = (
                                 isinstance(remediation, dict)
                                 and remediation.get("schema_version")
-                                == "implementation-review-remediation/v1"
-                                and isinstance(
-                                    initial_product_delta_sha256, str
+                                == (
+                                    "implementation-review-remediation/v2"
+                                    if is_v2_baseline
+                                    else "implementation-review-remediation/v1"
                                 )
-                                and len(initial_product_delta_sha256) == 64
-                                and all(
-                                    character in "0123456789abcdef"
-                                    for character in initial_product_delta_sha256
+                                and (
+                                    (
+                                        remediation_v2
+                                        and initial_result_valid
+                                        and isinstance(
+                                            remediation.get("initial_product_result_sha256"), str
+                                        )
+                                    )
+                                    or (
+                                        not remediation_v2
+                                        and isinstance(initial_product_delta_sha256, str)
+                                        and len(initial_product_delta_sha256) == 64
+                                        and all(
+                                            character in "0123456789abcdef"
+                                            for character in initial_product_delta_sha256
+                                        )
+                                    )
                                 )
                                 and isinstance(unresolved_finding_ids, list)
                                 and bool(unresolved_finding_ids)
@@ -2419,9 +2937,17 @@ def validate_state_authority(
                                 )
                                 and isinstance(review_binding, dict)
                                 and review_binding.get("schema_version")
-                                == "implementation-review-remediation/v1"
+                                == (
+                                    "implementation-review-remediation/v2"
+                                    if remediation_v2
+                                    else "implementation-review-remediation/v1"
+                                )
                                 and review_binding.get("candidate_sha256")
-                                == initial_product_delta_sha256
+                                == (
+                                    remediation.get("initial_product_result_sha256")
+                                    if remediation_v2
+                                    else initial_product_delta_sha256
+                                )
                                 and review_binding.get(
                                     "unresolved_material_findings"
                                 )
@@ -2522,6 +3048,24 @@ def validate_state_authority(
                     if not isinstance(storage, dict):
                         issues.append("review storage descriptor is missing")
                     else:
+                        is_v2_review_preparation = (
+                            review_preparation.get("schema_version")
+                            == "implementation-review-preparation/v2"
+                        )
+                        if is_v2_review_preparation != is_v2_baseline:
+                            issues.append(
+                                "review preparation family does not match execution family"
+                            )
+                        if is_v2_review_preparation and (
+                            review_preparation.get("product_result_schema_version")
+                            != PRODUCT_PATH_STATES_SCHEMA_V2
+                            or not isinstance(
+                                review_preparation.get("product_result_sha256"), str
+                            )
+                        ):
+                            issues.append(
+                                "v2 review preparation product result binding mismatch"
+                            )
                         expected_paths = {
                             "evidence": (
                                 f"{storage.get('root')}/{status.get('current_increment_id')}/"
@@ -2532,6 +3076,7 @@ def validate_state_authority(
                                 f"{storage.get('review_packet_filename')}"
                             ),
                         }
+                        resolved_review_paths: dict[str, Path] = {}
                         for label, binding in (
                             ("evidence", evidence_binding),
                             ("packet", packet_binding),
@@ -2545,22 +3090,165 @@ def validate_state_authority(
                                 role=f"status review {label} binding",
                             )
                             issues.extend(path_issues)
+                            if path is not None:
+                                resolved_review_paths[label] = path
                             if path is not None and binding.get("sha256") != sha256_file(path):
                                 issues.append(f"review {label} digest mismatch")
-                            if binding.get("candidate_sha256") != review_preparation.get(
-                                "product_delta_sha256"
+                            if binding.get("sha256") != review_preparation.get(
+                                f"{label}_sha256"
                             ):
+                                issues.append(
+                                    f"review {label} digest does not match review preparation"
+                                )
+                            if is_v2_review_preparation and (
+                                binding.get("product_result_schema_version")
+                                != PRODUCT_PATH_STATES_SCHEMA_V2
+                                or binding.get("product_result_sha256")
+                                != review_preparation.get("product_result_sha256")
+                            ):
+                                issues.append(
+                                    f"v2 review {label} product result binding mismatch"
+                                )
+                            if (
+                                path is not None
+                                and review_preparation.get("schema_version")
+                                == "implementation-review-preparation/v2"
+                                and label == "evidence"
+                            ):
+                                evidence_value, evidence_issues = load_json_object(path)
+                                issues.extend(evidence_issues)
+                                try:
+                                    from repository_preparation import product_path_states_v2_from_value
+
+                                    parsed_result = product_path_states_v2_from_value(
+                                        evidence_value["product_result"]
+                                    )
+                                    transition_value = status.get(
+                                        "execution_transition_binding"
+                                    )
+                                    if (
+                                        evidence_value.get("schema_version")
+                                        != "implementation-review-evidence/v2"
+                                        or "requirement_result" in evidence_value
+                                        or parsed_result.sha256
+                                        != review_preparation.get("product_result_sha256")
+                                        or not isinstance(transition_value, dict)
+                                        or transition_value.get("product_path_states")
+                                        != evidence_value.get("product_result")
+                                    ):
+                                        issues.append("v2 review evidence product result binding mismatch")
+                                except (KeyError, TypeError, ValueError):
+                                    issues.append("v2 review evidence product result is invalid")
+                            expected_candidate = (
+                                review_preparation.get("product_result_sha256")
+                                if review_preparation.get("schema_version")
+                                == "implementation-review-preparation/v2"
+                                else review_preparation.get("product_delta_sha256")
+                            )
+                            if binding.get("candidate_sha256") != expected_candidate:
                                 issues.append(f"review {label} candidate binding mismatch")
+                        if (
+                            is_v2_review_preparation
+                            and set(resolved_review_paths) == {"evidence", "packet"}
+                        ):
+                            evidence_value, evidence_issues = load_json_object(
+                                resolved_review_paths["evidence"]
+                            )
+                            issues.extend(evidence_issues)
+                            try:
+                                packet_markdown = resolved_review_paths[
+                                    "packet"
+                                ].read_text(encoding="utf-8")
+                            except (OSError, UnicodeError) as error:
+                                issues.append(f"review packet could not be read: {error}")
+                            else:
+                                if evidence_value is not None:
+                                    try:
+                                        from review_coordination import (
+                                            validate_review_bundle,
+                                        )
+
+                                        issues.extend(
+                                            f"review bundle: {issue}"
+                                            for issue in validate_review_bundle(
+                                                evidence_value, packet_markdown
+                                            )
+                                        )
+                                    except (ImportError, TypeError, ValueError) as error:
+                                        issues.append(
+                                            f"review bundle validation failed: {error}"
+                                        )
             if status.get("current_increment_state") == "accepted":
                 disposition = status.get("diff_disposition_binding")
+                setup_semantics = manifest.get("setup_semantics")
+                setup_envelope = (
+                    setup_semantics.get("operation_envelope")
+                    if isinstance(setup_semantics, dict)
+                    else None
+                )
+                setup_v2_family = (
+                    isinstance(setup_semantics, dict)
+                    and setup_semantics.get("schema_version")
+                    == "implementation-program-setup-semantics/v2"
+                    and isinstance(setup_envelope, dict)
+                    and setup_envelope.get("schema_version")
+                    == "implementation-operation-envelope/v2"
+                )
+                execution_transition = status.get("execution_transition_binding")
+                review_preparation = status.get("review_preparation_binding")
+                review_evidence = status.get("review_evidence_binding")
+                transition_v2_family = (
+                    isinstance(execution_transition, dict)
+                    and execution_transition.get("schema_version")
+                    == EXECUTION_TRANSITION_SCHEMA_V2
+                    and isinstance(execution_transition.get("product_path_states"), dict)
+                    and execution_transition["product_path_states"].get("schema_version")
+                    == PRODUCT_PATH_STATES_SCHEMA_V2
+                )
+                review_v2_family = (
+                    isinstance(review_preparation, dict)
+                    and review_preparation.get("schema_version")
+                    == "implementation-review-preparation/v2"
+                    and isinstance(review_evidence, dict)
+                    and review_evidence.get("product_result_schema_version")
+                    == PRODUCT_PATH_STATES_SCHEMA_V2
+                )
+                is_v2_disposition = (
+                    isinstance(disposition, dict)
+                    and disposition.get("schema_version")
+                    == "implementation-diff-disposition-binding/v2"
+                )
+                if not (
+                    setup_v2_family
+                    == transition_v2_family
+                    == review_v2_family
+                    == is_v2_disposition
+                ):
+                    issues.append(
+                        "accepted status family does not match controlling setup family"
+                    )
+                if is_v2_disposition and (
+                    not isinstance(disposition, dict)
+                    or disposition.get("product_result_schema_version")
+                    != PRODUCT_PATH_STATES_SCHEMA_V2
+                    or not isinstance(execution_transition, dict)
+                    or execution_transition.get("product_path_states_sha256")
+                    != disposition.get("product_result_sha256")
+                ):
+                    issues.append("accepted status v2 product result family binding is invalid")
                 transition_authority = status.get("transition_authority")
                 program_state = status.get("program_state")
                 diff_transition_is_current = program_state == "active"
                 if (
                     not isinstance(disposition, dict)
                     or disposition.get("schema_version")
-                    != "implementation-diff-disposition-binding/v1"
-                    or disposition.get("decision") != "accept-stop"
+                    != (
+                        "implementation-diff-disposition-binding/v2"
+                        if is_v2_disposition
+                        else "implementation-diff-disposition-binding/v1"
+                    )
+                    or disposition.get("decision")
+                    not in {"accept-stop", "accept-continue"}
                     or disposition.get("exact_file_plan_sha256")
                     != status.get("approved_exact_file_plan_sha256")
                     or disposition.get("execution_baseline_sha256")
@@ -2569,13 +3257,24 @@ def validate_state_authority(
                         if isinstance(baseline_binding, dict)
                         else None
                     )
-                    or disposition.get("accepted_product_delta_sha256")
-                    != (
-                        status.get("execution_transition_binding", {}).get(
-                            "product_delta_sha256"
+                    or (
+                        disposition.get("product_result_sha256")
+                        != (
+                            status.get("execution_transition_binding", {}).get(
+                                "product_path_states_sha256"
+                            )
+                            if isinstance(status.get("execution_transition_binding"), dict)
+                            else None
                         )
-                        if isinstance(status.get("execution_transition_binding"), dict)
-                        else None
+                        if is_v2_disposition
+                        else disposition.get("accepted_product_delta_sha256")
+                        != (
+                            status.get("execution_transition_binding", {}).get(
+                                "product_delta_sha256"
+                            )
+                            if isinstance(status.get("execution_transition_binding"), dict)
+                            else None
+                        )
                     )
                     or (
                         diff_transition_is_current
@@ -2610,7 +3309,8 @@ def validate_state_authority(
                                 == disposition.get("approval_event_id")
                                 and record.get("type") == "increment-diff-approval"
                                 and record.get("decision") == "approved"
-                                and record.get("diff_decision") == "accept-stop"
+                                and record.get("diff_decision")
+                                == disposition.get("decision")
                                 and record.get("base_seed_sha256")
                                 == disposition.get("base_seed_sha256")
                             ]
@@ -2619,6 +3319,16 @@ def validate_state_authority(
                             issues.append(
                                 "accepted status requires one exact diff approval"
                             )
+                        elif matches[0].get("schema_version") != (
+                            APPROVAL_SCHEMA_V3
+                            if is_v2_disposition
+                            else (
+                                "implementation-approval/v2"
+                                if manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA
+                                else APPROVAL_SCHEMA
+                            )
+                        ):
+                            issues.append("accepted status diff approval schema mismatch")
                 if program_state in {"awaiting-closure-approval", "closed"}:
                     issues.extend(_validate_closure_readiness(root, manifest, status))
                     preparation = status.get("closure_preparation_binding")
@@ -3015,6 +3725,1560 @@ def _sha256_descriptor(descriptor: int) -> str:
     return digest.hexdigest()
 
 
+def _descriptor_relative_path(value: str) -> tuple[str, ...]:
+    """Normalize one target without allowing path traversal or Git metadata."""
+    if not isinstance(value, str) or not value or "\\" in value:
+        raise ValueError("descriptor-relative path must be a relative POSIX path")
+    path = PurePosixPath(value)
+    if (
+        path.is_absolute()
+        or path.as_posix() != value
+        or any(part in {"", ".", ".."} for part in path.parts)
+        or ".git" in path.parts
+    ):
+        raise ValueError(f"descriptor-relative path is unsafe: {value!r}")
+    return path.parts
+
+
+def _descriptor_identity(value: object) -> tuple[int, int]:
+    if (
+        not isinstance(value, (tuple, list))
+        or len(value) != 2
+        or not all(isinstance(part, int) and not isinstance(part, bool) for part in value)
+    ):
+        raise ValueError("protected identity must be a (device, inode) pair")
+    return int(value[0]), int(value[1])
+
+
+def _descriptor_mode(mode: int) -> str:
+    return format(mode, "o")
+
+
+def _descriptor_stat_identity(value: os.stat_result) -> tuple[int, int]:
+    return int(value.st_dev), int(value.st_ino)
+
+
+def _descriptor_stat_binding(value: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
+    return (
+        int(value.st_dev),
+        int(value.st_ino),
+        int(value.st_mode),
+        int(value.st_nlink),
+        int(value.st_size),
+        int(value.st_mtime_ns),
+        int(value.st_ctime_ns),
+    )
+
+
+def _descriptor_file_binding(value: os.stat_result) -> tuple[int, int, int, int, int]:
+    """Identity and file shape that survive an atomic same-filesystem rename."""
+    return (
+        int(value.st_dev),
+        int(value.st_ino),
+        int(value.st_mode),
+        int(value.st_nlink),
+        int(value.st_size),
+    )
+
+
+def _descriptor_unsupported() -> OSError:
+    return OSError(DESCRIPTOR_RELATIVE_DELETE_UNSUPPORTED)
+
+
+def _delete_descriptor_capabilities_supported(*, mutation: bool) -> bool:
+    flags = ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC", "O_NONBLOCK")
+    if _WINDOWS or not all(
+        isinstance(getattr(os, flag, None), int) and bool(getattr(os, flag))
+        for flag in flags
+    ):
+        return False
+    required = [os.open, os.stat]
+    if mutation:
+        required.extend((os.mkdir, os.link, os.unlink, os.rename))
+        if not callable(getattr(os, "fchmod", None)):
+            return False
+        if os.rename is _ORIGINAL_OS_RENAME and _RENAMEATX_NP is None:
+            return False
+    return all(function in os.supports_dir_fd for function in required if function is not None)
+
+
+def _descriptor_protected_relative_paths(
+    workspace_root: Path, protected_paths: Sequence[str]
+) -> frozenset[str]:
+    """Convert caller-owned protected paths to lexical workspace-relative paths."""
+    root_text = os.path.abspath(os.fspath(workspace_root))
+    normalized: set[str] = set()
+    for raw in protected_paths:
+        if not isinstance(raw, str) or not raw or "\\" in raw:
+            raise ValueError("protected path must be a path string")
+        if os.path.isabs(raw):
+            candidate = os.path.normpath(raw)
+            try:
+                relative = os.path.relpath(candidate, root_text)
+            except ValueError as error:
+                raise ValueError("protected path is not in the workspace") from error
+            if relative == os.pardir or relative.startswith(os.pardir + os.sep):
+                # An actual Git/common directory may live outside a linked
+                # worktree. It cannot be reached through this descriptor walk,
+                # but remains valid protection context for the caller.
+                normalized.add("@" + candidate)
+                continue
+            raw = "" if relative == os.curdir else relative.replace(os.sep, "/")
+        if raw:
+            path = PurePosixPath(raw)
+            if (
+                path.is_absolute()
+                or path.as_posix() != raw
+                or any(part in {"", ".."} for part in path.parts)
+            ):
+                raise ValueError(f"protected path is unsafe: {raw!r}")
+            normalized.add(path.as_posix())
+        else:
+            normalized.add("")
+    return frozenset(normalized)
+
+
+def _descriptor_path_is_protected(path: str, protected_paths: frozenset[str]) -> bool:
+    if "" in protected_paths:
+        return True
+    return any(
+        path == protected or path.startswith(protected + "/")
+        for protected in protected_paths
+        if protected
+    )
+
+
+def descriptor_protection_context(
+    workspace_root: Path,
+    *,
+    program_root: Path | None = None,
+    inspection: object | None = None,
+    extra_paths: Sequence[str] = (),
+) -> tuple[tuple[str, ...], tuple[tuple[int, int], ...]]:
+    """Build lexical and identity protections from one fresh repository inspection."""
+    workspace = Path(workspace_root).resolve(strict=False)
+    paths = [path for path in extra_paths if path]
+    candidates: list[Path] = []
+    if program_root is not None:
+        candidates.append(Path(program_root))
+    for field in ("git_directory", "git_common_directory"):
+        value = getattr(inspection, field, None)
+        if isinstance(value, str) and value:
+            candidates.append(Path(value))
+    identities: set[tuple[int, int]] = set()
+    for candidate in candidates:
+        if os.path.abspath(os.fspath(candidate)) == os.path.abspath(os.fspath(workspace)):
+            continue
+        for follow_symlinks in (False, True):
+            try:
+                identity_stat = os.stat(candidate, follow_symlinks=follow_symlinks)
+                identities.add(_descriptor_stat_identity(identity_stat))
+            except OSError:
+                pass
+        try:
+            relative = candidate.resolve(strict=False).relative_to(workspace).as_posix()
+        except ValueError:
+            continue
+        if relative and relative != ".":
+            paths.append(relative)
+    return tuple(dict.fromkeys(paths)), tuple(sorted(identities))
+
+
+def _descriptor_chain_matches(
+    chain: Sequence[tuple[int, str, int, tuple[int, int]]],
+) -> bool:
+    """Re-stat each held directory name through its held parent descriptor."""
+    for parent_fd, name, child_fd, identity in chain:
+        try:
+            current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        except OSError:
+            return False
+        if _descriptor_stat_identity(current) != identity:
+            return False
+        if _descriptor_stat_identity(os.fstat(child_fd)) != identity:
+            return False
+    return True
+
+
+def inspect_workspace_path(
+    workspace_root: Path,
+    relative_path: str,
+    *,
+    protected_paths: Sequence[str] = (),
+    protected_identities: Sequence[tuple[int, int]] = (),
+) -> WorkspacePathSnapshot:
+    """Read one workspace file through held descriptor-relative no-follow handles.
+
+    A missing component is the sole normal absence result. Every other race,
+    unsupported primitive, unsafe path, or non-regular target is a hard failure.
+    """
+    if (
+        _WINDOWS
+        or not all(
+            isinstance(getattr(os, flag, None), int) and bool(getattr(os, flag))
+            for flag in ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")
+        )
+        or not isinstance(getattr(os, "O_NONBLOCK", None), int)
+        or not os.O_NONBLOCK
+        or any(
+            function not in os.supports_dir_fd
+            for function in (os.open, os.stat)
+        )
+    ):
+        raise _descriptor_unsupported()
+
+    parts = _descriptor_relative_path(relative_path)
+    protected = _descriptor_protected_relative_paths(
+        Path(workspace_root), protected_paths
+    )
+    identities = frozenset(
+        _descriptor_identity(identity) for identity in protected_identities
+    )
+    if _descriptor_path_is_protected(relative_path, protected):
+        raise ValueError(f"descriptor-relative path is protected: {relative_path}")
+
+    directory_flags = (
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    )
+    final_flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+    root = Path(workspace_root)
+    root_fd: int | None = None
+    descriptors: list[int] = []
+    chain: list[tuple[int, str, int, tuple[int, int]]] = []
+
+    def absent() -> WorkspacePathSnapshot:
+        try:
+            root_current = os.stat(root, follow_symlinks=False)
+        except OSError as error:
+            raise ValueError("descriptor-relative workspace root changed") from error
+        if (
+            _descriptor_stat_binding(root_current)
+            != _descriptor_stat_binding(root_stat)
+            or not _descriptor_chain_matches(chain)
+        ):
+            raise ValueError("descriptor-relative workspace ancestor changed")
+        return WorkspacePathSnapshot(
+            path=relative_path,
+            exists=False,
+            sha256=None,
+            mode=None,
+            device=None,
+            inode=None,
+            link_count=None,
+        )
+
+    try:
+        root_fd = os.open(root, directory_flags)
+        descriptors.append(root_fd)
+        root_stat = os.fstat(root_fd)
+        if not stat.S_ISDIR(root_stat.st_mode):
+            raise ValueError("workspace root must be a directory")
+        root_identity = _descriptor_stat_identity(root_stat)
+        if root_identity in identities:
+            raise ValueError("workspace ancestor has a protected identity")
+
+        parent_fd = root_fd
+        current_path = ""
+        for component in parts[:-1]:
+            current_path = f"{current_path}/{component}".lstrip("/")
+            if _descriptor_path_is_protected(current_path, protected):
+                raise ValueError(f"descriptor-relative path is protected: {current_path}")
+            try:
+                expected = os.stat(component, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return absent()
+            if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
+                raise ValueError(f"descriptor-relative ancestor is unsafe: {current_path}")
+            try:
+                child_fd = os.open(component, directory_flags, dir_fd=parent_fd)
+            except FileNotFoundError:
+                return absent()
+            descriptors.append(child_fd)
+            actual = os.fstat(child_fd)
+            identity = _descriptor_stat_identity(actual)
+            if identity != _descriptor_stat_identity(expected):
+                raise ValueError(f"descriptor-relative ancestor changed: {current_path}")
+            if identity in identities:
+                raise ValueError(f"descriptor-relative ancestor has a protected identity: {current_path}")
+            chain.append((parent_fd, component, child_fd, identity))
+            parent_fd = child_fd
+
+        final_name = parts[-1]
+        final_path = "/".join(parts)
+        if _descriptor_path_is_protected(final_path, protected):
+            raise ValueError(f"descriptor-relative path is protected: {final_path}")
+        try:
+            expected = os.stat(final_name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return absent()
+        if stat.S_ISLNK(expected.st_mode):
+            raise ValueError(f"descriptor-relative final path is a symlink: {final_path}")
+        try:
+            target_fd = os.open(final_name, final_flags, dir_fd=parent_fd)
+        except FileNotFoundError:
+            return absent()
+        descriptors.append(target_fd)
+        try:
+            before = os.fstat(target_fd)
+            if _descriptor_stat_binding(before) != _descriptor_stat_binding(expected):
+                raise ValueError(f"descriptor-relative final path changed: {final_path}")
+            identity = _descriptor_stat_identity(before)
+            if identity in identities:
+                raise ValueError(f"descriptor-relative final path has a protected identity: {final_path}")
+            if not stat.S_ISREG(before.st_mode):
+                raise ValueError(f"descriptor-relative final path is not regular: {final_path}")
+            if before.st_nlink != 1:
+                raise ValueError(f"descriptor-relative final path has hard links: {final_path}")
+            digest = _sha256_descriptor(target_fd)
+            after = os.fstat(target_fd)
+            if _descriptor_stat_binding(after) != _descriptor_stat_binding(before):
+                raise ValueError(f"descriptor-relative final path changed while reading: {final_path}")
+            try:
+                current = os.stat(final_name, dir_fd=parent_fd, follow_symlinks=False)
+            except OSError as error:
+                raise ValueError(f"descriptor-relative final path changed: {final_path}") from error
+            if _descriptor_stat_binding(current) != _descriptor_stat_binding(after):
+                raise ValueError(f"descriptor-relative final path changed: {final_path}")
+            try:
+                root_current = os.stat(root, follow_symlinks=False)
+            except OSError as error:
+                raise ValueError("descriptor-relative workspace root changed") from error
+            if (
+                _descriptor_stat_binding(root_current)
+                != _descriptor_stat_binding(root_stat)
+                or not _descriptor_chain_matches(chain)
+            ):
+                raise ValueError("descriptor-relative workspace ancestor changed")
+            return WorkspacePathSnapshot(
+                path=relative_path,
+                exists=True,
+                sha256=digest,
+                mode=_descriptor_mode(after.st_mode),
+                device=int(after.st_dev),
+                inode=int(after.st_ino),
+                link_count=int(after.st_nlink),
+            )
+        finally:
+            os.close(target_fd)
+            descriptors.remove(target_fd)
+    except (AttributeError, NotImplementedError) as error:
+        raise _descriptor_unsupported() from error
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
+def _delete_baseline_snapshot(
+    target_path: str, binding: WorkspacePathSnapshot | dict[str, object]
+) -> WorkspacePathSnapshot:
+    if isinstance(binding, WorkspacePathSnapshot):
+        snapshot = binding
+    elif isinstance(binding, dict):
+        try:
+            snapshot = WorkspacePathSnapshot(
+                path=str(binding["path"]),
+                exists=bool(binding["exists"]),
+                sha256=binding.get("sha256", binding.get("baseline_sha256")),
+                mode=binding.get("mode", binding.get("baseline_mode")),
+                device=binding.get("device", binding.get("baseline_device")),
+                inode=binding.get("inode", binding.get("baseline_inode")),
+                link_count=binding.get("link_count", binding.get("baseline_link_count")),
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("Delete baseline binding is invalid") from error
+    else:
+        raise ValueError("Delete baseline binding is invalid")
+    _descriptor_relative_path(snapshot.path)
+    _descriptor_relative_path(target_path)
+    if snapshot.path != target_path or not snapshot.exists:
+        raise ValueError("Delete baseline must bind an existing target path")
+    if (
+        not isinstance(snapshot.sha256, str)
+        or len(snapshot.sha256) != 64
+        or any(character not in "0123456789abcdef" for character in snapshot.sha256)
+        or not isinstance(snapshot.mode, str)
+        or not isinstance(snapshot.device, int)
+        or isinstance(snapshot.device, bool)
+        or not isinstance(snapshot.inode, int)
+        or isinstance(snapshot.inode, bool)
+        or snapshot.link_count != 1
+    ):
+        raise ValueError("Delete baseline binding is invalid")
+    return snapshot
+
+
+def _delete_binding_metadata(
+    program_root: Path,
+    baseline: WorkspacePathSnapshot | dict[str, object],
+    *,
+    require_status_current: bool = True,
+) -> tuple[str, int, str, WorkspacePathSnapshot]:
+    manifest, issues = load_json_object(Path(program_root) / "manifest.json")
+    if manifest is None:
+        raise ValueError("; ".join(issues))
+    if not isinstance(manifest.get("program_id"), str) or not manifest["program_id"]:
+        raise ValueError("manifest program_id is required for Delete quarantine")
+    if not isinstance(manifest.get("program_revision"), int) or isinstance(
+        manifest["program_revision"], bool
+    ):
+        raise ValueError("manifest program_revision is required for Delete quarantine")
+    if not isinstance(baseline, (WorkspacePathSnapshot, dict)):
+        raise ValueError("Delete baseline binding is invalid")
+    raw = baseline if isinstance(baseline, dict) else baseline.__dict__
+    program_id = raw.get("program_id", manifest["program_id"])
+    revision = raw.get("program_revision", manifest["program_revision"])
+    increment_id = raw.get("increment_id", raw.get("current_increment_id"))
+    if (
+        not isinstance(program_id, str)
+        or program_id != manifest["program_id"]
+        or not isinstance(revision, int)
+        or isinstance(revision, bool)
+        or revision != manifest["program_revision"]
+        or not isinstance(increment_id, str)
+    ):
+        raise ValueError("Delete baseline program binding is invalid")
+    increment_parts = _descriptor_relative_path(increment_id)
+    if len(increment_parts) != 1:
+        raise ValueError("Delete baseline increment_id must be one safe path segment")
+    logical_roles = manifest.get("logical_roles")
+    if not isinstance(logical_roles, dict):
+        raise ValueError("manifest logical_roles is required for Delete quarantine")
+    status_path, status_issues = resolve_managed_path(
+        Path(program_root), logical_roles.get("status"), role="logical role status"
+    )
+    if status_path is None:
+        raise ValueError("; ".join(status_issues))
+    status, status_issues = load_json_object(status_path)
+    if status is None:
+        raise ValueError("; ".join(status_issues))
+    if require_status_current and status.get("current_increment_id") != increment_id:
+        raise ValueError("Delete baseline increment_id is not the status current increment")
+    authority = raw.get("current_increment_authority_binding")
+    if (
+        require_status_current
+        and authority is not None
+        and authority != status.get("current_increment_authority_binding")
+    ):
+        raise ValueError("Delete baseline current increment authority binding mismatch")
+    path = raw.get("path")
+    if not isinstance(path, str):
+        raise ValueError("Delete baseline path is required")
+    snapshot = _delete_baseline_snapshot(path, baseline)
+    return str(program_id), int(revision), increment_parts[0], snapshot
+
+
+@dataclass(frozen=True)
+class _HeldDeleteDirectory:
+    root_path: Path
+    root_fd: int
+    directory_fd: int
+    root_stat: os.stat_result
+    directory_stat: os.stat_result
+    chain: tuple[tuple[int, str, int, tuple[int, int]], ...]
+    descriptors: tuple[int, ...]
+
+
+def _program_root_relative_parts(
+    workspace_root: Path, program_root: Path
+) -> tuple[str, ...]:
+    relative = os.path.relpath(
+        os.path.normpath(os.fspath(program_root)),
+        os.path.abspath(os.fspath(workspace_root)),
+    )
+    if relative == os.pardir or relative.startswith(os.pardir + os.sep):
+        raise ValueError("program root must be inside the selected workspace")
+    if relative == os.curdir:
+        return ()
+    return _descriptor_relative_path(relative.replace(os.sep, "/"))
+
+
+def _open_held_delete_directory(
+    workspace_root: Path,
+    program_root: Path,
+    relative_parts: Sequence[str],
+    *,
+    create: bool,
+) -> _HeldDeleteDirectory:
+    """Hold the workspace-to-program directory chain without following symlinks."""
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    root_path = Path(workspace_root)
+    program_parts = _program_root_relative_parts(root_path, Path(program_root))
+    descriptors: list[int] = []
+    chain: list[tuple[int, str, int, tuple[int, int]]] = []
+    root_fd = os.open(root_path, directory_flags)
+    descriptors.append(root_fd)
+    root_stat = os.fstat(root_fd)
+    if not stat.S_ISDIR(root_stat.st_mode):
+        os.close(root_fd)
+        raise ValueError("workspace root must be a directory")
+    parent_fd = root_fd
+    try:
+        for index, component in enumerate((*program_parts, *relative_parts)):
+            try:
+                expected = os.stat(component, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                if not create or index < len(program_parts):
+                    raise
+                os.mkdir(component, 0o700, dir_fd=parent_fd)
+                expected = os.stat(component, dir_fd=parent_fd, follow_symlinks=False)
+            if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
+                if index < len(program_parts):
+                    raise ValueError("Delete program root ancestor is unsafe")
+                raise ValueError("Delete quarantine storage must be a directory")
+            child = os.open(component, directory_flags, dir_fd=parent_fd)
+            descriptors.append(child)
+            actual = os.fstat(child)
+            identity = _descriptor_stat_identity(actual)
+            if identity != _descriptor_stat_identity(expected):
+                raise ValueError("Delete quarantine storage changed during binding")
+            chain.append((parent_fd, component, child, identity))
+            parent_fd = child
+        return _HeldDeleteDirectory(
+            root_path=root_path,
+            root_fd=root_fd,
+            directory_fd=parent_fd,
+            root_stat=root_stat,
+            directory_stat=os.fstat(parent_fd),
+            chain=tuple(chain),
+            descriptors=tuple(descriptors),
+        )
+    except BaseException:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+        raise
+
+
+def _held_delete_directory_matches(directory: _HeldDeleteDirectory) -> bool:
+    try:
+        current_root = os.stat(directory.root_path, follow_symlinks=False)
+        current_directory = os.fstat(directory.directory_fd)
+    except OSError:
+        return False
+    return (
+        _descriptor_stat_identity(current_root)
+        == _descriptor_stat_identity(directory.root_stat)
+        and _descriptor_mode(current_root.st_mode)
+        == _descriptor_mode(directory.root_stat.st_mode)
+        and getattr(current_root, "st_uid", -1)
+        == getattr(directory.root_stat, "st_uid", -1)
+        and _descriptor_stat_identity(current_directory)
+        == _descriptor_stat_identity(directory.directory_stat)
+        and _descriptor_mode(current_directory.st_mode)
+        == _descriptor_mode(directory.directory_stat.st_mode)
+        and getattr(current_directory, "st_uid", -1)
+        == getattr(directory.directory_stat, "st_uid", -1)
+        and _descriptor_chain_matches(directory.chain)
+    )
+
+
+def _close_held_delete_directory(directory: _HeldDeleteDirectory) -> None:
+    for descriptor in reversed(directory.descriptors):
+        os.close(descriptor)
+
+
+def _inspect_held_delete_root(
+    root_fd: int,
+    root_stat: os.stat_result,
+    relative_path: str,
+) -> WorkspacePathSnapshot:
+    """Inspect a file below one already-held canonical quarantine root."""
+    parts = _descriptor_relative_path(relative_path)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    final_flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+    descriptors: list[int] = []
+    chain: list[tuple[int, str, int, tuple[int, int]]] = []
+    parent_fd = root_fd
+    try:
+        for component in parts[:-1]:
+            try:
+                expected = os.stat(component, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return WorkspacePathSnapshot(relative_path, False, None, None, None, None, None)
+            if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
+                raise ValueError("Delete quarantine path ancestor is unsafe")
+            child_fd = os.open(component, directory_flags, dir_fd=parent_fd)
+            descriptors.append(child_fd)
+            actual = os.fstat(child_fd)
+            identity = _descriptor_stat_identity(actual)
+            if identity != _descriptor_stat_identity(expected):
+                raise ValueError("Delete quarantine path ancestor changed")
+            chain.append((parent_fd, component, child_fd, identity))
+            parent_fd = child_fd
+        name = parts[-1]
+        try:
+            expected = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return WorkspacePathSnapshot(relative_path, False, None, None, None, None, None)
+        if stat.S_ISLNK(expected.st_mode):
+            raise ValueError("Delete quarantine path is a symlink")
+        descriptor = os.open(name, final_flags, dir_fd=parent_fd)
+        descriptors.append(descriptor)
+        before = os.fstat(descriptor)
+        if _descriptor_stat_binding(before) != _descriptor_stat_binding(expected):
+            raise ValueError("Delete quarantine path changed")
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise ValueError("Delete quarantine path must be a single regular file")
+        digest = _sha256_descriptor(descriptor)
+        after = os.fstat(descriptor)
+        current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            _descriptor_stat_binding(after) != _descriptor_stat_binding(before)
+            or _descriptor_stat_binding(current) != _descriptor_stat_binding(after)
+            or not _descriptor_chain_matches(chain)
+            or _descriptor_stat_binding(os.fstat(root_fd))
+            != _descriptor_stat_binding(root_stat)
+        ):
+            raise ValueError("Delete quarantine root or path changed")
+        return WorkspacePathSnapshot(
+            relative_path,
+            True,
+            digest,
+            _descriptor_mode(after.st_mode),
+            int(after.st_dev),
+            int(after.st_ino),
+            int(after.st_nlink),
+        )
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
+def _delete_storage_parts(manifest: dict[str, object], increment_id: str) -> tuple[str, ...]:
+    storage = manifest.get("increment_storage")
+    if not isinstance(storage, dict) or not isinstance(storage.get("root"), str):
+        raise ValueError("manifest increment_storage root is required for Delete quarantine")
+    root = storage["root"]
+    root_parts = _descriptor_relative_path(root)
+    increment_parts = _descriptor_relative_path(increment_id)
+    if len(increment_parts) != 1:
+        raise ValueError("Delete baseline increment_id must be one safe path segment")
+    return (*root_parts, increment_parts[0], "delete-quarantine")
+
+
+def _delete_allocation_paths(
+    program_root: Path,
+    workspace_root: Path,
+    target_path: str,
+    baseline: WorkspacePathSnapshot | dict[str, object],
+    *,
+    create_root: bool,
+    require_status_current: bool = True,
+) -> tuple[DeleteQuarantineAllocation, tuple[str, int, str, WorkspacePathSnapshot]]:
+    program_id, revision, increment_id, snapshot = _delete_binding_metadata(
+        program_root,
+        baseline,
+        require_status_current=require_status_current,
+    )
+    manifest, issues = load_json_object(Path(program_root) / "manifest.json")
+    if manifest is None:
+        raise ValueError("; ".join(issues))
+    storage_parts = _delete_storage_parts(manifest, increment_id)
+    seed = {
+        "program_id": program_id,
+        "program_revision": revision,
+        "increment_id": increment_id,
+        "path": target_path,
+        "baseline_sha256": snapshot.sha256,
+        "device": snapshot.device,
+        "inode": snapshot.inode,
+        "mode": snapshot.mode,
+        "link_count": snapshot.link_count,
+    }
+    binding_digest = _canonical_json_line_sha256(seed)
+    quarantine_name = f"delete-{binding_digest}.bin"
+    receipt_name = f"delete-{binding_digest}.receipt.json"
+    root_relative = "/".join(storage_parts)
+    allocation = DeleteQuarantineAllocation(
+        root_path=root_relative,
+        quarantine_path=f"{root_relative}/{quarantine_name}",
+        receipt_path=f"{root_relative}/{receipt_name}",
+        quarantine_name=quarantine_name,
+        receipt_name=receipt_name,
+        root_device=None,
+        root_inode=None,
+        root_mode=None,
+        root_owner=None,
+    )
+    if not create_root:
+        try:
+            held_root = _open_held_delete_directory(
+                Path(workspace_root), Path(program_root), storage_parts, create=False
+            )
+        except (FileNotFoundError, ValueError):
+            return allocation, (program_id, revision, increment_id, snapshot)
+        try:
+            root_stat = held_root.directory_stat
+            return replace(
+                allocation,
+                root_device=int(root_stat.st_dev),
+                root_inode=int(root_stat.st_ino),
+                root_mode=_descriptor_mode(root_stat.st_mode),
+                root_owner=int(getattr(root_stat, "st_uid", -1)),
+            ), (program_id, revision, increment_id, snapshot)
+        finally:
+            _close_held_delete_directory(held_root)
+    held_root = _open_held_delete_directory(
+        Path(workspace_root), Path(program_root), storage_parts, create=True
+    )
+    try:
+        root_fd = held_root.directory_fd
+        root_stat = held_root.directory_stat
+        if (root_stat.st_mode & 0o777) != 0o700:
+            raise ValueError("Delete quarantine storage must use private mode 0700")
+        os.fchmod(root_fd, 0o700)
+        root_stat = os.fstat(root_fd)
+        if not _held_delete_directory_matches(held_root):
+            raise ValueError("Delete quarantine root path changed during allocation")
+        return replace(
+            allocation,
+            root_device=int(root_stat.st_dev),
+            root_inode=int(root_stat.st_ino),
+            root_mode=_descriptor_mode(root_stat.st_mode),
+            root_owner=int(getattr(root_stat, "st_uid", -1)),
+        ), (program_id, revision, increment_id, snapshot)
+    finally:
+        _close_held_delete_directory(held_root)
+
+
+def delete_quarantine_allocation(
+    program_root: Path,
+    workspace_root: Path,
+    target_path: str,
+    authorized_baseline: WorkspacePathSnapshot | dict[str, object],
+) -> DeleteQuarantineAllocation:
+    """Derive and allocate the manifest-owned deterministic Delete quarantine root."""
+    _program_root_relative_parts(Path(workspace_root), Path(program_root))
+    if not _delete_descriptor_capabilities_supported(mutation=True):
+        raise _descriptor_unsupported()
+    allocation, _ = _delete_allocation_paths(
+        Path(program_root),
+        Path(workspace_root),
+        target_path,
+        authorized_baseline,
+        create_root=True,
+    )
+    return allocation
+
+
+def _recorded_delete_allocation(
+    binding: WorkspacePathSnapshot | dict[str, object],
+) -> dict[str, object] | None:
+    if not isinstance(binding, dict):
+        return None
+    fields = {
+        "quarantine_root_path": binding.get("quarantine_root_path"),
+        "quarantine_root_device": binding.get("quarantine_root_device"),
+        "quarantine_root_inode": binding.get("quarantine_root_inode"),
+        "quarantine_root_mode": binding.get("quarantine_root_mode"),
+        "quarantine_root_owner": binding.get("quarantine_root_owner"),
+    }
+    if not all(value is not None for value in fields.values()):
+        return None
+    return fields
+
+
+@dataclass(frozen=True)
+class _HeldDeleteTarget:
+    root_fd: int
+    parent_fd: int
+    target_fd: int
+    target_name: str
+    root_stat: os.stat_result
+    target_stat: os.stat_result
+    target_sha256: str
+    chain: tuple[tuple[int, str, int, tuple[int, int]], ...]
+    descriptors: tuple[int, ...]
+
+
+def _open_held_delete_target(
+    workspace_root: Path,
+    relative_path: str,
+    *,
+    protected_paths: Sequence[str] = (),
+    protected_identities: Sequence[tuple[int, int]] = (),
+) -> _HeldDeleteTarget:
+    parts = _descriptor_relative_path(relative_path)
+    protected = _descriptor_protected_relative_paths(workspace_root, protected_paths)
+    identities = frozenset(_descriptor_identity(identity) for identity in protected_identities)
+    if _descriptor_path_is_protected(relative_path, protected):
+        raise ValueError(f"descriptor-relative path is protected: {relative_path}")
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    final_flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+    descriptors: list[int] = []
+    chain: list[tuple[int, str, int, tuple[int, int]]] = []
+    root_fd = os.open(workspace_root, directory_flags)
+    descriptors.append(root_fd)
+    root_stat = os.fstat(root_fd)
+    if not stat.S_ISDIR(root_stat.st_mode):
+        os.close(root_fd)
+        raise ValueError("workspace root must be a directory")
+    if _descriptor_stat_identity(root_stat) in identities:
+        os.close(root_fd)
+        raise ValueError("Delete workspace root has a protected identity")
+    parent_fd = root_fd
+    try:
+        for component in parts[:-1]:
+            try:
+                expected = os.stat(component, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                raise ValueError(f"Delete target is absent: {relative_path}")
+            if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
+                raise ValueError(f"Delete target ancestor is unsafe: {relative_path}")
+            child_fd = os.open(component, directory_flags, dir_fd=parent_fd)
+            descriptors.append(child_fd)
+            actual = os.fstat(child_fd)
+            identity = _descriptor_stat_identity(actual)
+            if identity != _descriptor_stat_identity(expected):
+                raise ValueError(f"Delete target ancestor changed: {relative_path}")
+            if identity in identities:
+                raise ValueError(f"Delete target ancestor has a protected identity: {relative_path}")
+            chain.append((parent_fd, component, child_fd, identity))
+            parent_fd = child_fd
+        final_name = parts[-1]
+        try:
+            expected = os.stat(final_name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            raise ValueError(f"Delete target is absent: {relative_path}")
+        if stat.S_ISLNK(expected.st_mode):
+            raise ValueError(f"Delete target is a symlink: {relative_path}")
+        target_fd = os.open(final_name, final_flags, dir_fd=parent_fd)
+        descriptors.append(target_fd)
+        target_stat = os.fstat(target_fd)
+        if _descriptor_stat_binding(target_stat) != _descriptor_stat_binding(expected):
+            raise ValueError(f"Delete target changed: {relative_path}")
+        if _descriptor_stat_identity(target_stat) in identities:
+            raise ValueError(f"Delete target has a protected identity: {relative_path}")
+        if not stat.S_ISREG(target_stat.st_mode) or target_stat.st_nlink != 1:
+            raise ValueError(f"Delete target must be a single regular file: {relative_path}")
+        target_sha256 = _sha256_descriptor(target_fd)
+        after = os.fstat(target_fd)
+        if _descriptor_stat_binding(after) != _descriptor_stat_binding(target_stat):
+            raise ValueError(f"Delete target changed while reading: {relative_path}")
+        current = os.stat(final_name, dir_fd=parent_fd, follow_symlinks=False)
+        if _descriptor_stat_binding(current) != _descriptor_stat_binding(after):
+            raise ValueError(f"Delete target changed: {relative_path}")
+        return _HeldDeleteTarget(
+            root_fd=root_fd,
+            parent_fd=parent_fd,
+            target_fd=target_fd,
+            target_name=final_name,
+            root_stat=root_stat,
+            target_stat=after,
+            target_sha256=target_sha256,
+            chain=tuple(chain),
+            descriptors=tuple(descriptors),
+        )
+    except BaseException:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+        raise
+
+
+def _close_held_delete_target(target: _HeldDeleteTarget) -> None:
+    for descriptor in reversed(target.descriptors):
+        os.close(descriptor)
+
+
+def _rename_without_replacement(
+    source_name: str,
+    quarantine_name: str,
+    *,
+    source_fd: int,
+    quarantine_fd: int,
+) -> None:
+    """Rename atomically without replacing a destination, or fail closed."""
+    if os.rename is not _ORIGINAL_OS_RENAME:
+        os.rename(
+            source_name,
+            quarantine_name,
+            src_dir_fd=source_fd,
+            dst_dir_fd=quarantine_fd,
+        )
+        return
+    if _RENAMEATX_NP is None:
+        raise _descriptor_unsupported()
+    result = _RENAMEATX_NP(
+        source_fd,
+        os.fsencode(source_name),
+        quarantine_fd,
+        os.fsencode(quarantine_name),
+        _RENAME_EXCL,
+    )
+    if result != 0:
+        error_number = _ctypes.get_errno()
+        if error_number == errno.EXDEV:
+            raise _descriptor_unsupported()
+        raise OSError(error_number, os.strerror(error_number))
+
+
+def _revalidate_held_delete_target(target: _HeldDeleteTarget) -> None:
+    """Repeat the held source walk, name lookup, stat, and hash before rename."""
+    if not _descriptor_chain_matches(target.chain):
+        raise ValueError("Delete target ancestor changed")
+    try:
+        named = os.stat(target.target_name, dir_fd=target.parent_fd, follow_symlinks=False)
+    except OSError as error:
+        raise ValueError("Delete target changed before quarantine move") from error
+    held = os.fstat(target.target_fd)
+    if _descriptor_stat_binding(named) != _descriptor_stat_binding(held):
+        raise ValueError("Delete target changed before quarantine move")
+    if not stat.S_ISREG(held.st_mode) or held.st_nlink != 1:
+        raise ValueError("Delete target changed before quarantine move")
+    os.lseek(target.target_fd, 0, os.SEEK_SET)
+    digest = _sha256_descriptor(target.target_fd)
+    after = os.fstat(target.target_fd)
+    if digest != target.target_sha256 or _descriptor_stat_binding(after) != _descriptor_stat_binding(held):
+        raise ValueError("Delete target changed before quarantine move")
+
+
+def _delete_receipt_bytes(receipt: DeleteQuarantineReceipt) -> bytes:
+    return _canonical_json_bytes(asdict(receipt))
+
+
+def _write_delete_receipt(
+    quarantine_fd: int, receipt_name: str, receipt: DeleteQuarantineReceipt
+) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+    temporary_name = f".{receipt_name}.{secrets.token_hex(8)}.tmp"
+    descriptor = os.open(temporary_name, flags, 0o600, dir_fd=quarantine_fd)
+    try:
+        try:
+            payload = _delete_receipt_bytes(receipt)
+            view = memoryview(payload)
+            while view:
+                written = os.write(descriptor, view)
+                if written <= 0:
+                    raise OSError("Delete receipt write made no progress")
+                view = view[written:]
+            os.fsync(descriptor)
+        except BaseException:
+            os.unlink(temporary_name, dir_fd=quarantine_fd)
+            raise
+    finally:
+        os.close(descriptor)
+    try:
+        os.link(
+            temporary_name,
+            receipt_name,
+            src_dir_fd=quarantine_fd,
+            dst_dir_fd=quarantine_fd,
+        )
+    finally:
+        os.unlink(temporary_name, dir_fd=quarantine_fd)
+    os.fsync(quarantine_fd)
+
+
+def quarantine_bound_regular_file(
+    program_root: Path,
+    workspace_root: Path,
+    target_path: str,
+    authorized_baseline: WorkspacePathSnapshot | dict[str, object],
+    *,
+    protected_paths: Sequence[str] = (),
+    protected_identities: Sequence[tuple[int, int]] = (),
+) -> DeleteQuarantineReceipt:
+    """Atomically move one exact regular file into its manifest-owned quarantine."""
+    if not _delete_descriptor_capabilities_supported(mutation=True):
+        raise _descriptor_unsupported()
+    allocation, metadata = _delete_allocation_paths(
+        Path(program_root),
+        Path(workspace_root),
+        target_path,
+        authorized_baseline,
+        create_root=False,
+    )
+    program_id, revision, increment_id, baseline = metadata
+    recorded_allocation = _recorded_delete_allocation(authorized_baseline)
+    if allocation.root_device is None or recorded_allocation is None:
+        raise ValueError("Delete quarantine allocation is missing")
+    if (
+        recorded_allocation["quarantine_root_path"] != allocation.root_path
+        or recorded_allocation["quarantine_root_device"] != allocation.root_device
+        or recorded_allocation["quarantine_root_inode"] != allocation.root_inode
+        or recorded_allocation["quarantine_root_mode"] != allocation.root_mode
+        or recorded_allocation["quarantine_root_owner"] != allocation.root_owner
+    ):
+        raise ValueError("Delete quarantine allocation binding changed")
+    program_relative = os.path.relpath(
+        os.path.normpath(os.fspath(program_root)),
+        os.path.abspath(os.fspath(workspace_root)),
+    ).replace(os.sep, "/")
+    protected_paths = (
+        *protected_paths,
+        program_relative,
+        f"{program_relative}/{allocation.root_path}",
+    )
+    held = _open_held_delete_target(
+        Path(workspace_root),
+        target_path,
+        protected_paths=protected_paths,
+        protected_identities=protected_identities,
+    )
+    held_quarantine: _HeldDeleteDirectory | None = None
+    try:
+        if (
+            held.target_sha256 != baseline.sha256
+            or _descriptor_stat_identity(held.target_stat)
+            != (baseline.device, baseline.inode)
+            or _descriptor_mode(held.target_stat.st_mode) != baseline.mode
+            or held.target_stat.st_nlink != 1
+        ):
+            raise ValueError("Delete target no longer matches its authorized baseline")
+        quarantine_parts = tuple(allocation.root_path.split("/"))
+        held_quarantine = _open_held_delete_directory(
+            Path(workspace_root),
+            Path(program_root),
+            quarantine_parts,
+            create=False,
+        )
+        quarantine_fd = held_quarantine.directory_fd
+        quarantine_stat = held_quarantine.directory_stat
+        if (
+            (quarantine_stat.st_mode & 0o777) != 0o700
+            or allocation.root_device != quarantine_stat.st_dev
+            or allocation.root_inode != quarantine_stat.st_ino
+            or allocation.root_mode != _descriptor_mode(quarantine_stat.st_mode)
+            or allocation.root_owner != getattr(quarantine_stat, "st_uid", -1)
+        ):
+            raise ValueError("Delete quarantine root identity or mode changed")
+        if (
+            os.fstat(held.parent_fd).st_dev != quarantine_stat.st_dev
+            or held.target_stat.st_dev != quarantine_stat.st_dev
+        ):
+            raise ValueError("Delete target and quarantine are on different filesystems")
+        for name in (allocation.quarantine_name, allocation.receipt_name):
+            try:
+                os.stat(name, dir_fd=quarantine_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            raise ValueError("Delete quarantine allocation is already occupied")
+        _revalidate_held_delete_target(held)
+        if not _held_delete_directory_matches(held_quarantine):
+            raise ValueError("Delete quarantine root path changed before rename")
+        _rename_without_replacement(
+            held.target_name,
+            allocation.quarantine_name,
+            source_fd=held.parent_fd,
+            quarantine_fd=quarantine_fd,
+        )
+        moved_fd = os.open(
+            allocation.quarantine_name,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+            dir_fd=quarantine_fd,
+        )
+        try:
+            moved_stat = os.fstat(moved_fd)
+            moved_sha256 = _sha256_descriptor(moved_fd)
+            moved_after = os.fstat(moved_fd)
+            if (
+                _descriptor_file_binding(moved_stat)
+                != _descriptor_file_binding(held.target_stat)
+                or moved_sha256 != held.target_sha256
+                or moved_stat.st_nlink != 1
+                or _descriptor_stat_binding(moved_after)
+                != _descriptor_stat_binding(moved_stat)
+            ):
+                raise ValueError("Delete quarantine bytes do not match the authorized target")
+        finally:
+            os.close(moved_fd)
+        try:
+            source_after = os.stat(
+                held.target_name, dir_fd=held.parent_fd, follow_symlinks=False
+            )
+        except FileNotFoundError:
+            source_after = None
+        if source_after is not None:
+            raise ValueError("Delete target replacement appeared after quarantine move")
+        if not _descriptor_chain_matches(held.chain):
+            raise ValueError("Delete target ancestor changed after quarantine move")
+        current_quarantine = os.fstat(quarantine_fd)
+        if (
+            _descriptor_stat_identity(current_quarantine)
+            != _descriptor_stat_identity(quarantine_stat)
+            or _descriptor_mode(current_quarantine.st_mode)
+            != _descriptor_mode(quarantine_stat.st_mode)
+            or getattr(current_quarantine, "st_uid", -1)
+            != getattr(quarantine_stat, "st_uid", -1)
+        ):
+            raise ValueError("Delete quarantine root changed after quarantine move")
+        if not _held_delete_directory_matches(held_quarantine):
+            raise ValueError("Delete quarantine root path changed before receipt")
+        receipt = DeleteQuarantineReceipt(
+            schema_version=DELETE_QUARANTINE_RECEIPT_SCHEMA_V1,
+            program_id=program_id,
+            program_revision=revision,
+            increment_id=increment_id,
+            path=target_path,
+            baseline_sha256=baseline.sha256 or "",
+            device=int(held.target_stat.st_dev),
+            inode=int(held.target_stat.st_ino),
+            quarantine_path=allocation.quarantine_path,
+            quarantine_sha256=held.target_sha256,
+            final_state="absent",
+        )
+        if not _held_delete_directory_matches(held_quarantine):
+            raise ValueError("Delete quarantine root path changed before receipt")
+        _write_delete_receipt(quarantine_fd, allocation.receipt_name, receipt)
+        if not _held_delete_directory_matches(held_quarantine):
+            raise ValueError("Delete quarantine root path changed after receipt")
+        return receipt
+    except OSError as error:
+        if error.errno == errno.EXDEV:
+            raise _descriptor_unsupported() from error
+        raise
+    except (AttributeError, NotImplementedError, TypeError) as error:
+        raise _descriptor_unsupported() from error
+    finally:
+        if held_quarantine is not None:
+            _close_held_delete_directory(held_quarantine)
+        _close_held_delete_target(held)
+
+
+def adopt_delete_quarantine_receipt(
+    program_root: Path,
+    workspace_root: Path,
+    target_path: str,
+    authorized_baseline: dict[str, object],
+    *,
+    protected_paths: Sequence[str] = (),
+    protected_identities: Sequence[tuple[int, int]] = (),
+) -> DeleteQuarantineReceipt:
+    """Publish the canonical receipt after an already-completed atomic rename."""
+    if not _delete_descriptor_capabilities_supported(mutation=True):
+        raise _descriptor_unsupported()
+    allocation, metadata = _delete_allocation_paths(
+        Path(program_root),
+        Path(workspace_root),
+        target_path,
+        authorized_baseline,
+        create_root=False,
+    )
+    if allocation.root_device is None:
+        raise ValueError("Delete quarantine allocation is not recorded")
+    held_root = _open_held_delete_directory(
+        Path(workspace_root),
+        Path(program_root),
+        _descriptor_relative_path(allocation.root_path),
+        create=False,
+    )
+    root_fd = held_root.directory_fd
+    root_stat = held_root.directory_stat
+    source_parts = _descriptor_relative_path(target_path)
+    try:
+        held_source_parent = _open_held_delete_directory(
+            Path(workspace_root),
+            Path(workspace_root),
+            source_parts[:-1],
+            create=False,
+        )
+    except BaseException:
+        _close_held_delete_directory(held_root)
+        raise
+    source_parent_fd = held_source_parent.directory_fd
+    source_parent_stat = held_source_parent.directory_stat
+    try:
+        protected = _descriptor_protected_relative_paths(
+            Path(workspace_root), protected_paths
+        )
+        if _descriptor_stat_identity(source_parent_stat) in {
+            _descriptor_identity(identity) for identity in protected_identities
+        }:
+            raise ValueError("Delete source parent has a protected identity")
+        if _descriptor_path_is_protected("/".join(source_parts[:-1]), protected):
+            raise ValueError("Delete source parent is protected")
+        source_name = source_parts[-1]
+        if (
+            _descriptor_stat_identity(root_stat)
+            != (allocation.root_device, allocation.root_inode)
+            or _descriptor_mode(root_stat.st_mode) != allocation.root_mode
+            or getattr(root_stat, "st_uid", -1) != allocation.root_owner
+        ):
+            raise ValueError("Delete quarantine root identity or mode changed")
+        if not _held_delete_directory_matches(held_root):
+            raise ValueError("Delete quarantine root path changed")
+        if not _held_delete_directory_matches(held_source_parent):
+            raise ValueError("Delete source parent path changed")
+        quarantine = _inspect_held_delete_root(
+            root_fd, root_stat, allocation.quarantine_name
+        )
+        if not quarantine.exists or quarantine.link_count != 1:
+            raise ValueError("Delete quarantine entry is not an exact regular file")
+        _program_id, _revision, increment_id, snapshot = metadata
+        if (
+            quarantine.sha256 != snapshot.sha256
+            or quarantine.device != snapshot.device
+            or quarantine.inode != snapshot.inode
+            or quarantine.mode != snapshot.mode
+        ):
+            raise ValueError("Delete quarantine bytes do not match the authorized target")
+        try:
+            source_stat = os.stat(source_name, dir_fd=source_parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            source_stat = None
+        if source_stat is not None:
+            raise ValueError("Delete target replacement appeared before receipt adoption")
+        try:
+            os.stat(allocation.receipt_name, dir_fd=root_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise ValueError("Delete quarantine receipt already exists")
+        try:
+            source_stat = os.stat(source_name, dir_fd=source_parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            source_stat = None
+        if source_stat is not None:
+            raise ValueError("Delete target replacement appeared before receipt adoption")
+        receipt = DeleteQuarantineReceipt(
+            schema_version=DELETE_QUARANTINE_RECEIPT_SCHEMA_V1,
+            program_id=_program_id,
+            program_revision=_revision,
+            increment_id=increment_id,
+            path=target_path,
+            baseline_sha256=snapshot.sha256 or "",
+            device=quarantine.device or 0,
+            inode=quarantine.inode or 0,
+            quarantine_path=allocation.quarantine_path,
+            quarantine_sha256=quarantine.sha256 or "",
+            final_state="absent",
+        )
+        if not _held_delete_directory_matches(held_root):
+            raise ValueError("Delete quarantine root path changed before receipt adoption")
+        if not _held_delete_directory_matches(held_source_parent):
+            raise ValueError("Delete source parent path changed before receipt adoption")
+        _write_delete_receipt(root_fd, allocation.receipt_name, receipt)
+        current_root = os.fstat(root_fd)
+        if (
+            _descriptor_stat_identity(current_root)
+            != _descriptor_stat_identity(root_stat)
+            or _descriptor_mode(current_root.st_mode)
+            != _descriptor_mode(root_stat.st_mode)
+            or getattr(current_root, "st_uid", -1)
+            != getattr(root_stat, "st_uid", -1)
+        ):
+            raise ValueError("Delete quarantine root changed after receipt adoption")
+        if not _held_delete_directory_matches(held_root):
+            raise ValueError("Delete quarantine root path changed after receipt adoption")
+        if not _held_delete_directory_matches(held_source_parent):
+            raise ValueError("Delete source parent path changed after receipt adoption")
+        try:
+            source_stat = os.stat(source_name, dir_fd=source_parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            source_stat = None
+        if source_stat is not None:
+            raise ValueError("Delete target replacement appeared after receipt adoption")
+        return receipt
+    finally:
+        _close_held_delete_directory(held_source_parent)
+        _close_held_delete_directory(held_root)
+
+
+def _read_delete_receipt(
+    program_root: Path,
+    receipt_path: str,
+    *,
+    root_fd: int | None = None,
+    root_stat: os.stat_result | None = None,
+    receipt_name: str | None = None,
+) -> DeleteQuarantineReceipt:
+    held = (
+        _open_held_delete_target(Path(program_root), receipt_path)
+        if root_fd is None
+        else None
+    )
+    target_fd = (
+        held.target_fd
+        if held is not None
+        else os.open(
+            receipt_name or _descriptor_relative_path(receipt_path)[-1],
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+            dir_fd=root_fd,
+        )
+    )
+    try:
+        os.lseek(target_fd, 0, os.SEEK_SET)
+        payload = bytearray()
+        for chunk in iter(lambda: os.read(target_fd, 1024 * 1024), b""):
+            payload.extend(chunk)
+        def object_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+            value: dict[str, object] = {}
+            for key, item in pairs:
+                if key in value:
+                    raise ValueError("duplicate receipt key")
+                value[key] = item
+            return value
+
+        value = json.loads(
+            bytes(payload).decode("utf-8"),
+            object_pairs_hook=object_pairs,
+            parse_constant=lambda constant: (_ for _ in ()).throw(
+                ValueError(f"invalid receipt constant: {constant}")
+            ),
+        )
+        if not isinstance(value, dict):
+            raise ValueError("Delete quarantine receipt must be an object")
+        required = {
+            "schema_version",
+            "program_id",
+            "program_revision",
+            "increment_id",
+            "path",
+            "baseline_sha256",
+            "device",
+            "inode",
+            "quarantine_path",
+            "quarantine_sha256",
+            "final_state",
+        }
+        if set(value) != required:
+            raise ValueError("Delete quarantine receipt fields are invalid")
+        if (
+            value["schema_version"] != DELETE_QUARANTINE_RECEIPT_SCHEMA_V1
+            or not all(isinstance(value[field], str) and value[field] for field in (
+                "program_id", "increment_id", "path", "quarantine_path"
+            ))
+            or not isinstance(value["program_revision"], int)
+            or isinstance(value["program_revision"], bool)
+            or value["program_revision"] < 1
+            or not isinstance(value["device"], int)
+            or isinstance(value["device"], bool)
+            or not isinstance(value["inode"], int)
+            or isinstance(value["inode"], bool)
+            or not isinstance(value["baseline_sha256"], str)
+            or len(value["baseline_sha256"]) != 64
+            or any(character not in "0123456789abcdef" for character in value["baseline_sha256"])
+            or not isinstance(value["quarantine_sha256"], str)
+            or len(value["quarantine_sha256"]) != 64
+            or any(character not in "0123456789abcdef" for character in value["quarantine_sha256"])
+            or value["final_state"] != "absent"
+        ):
+            raise ValueError("Delete quarantine receipt fields are invalid")
+        _descriptor_relative_path(value["path"])
+        _descriptor_relative_path(value["quarantine_path"])
+        receipt = DeleteQuarantineReceipt(
+            schema_version=value["schema_version"],
+            program_id=value["program_id"],
+            program_revision=value["program_revision"],
+            increment_id=value["increment_id"],
+            path=value["path"],
+            baseline_sha256=value["baseline_sha256"],
+            device=value["device"],
+            inode=value["inode"],
+            quarantine_path=value["quarantine_path"],
+            quarantine_sha256=value["quarantine_sha256"],
+            final_state=value["final_state"],
+        )
+        if _delete_receipt_bytes(receipt) != bytes(payload):
+            raise ValueError("Delete quarantine receipt is not canonical")
+    except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+        raise ValueError("Delete quarantine receipt is invalid") from error
+    finally:
+        if held is not None:
+            _close_held_delete_target(held)
+        else:
+            os.close(target_fd)
+    return receipt
+
+
+def _delete_snapshot_error(path: str, error: BaseException) -> WorkspacePathSnapshot:
+    return WorkspacePathSnapshot(
+        path=path,
+        exists=False,
+        sha256=None,
+        mode=None,
+        device=None,
+        inode=None,
+        link_count=None,
+    )
+
+
+def classify_delete_quarantine_recovery(
+    program_root: Path,
+    workspace_root: Path,
+    target_path: str,
+    authorized_baseline: WorkspacePathSnapshot | dict[str, object],
+    *,
+    protected_paths: Sequence[str] = (),
+    protected_identities: Sequence[tuple[int, int]] = (),
+    require_status_current: bool = True,
+) -> DeleteQuarantineRecovery:
+    """Classify an existing Delete intent without deleting, restoring, or overwriting bytes."""
+    allocation, metadata = _delete_allocation_paths(
+        Path(program_root),
+        Path(workspace_root),
+        target_path,
+        authorized_baseline,
+        create_root=False,
+        require_status_current=require_status_current,
+    )
+    _, _, _, baseline = metadata
+    program_relative = os.path.relpath(
+        os.path.normpath(os.fspath(program_root)),
+        os.path.abspath(os.fspath(workspace_root)),
+    ).replace(os.sep, "/")
+    issues: list[str] = []
+    recorded_allocation = _recorded_delete_allocation(authorized_baseline)
+    if allocation.root_device is None:
+        issues.append("quarantine root is missing")
+    elif recorded_allocation is None:
+        issues.append("quarantine root allocation is not recorded")
+    elif (
+        recorded_allocation["quarantine_root_path"] != allocation.root_path
+        or recorded_allocation["quarantine_root_device"] != allocation.root_device
+        or recorded_allocation["quarantine_root_inode"] != allocation.root_inode
+        or recorded_allocation["quarantine_root_mode"] != allocation.root_mode
+        or recorded_allocation["quarantine_root_owner"] != allocation.root_owner
+    ):
+        issues.append("quarantine root allocation binding changed")
+    held_quarantine_root: _HeldDeleteDirectory | None = None
+    quarantine_root_fd: int | None = None
+    quarantine_root_stat: os.stat_result | None = None
+    if allocation.root_device is not None and not issues:
+        try:
+            held_quarantine_root = _open_held_delete_directory(
+                Path(workspace_root),
+                Path(program_root),
+                _descriptor_relative_path(allocation.root_path),
+                create=False,
+            )
+            quarantine_root_fd = held_quarantine_root.directory_fd
+            quarantine_root_stat = held_quarantine_root.directory_stat
+            if (
+                _descriptor_stat_identity(quarantine_root_stat)
+                != (allocation.root_device, allocation.root_inode)
+                or _descriptor_mode(quarantine_root_stat.st_mode) != allocation.root_mode
+                or getattr(quarantine_root_stat, "st_uid", -1) != allocation.root_owner
+            ):
+                issues.append("quarantine root identity or mode changed")
+            elif not _held_delete_directory_matches(held_quarantine_root):
+                issues.append("quarantine root path changed")
+        except (OSError, ValueError) as error:
+            issues.append(f"quarantine root inspection failed: {error}")
+    try:
+        source = inspect_workspace_path(
+            Path(workspace_root),
+            target_path,
+            protected_paths=tuple(
+                path for path in (*protected_paths, program_relative) if path
+            ),
+            protected_identities=protected_identities,
+        )
+    except (OSError, ValueError) as error:
+        source = _delete_snapshot_error(target_path, error)
+        issues.append(f"source inspection failed: {error}")
+    try:
+        if quarantine_root_fd is None or quarantine_root_stat is None:
+            raise ValueError("canonical quarantine root is unavailable")
+        if held_quarantine_root is None or not _held_delete_directory_matches(
+            held_quarantine_root
+        ):
+            raise ValueError("quarantine root path changed")
+        quarantine = _inspect_held_delete_root(
+            quarantine_root_fd, quarantine_root_stat, allocation.quarantine_name
+        )
+    except (OSError, ValueError) as error:
+        quarantine = _delete_snapshot_error(allocation.quarantine_path, error)
+        issues.append(f"quarantine inspection failed: {error}")
+
+    receipt: DeleteQuarantineReceipt | None = None
+    try:
+        if quarantine_root_fd is None or quarantine_root_stat is None:
+            raise ValueError("canonical quarantine root is unavailable")
+        if held_quarantine_root is None or not _held_delete_directory_matches(
+            held_quarantine_root
+        ):
+            raise ValueError("quarantine root path changed")
+        receipt_snapshot = _inspect_held_delete_root(
+            quarantine_root_fd, quarantine_root_stat, allocation.receipt_name
+        )
+    except (OSError, ValueError) as error:
+        receipt_snapshot = _delete_snapshot_error(allocation.receipt_path, error)
+        issues.append(f"receipt inspection failed: {error}")
+    if receipt_snapshot.exists:
+        try:
+            receipt = _read_delete_receipt(
+                Path(program_root),
+                allocation.receipt_path,
+                root_fd=quarantine_root_fd,
+                root_stat=quarantine_root_stat,
+                receipt_name=allocation.receipt_name,
+            )
+        except (OSError, ValueError) as error:
+            issues.append(f"receipt is invalid: {error}")
+
+    source_exact = (
+        source.exists
+        and source.sha256 == baseline.sha256
+        and source.mode == baseline.mode
+        and source.device == baseline.device
+        and source.inode == baseline.inode
+        and source.link_count == 1
+    )
+    quarantine_exact = (
+        quarantine.exists
+        and quarantine.sha256 == baseline.sha256
+        and quarantine.mode == baseline.mode
+        and quarantine.device == baseline.device
+        and quarantine.inode == baseline.inode
+        and quarantine.link_count == 1
+    )
+    expected_receipt = DeleteQuarantineReceipt(
+        schema_version=DELETE_QUARANTINE_RECEIPT_SCHEMA_V1,
+        program_id=metadata[0],
+        program_revision=metadata[1],
+        increment_id=metadata[2],
+        path=target_path,
+        baseline_sha256=baseline.sha256 or "",
+        device=baseline.device or 0,
+        inode=baseline.inode or 0,
+        quarantine_path=allocation.quarantine_path,
+        quarantine_sha256=baseline.sha256 or "",
+        final_state="absent",
+    )
+    receipt_exact = receipt == expected_receipt
+    if source_exact and not quarantine.exists and not receipt_snapshot.exists and not issues:
+        disposition = "retry-ready"
+    elif (
+        not source.exists
+        and quarantine_exact
+        and not receipt_snapshot.exists
+        and not issues
+    ):
+        disposition = "receipt-adoption-ready"
+    elif (
+        not source.exists
+        and quarantine_exact
+        and receipt_snapshot.exists
+        and receipt_exact
+        and not issues
+    ):
+        disposition = "resume"
+    else:
+        disposition = "recovery-required"
+    try:
+        if (
+            quarantine_root_fd is not None
+            and quarantine_root_stat is not None
+            and (
+                held_quarantine_root is None
+                or not _held_delete_directory_matches(held_quarantine_root)
+            )
+        ):
+            issues.append("quarantine root path changed")
+        if issues:
+            disposition = "recovery-required"
+        return DeleteQuarantineRecovery(
+            disposition=disposition,
+            source=source,
+            quarantine=quarantine,
+            receipt=receipt,
+            issues=tuple(sorted(set(issues))),
+        )
+    finally:
+        if held_quarantine_root is not None:
+            _close_held_delete_directory(held_quarantine_root)
+
+
 def _windows_mutex_name(path: Path) -> str:
     normalized = os.path.normcase(os.path.abspath(path))
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
@@ -3222,7 +5486,11 @@ def atomic_replace_json(
 
 
 def atomic_append_json_line(
-    path: Path, value: dict[str, object], expected_sha256: str
+    path: Path,
+    value: dict[str, object],
+    expected_sha256: str,
+    *,
+    preserve_field_order: bool = False,
 ) -> AtomicWriteReceipt:
     path = Path(path)
     _validate_atomic_target(path)
@@ -3254,7 +5522,12 @@ def atomic_append_json_line(
     if identifier in identifiers:
         raise ValueError(f"duplicate record identifier: {identifier}")
     line = (
-        json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=not preserve_field_order,
+        )
         + "\n"
     ).encode("utf-8")
     return _atomic_replace_bytes(path, prior + line, expected_sha256)

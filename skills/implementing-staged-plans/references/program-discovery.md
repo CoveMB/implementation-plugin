@@ -26,6 +26,12 @@ An explicit valid manifest takes precedence over convention and instruction cand
 
 The legacy caller-authored rollover writer is quarantined at its persistence entry point and always returns `legacy-rollover-upgrade-required`. Accepted legacy state remains readable; historical closed and superseded records remain terminal evidence. Read compatibility does not reactivate an unsafe writer.
 
+## Delete continuation evidence
+
+For setup/envelope v2, discovery validates the exact `implementation-accepted-state-continuation-binding/v2`, successor projection, uniquely ordered approval-v3, result-bound action-v3, `implementation-increment-rollover/v2`, rollover binding, and inherited-workspace families before classifying a retry or resumed successor. It rechecks the copied review evidence, packet, accepted result, existing handoff, successor brief, baseline, quarantine receipts, and cumulative inherited digest rather than trusting status alone.
+
+An inherited Delete remains an `absent` tombstone bound to retained quarantine bytes and its historical receipt. It may become present only when the current successor exact plan owns that path as explicit `Create`; unrelated reappearance fails closed before review or rollover writes. Repeated Delete replaces the current inherited state in place, and explicit `Create` removes only the active receipt binding while preserving historical quarantine evidence. PLUG-001 never disposes of quarantine or declares terminal closure.
+
 ## Resume Evidence
 
 Build expected program, source, semantic, status, increment, workspace, plan, and dirty-state bindings independently from the discovered manifest and fresh Git observation. Compare submitted resume evidence with those expectations. Structural bundle validation may validate a submitted record, but it must not present a record-versus-itself comparison as repository-backed resume validation.

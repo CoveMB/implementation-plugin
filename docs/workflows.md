@@ -57,6 +57,12 @@ omit only that routine pause. Every mode still needs the current increment
 grant, an exact plan, an execution baseline, and plan-bound write authority.
 Authorized state permits no product delta.
 
+Accepted v1 setup supports `Create`, `Modify`, and `Preserve`. The exact
+setup/envelope v2 family adds `Delete`; each Delete path must be an exact
+regular file with a baseline-bound same-filesystem quarantine destination.
+Protected paths, changed identities, symlinks, collisions, cross-device moves,
+and unsupported descriptor operations stop before mutation.
+
 ## 4. Prepare Review and Diff Disposition
 
 After the exact implementation delta reaches reviewing state, prepare the
@@ -70,6 +76,11 @@ test-evidence reports. Stop at the exact diff disposition.
 
 Questions about the diff do not accept it. Keep the status unchanged until the
 exact disposition is submitted directly.
+
+For the v2 family, review and diff disposition carry the complete ordered
+product-path result rather than a legacy product-delta digest. A deleted path
+must remain absent and match its exact quarantine receipt and retained bytes
+through approval-v3 acceptance.
 
 An open material finding uses a typed remediation round trip. Persist the
 initial review evidence in `reviewing`, enter `remediating`, make the bounded
@@ -105,6 +116,11 @@ writes status last. The successor status binds
 manifest or inherit genesis authority. The successor exact plan allocates its
 own complete lifecycle paths before its baseline and write authority exist.
 
+Delete-capable rollover uses result-bound action-v3 and reuses the existing
+handoff. Its inherited workspace retains ordered product states and quarantine
+receipts. A tombstone may be recreated only when that successor explicitly owns
+the path as `Create`; recreation preserves historical quarantine evidence.
+
 ## 8. Resolve a Blocked Program
 
 Only active `implementing` or `reviewing` state can enter the typed blocked
@@ -134,7 +150,8 @@ status last. Closure approval authorizes no commit or later action.
 
 ## Unsupported routes and mandatory stops
 
-Version 0.1.2 adds typed successor rollover and blocked recovery while
+Version 0.1.3 adds exact regular-file Delete to typed successor rollover and
+blocked recovery while
 preserving these sink guards:
 
 - legacy automatic or caller-authored rollover returns
@@ -155,6 +172,12 @@ adopt byte-identical prefixes and continue in their defined order. A changed,
 unsafe, stale, ambiguous, or unexpected prefix is preserved and returns the
 corresponding recovery-required disposition. Do not delete or rewrite it as a
 routine recovery step.
+
+Delete recovery is likewise non-destructive: before rename, failure leaves the
+product file in place; after a matching rename, only an exact receipt may be
+adopted. A changed quarantine, replacement source, or divergent receipt is
+preserved for diagnosis. PLUG-001 never unlinks quarantine, claims secure
+erasure, supplies PLUG-002 requirement evidence, or performs terminal closure.
 
 ## Authority reminders
 

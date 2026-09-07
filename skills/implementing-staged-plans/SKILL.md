@@ -39,11 +39,15 @@ Derive the current exact-file plan and execution baseline from the manifest, sta
 
 Materialize the execution baseline and action authorization before status becomes authorized. `authorized` permits no product delta. Advance only through the typed execution transition, preserving user-owned work and every exact plan disposition.
 
+The accepted v1 operation family supports `Create`, `Modify`, and `Preserve`; exact setup/envelope v2 supports `Create`, `Modify`, and `Delete` plus `Preserve`. Route Delete only through the [repository preparation](references/repository-preparation.md) descriptor-bound quarantine contract and the [execution discipline](references/execution-discipline.md) typed absence and recovery rules. Unsupported platforms, cross-device movement, protected paths, or changed identities stop before mutation.
+
 For manifest/status v3, satisfy each immutable source-defined gate only at its declared owning boundary. The setup answer may satisfy a gate only when the manifest explicitly declares setup reuse. Every other response writes nothing; do not infer a gate from prose or move it to another transaction.
 
 ## Prepare Review and Diff Disposition
 
 At reviewing state, use typed review preparation to load the three exact-plan-allocated raw reports, validate findings and risk predicates, bind the accepted product delta, create review evidence and the review packet, and persist verified then awaiting-diff status. Status is last at each boundary, and exact partial prefixes are retryable.
+
+For setup/envelope v2, bind the ordered product-path result—including each Delete tombstone and quarantine receipt—through transition, review, diff disposition, and the uniquely ordered approval-v3 family. Never downgrade that result to a legacy product-delta record.
 
 Review preparation stops at the exact diff-disposition prompt. Questions or discussion do not accept the candidate. Acceptance grants no closure, commit, push, pull request, publication, deployment, or external action.
 
@@ -59,7 +63,9 @@ Replaying `accept-stop` only recovers or reports the same accepted-stop state. A
 
 Validate the current accepted projection, canonical rollover chain, successor dependencies, accepted product bytes, workspace, and prompt before writing. Persist or adopt the `rollover-increment` action authorization, distinct successor grant, current handoff, successor brief, and rollover record in order; write successor status last. Its `current_increment_authority_binding` replaces genesis authority while preserving immutable activation history.
 
-Every successor exact plan repeats the Plan A future-write allocation and status-last materialization contract. Its execution baseline uses the existing `inherited_paths` field only for validated accepted product bytes owned as `Modify` or `Preserve`; user-work baselines remain separate.
+Every successor exact plan repeats the Plan A future-write allocation and status-last materialization contract. Its execution baseline uses `inherited_paths` only for validated accepted product states with exact current-plan ownership; user-work baselines remain separate.
+
+The v2 continuation and rollover families use result-bound action-v3 authority, reuse the existing handoff, and preserve an absent tombstone plus retained quarantine bytes. Only an explicit later `Create` may recreate that path. PLUG-001 makes no secure-erasure or quarantine-disposal claim; PLUG-002 must supply requirement evidence, disposal authority, and terminal closure semantics before any such action.
 
 ## Resolve a Blocked Program
 

@@ -11,11 +11,14 @@ from unittest import mock
 from tests.test_program_authority import ProgramAuthorityFixture
 from tests.program_bootstrap_support import (
     BootstrapFixture,
+    _exact_plan_bytes,
     canonical_json,
     repository_snapshot,
+    write_raw_review_reports,
 )
 from tests.script_module_support import load_script_module
 from tests.test_program_setup import ACTIVATION, BOOTSTRAP, SETUP, gate_definition
+from tests.test_program_review import REVIEW
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +58,59 @@ class SetupV3DiscoveryTests(unittest.TestCase):
             provenance="direct-user-message",
         )
 
+    def reset_with_delete_setup_v2(self) -> None:
+        self.fixture.close()
+        self.fixture = BootstrapFixture()
+        self.fixture.configure_delete_setup_v2()
+        BOOTSTRAP.publish_program_proposal(
+            self.fixture.repository,
+            self.fixture.source_plan,
+            self.fixture.candidate,
+            self.fixture.source_sha256,
+        )
+
+    def prepare_v2_awaiting_diff(self) -> None:
+        observation = self.observation()
+        activation = ACTIVATION.activate_program(
+            self.fixture.program_root, self.decision(), observation
+        )
+        intent = SETUP.adapt_increment_start_intent(
+            self.fixture.program_root,
+            activation.handoff,
+            role="user",
+            provenance="direct-user-message",
+        )
+        ACTIVATION.start_first_increment(
+            self.fixture.program_root, intent, observation
+        )
+        observation = self.observation()
+        prepared = ACTIVATION.prepare_exact_plan(
+            self.fixture.program_root,
+            _exact_plan_bytes(self.fixture.program_root, observation),
+            observation,
+        )
+        ACTIVATION.materialize_exact_plan(
+            self.fixture.program_root, prepared.plan_prompt, observation
+        )
+        ACTIVATION.advance_execution_state(
+            self.fixture.program_root, "implementing", observation
+        )
+        (self.fixture.repository / "archive-output.txt").write_text(
+            "archive output\n", encoding="utf-8"
+        )
+        write_raw_review_reports(self.fixture.repository)
+        observation = self.observation()
+        ACTIVATION.advance_execution_state(
+            self.fixture.program_root, "reviewing", observation
+        )
+        def interrupt(label: str) -> None:
+            if label == "verified-status":
+                raise RuntimeError("injected review prefix interruption")
+
+        with mock.patch.object(REVIEW, "_after_persist", side_effect=interrupt):
+            with self.assertRaisesRegex(RuntimeError, "review prefix"):
+                REVIEW.persist_review_preparation(self.fixture.program_root, observation)
+
     def test_sequence_zero_routes_to_readable_setup(self) -> None:
         result = DISCOVERY.discover_programs(self.fixture.repository)
 
@@ -72,6 +128,175 @@ class SetupV3DiscoveryTests(unittest.TestCase):
         self.assertEqual(result.disposition, "first-increment-start-ready")
         self.assertEqual(result.required_input, "first-increment-start-intent")
         self.assertFalse(result.stop_required)
+
+    def test_delete_setup_v2_activation_prefixes_route_to_exact_retry(self) -> None:
+        expected_routes = {
+            "setup-activation-decision": "program-activation-retry-ready",
+            "program-approval": "program-activation-retry-ready",
+            "workspace-approval": "program-activation-retry-ready",
+            "active-waiting-status": "first-increment-start-ready",
+        }
+        for failure_label, expected_route in expected_routes.items():
+            with self.subTest(failure_label=failure_label):
+                self.reset_with_delete_setup_v2()
+
+                def fail_after(label: str) -> None:
+                    if label == failure_label:
+                        raise RuntimeError(f"injected-after:{label}")
+
+                with mock.patch.object(
+                    ACTIVATION, "_after_persist", side_effect=fail_after
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "injected-after"):
+                        ACTIVATION.activate_program(
+                            self.fixture.program_root,
+                            self.decision(),
+                            self.observation(),
+                        )
+
+                result = DISCOVERY.discover_programs(self.fixture.repository)
+
+                self.assertEqual(result.disposition, expected_route)
+                self.assertFalse(result.stop_required)
+                recovered = ACTIVATION.activate_program(
+                    self.fixture.program_root,
+                    self.decision(),
+                    self.observation(),
+                )
+                self.assertTrue(recovered.recovered)
+
+    def test_delete_setup_v2_corrupt_started_prefix_owns_activation_recovery(
+        self,
+    ) -> None:
+        cases = (
+            "mixed-family",
+            "reordered",
+            "changed",
+            "noncanonical-setup",
+            "noncanonical-approvals",
+        )
+        for case in cases:
+            with self.subTest(case=case):
+                self.reset_with_delete_setup_v2()
+
+                def fail_after_workspace(label: str) -> None:
+                    if label == "workspace-approval":
+                        raise RuntimeError("injected-after:workspace-approval")
+
+                with mock.patch.object(
+                    ACTIVATION, "_after_persist", side_effect=fail_after_workspace
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "injected-after"):
+                        ACTIVATION.activate_program(
+                            self.fixture.program_root,
+                            self.decision(),
+                            self.observation(),
+                        )
+                if case in {"mixed-family", "noncanonical-setup"}:
+                    setup_path = (
+                        self.fixture.program_root
+                        / "state/setup-activation-decision.json"
+                    )
+                    setup = json.loads(setup_path.read_text(encoding="utf-8"))
+                    if case == "mixed-family":
+                        setup["schema_version"] = "setup-activation-decision/v1"
+                        setup_path.write_bytes(canonical_json(setup))
+                    else:
+                        setup_path.write_text(
+                            json.dumps(setup, sort_keys=True) + "\n",
+                            encoding="utf-8",
+                        )
+                else:
+                    approvals_path = (
+                        self.fixture.program_root / "state/approvals.jsonl"
+                    )
+                    approvals = [
+                        json.loads(line)
+                        for line in approvals_path.read_text(
+                            encoding="utf-8"
+                        ).splitlines()
+                    ]
+                    if case == "reordered":
+                        approvals.reverse()
+                    elif case == "changed":
+                        approvals[0]["scope"] = ["changed setup authority"]
+                    if case == "noncanonical-approvals":
+                        approvals_path.write_text(
+                            "\n".join(
+                                json.dumps(record, sort_keys=True)
+                                for record in approvals
+                            )
+                            + "\n",
+                            encoding="utf-8",
+                        )
+                    else:
+                        approvals_path.write_bytes(
+                            b"".join(
+                                ACTIVATION._canonical_json_line(record)
+                                for record in approvals
+                            )
+                        )
+                before = repository_snapshot(self.fixture.program_root)
+
+                result = DISCOVERY.discover_programs(self.fixture.repository)
+
+                self.assertEqual(
+                    result.disposition, "program-activation-recovery-required"
+                )
+                self.assertTrue(result.stop_required)
+                self.assertEqual(repository_snapshot(self.fixture.program_root), before)
+
+    def test_delete_setup_v2_all_executable_states_prioritize_recovery(self) -> None:
+        self.reset_with_delete_setup_v2()
+        ACTIVATION.activate_program(
+            self.fixture.program_root, self.decision(), self.observation()
+        )
+        status_path = self.fixture.program_root / "state/status.json"
+        original = json.loads(status_path.read_text(encoding="utf-8"))
+        for increment_state in (
+            "authorized",
+            "implementing",
+            "reviewing",
+            "remediating",
+            "verified",
+            "awaiting-diff-approval",
+            "change-requested",
+            "accepted",
+        ):
+            with self.subTest(increment_state=increment_state):
+                status = dict(original)
+                status["current_increment_state"] = increment_state
+                status_path.write_bytes(canonical_json(status))
+                with mock.patch.object(
+                    DISCOVERY,
+                    "validate_state_authority",
+                    return_value=["Delete quarantine recovery-required: legacy.ts"],
+                ):
+                    result = DISCOVERY.discover_programs(self.fixture.repository)
+                self.assertEqual(
+                    result.disposition, "execution-transition-recovery-required"
+                )
+
+    def test_delete_setup_v2_review_prefix_recovery_precedes_generic_route(self) -> None:
+        self.reset_with_delete_setup_v2()
+        self.prepare_v2_awaiting_diff()
+        with mock.patch.object(DISCOVERY, "validate_state_authority", return_value=[]), mock.patch.object(
+            REVIEW, "validate_state_authority", return_value=[]
+        ):
+            result = DISCOVERY.discover_programs(self.fixture.repository.resolve())
+        self.assertEqual(result.disposition, "review-preparation-retry-ready", result)
+        evidence_path = (
+            self.fixture.program_root
+            / "increments/ARCHIVE-INDEX/review-evidence.json"
+        )
+        evidence_path.write_bytes(evidence_path.read_bytes() + b" ")
+        with mock.patch.object(DISCOVERY, "validate_state_authority", return_value=[]), mock.patch.object(
+            REVIEW, "validate_state_authority", return_value=[]
+        ):
+            recovered = DISCOVERY.discover_programs(self.fixture.repository.resolve())
+        self.assertEqual(
+            recovered.disposition, "review-preparation-recovery-required"
+        )
 
     def test_partial_activation_prefix_routes_each_missing_source_gate(self) -> None:
         self.fixture.close()

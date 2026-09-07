@@ -21,13 +21,17 @@ from execution_discipline import (
     validate_recovery_domains,
 )
 from repository_preparation import (
+    PRODUCT_PATH_STATES_SCHEMA_V2,
     SemanticNameRecord,
+    product_path_states_v2_from_value,
     validate_semantic_naming_inventory,
 )
 
 
 REVIEW_EVIDENCE_SCHEMA = "implementation-review-evidence/v1"
 REVIEW_PACKET_SCHEMA = "implementation-review-packet/v1"
+REVIEW_EVIDENCE_SCHEMA_V2 = "implementation-review-evidence/v2"
+REVIEW_PACKET_SCHEMA_V2 = "implementation-review-packet/v2"
 RAW_REVIEW_REPORT_SCHEMA = "implementation-raw-review-report/v1"
 REQUIRED_REVIEW_SCOPES = ("requirements", "architecture", "test-evidence")
 RISK_REVIEW_SCOPES = MappingProxyType(
@@ -732,7 +736,7 @@ def _command_summaries(verification: FinalVerification) -> tuple[str, ...]:
 
 def _validate_packet_shape(packet: ReviewPacket) -> list[str]:
     issues: list[str] = []
-    if packet.schema_version != REVIEW_PACKET_SCHEMA:
+    if packet.schema_version not in {REVIEW_PACKET_SCHEMA, REVIEW_PACKET_SCHEMA_V2}:
         issues.append("review packet has unsupported schema")
     if _SHA256.fullmatch(packet.candidate_sha256 or "") is None:
         issues.append("review packet candidate binding is invalid")
@@ -782,6 +786,16 @@ def render_review_packet(packet: ReviewPacket) -> str:
     if issues:
         raise ValueError("; ".join(issues))
     sections = ["# Review Packet"]
+    if packet.schema_version == REVIEW_PACKET_SCHEMA_V2:
+        sections.append(
+            "\n".join(
+                (
+                    f"Packet schema: {REVIEW_PACKET_SCHEMA_V2}",
+                    f"Product result schema: {PRODUCT_PATH_STATES_SCHEMA_V2}",
+                    f"Product result SHA-256: {packet.candidate_sha256}",
+                )
+            )
+        )
     for field in PACKET_FIELDS:
         bullets = "\n".join(f"- {item}" for item in getattr(packet, field))
         sections.append(f"## {PACKET_HEADINGS[field]}\n\n{bullets}")
@@ -802,9 +816,62 @@ def validate_review_bundle(
     bundle: Mapping[str, object], packet_markdown: str
 ) -> list[str]:
     """Compose review, execution, recovery, verification, and packet validation."""
+    if bundle.get("schema_version") == REVIEW_EVIDENCE_SCHEMA_V2:
+        issues: list[str] = []
+        if "requirement_result" in bundle:
+            issues.append("v2 review evidence must not contain requirement_result")
+        try:
+            product_result = product_path_states_v2_from_value(bundle["product_result"])
+        except (KeyError, TypeError, ValueError):
+            issues.append("v2 review evidence product_result is invalid")
+        else:
+            final_verification = bundle.get("final_verification")
+            if (
+                not isinstance(final_verification, dict)
+                or product_result.sha256 != final_verification.get("candidate_sha256")
+            ):
+                issues.append("v2 review product result is not bound to final verification")
+        packet_value = bundle.get("review_packet")
+        if (
+            not isinstance(packet_value, dict)
+            or packet_value.get("schema_version") != REVIEW_PACKET_SCHEMA_V2
+        ):
+            issues.append("v2 review evidence requires a v2 review packet")
+        legacy = dict(bundle)
+        legacy.pop("product_result", None)
+        legacy["schema_version"] = REVIEW_EVIDENCE_SCHEMA
+        legacy_packet_markdown = packet_markdown
+        if isinstance(packet_value, dict):
+            legacy_packet_value = {
+                **packet_value,
+                "schema_version": REVIEW_PACKET_SCHEMA,
+            }
+            legacy["review_packet"] = legacy_packet_value
+            try:
+                packet = ReviewPacket(
+                    **_tuple_fields(packet_value, PACKET_FIELDS)
+                )
+                if render_review_packet(packet) != packet_markdown:
+                    issues.append(
+                        "persisted review packet does not equal deterministic rendering"
+                    )
+                legacy_packet = ReviewPacket(
+                    **_tuple_fields(legacy_packet_value, PACKET_FIELDS)
+                )
+                legacy_packet_markdown = render_review_packet(legacy_packet)
+            except (KeyError, TypeError, ValueError):
+                issues.append("v2 review packet is structurally invalid")
+        issues.extend(validate_review_bundle(legacy, legacy_packet_markdown))
+        return sorted(set(issues))
     issues: list[str] = []
     if bundle.get("schema_version") != REVIEW_EVIDENCE_SCHEMA:
         issues.append("review evidence has unsupported schema")
+    packet_value = bundle.get("review_packet")
+    if (
+        isinstance(packet_value, dict)
+        and packet_value.get("schema_version") != REVIEW_PACKET_SCHEMA
+    ):
+        issues.append("v1 review evidence requires a v1 review packet")
     unknown_fields = sorted(set(bundle).difference(BUNDLE_FIELDS))
     missing_fields = sorted(BUNDLE_FIELDS.difference(bundle))
     if unknown_fields:

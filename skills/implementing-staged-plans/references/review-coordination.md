@@ -34,6 +34,12 @@ Reconcile only after all initial reports are persisted. An open material finding
 
 Final verification must complete after all repairs and reconciled reviews. Record exact commands, integer exit codes, concise results, completion times, verified paths, and a candidate digest. Reject duplicate commands, nonzero or boolean exits, sensitive result text, stale timestamps, and unresolved material findings. A prior successful run is not fresh evidence after repair.
 
+## Delete result family
+
+When setup/envelope v2 selects Delete-capable execution, review uses `implementation-review-preparation/v2`, `implementation-review-evidence/v2`, and `implementation-review-packet/v2`. Each reproduces the ordered `implementation-product-path-states/v2` result and digest: an accepted deleted path stays `absent` and remains bound to the exact quarantine receipt and retained bytes. Reappearance, omission, reorder, mixed schema, receipt drift, or quarantine-byte drift fails closed.
+
+Diff disposition then uses `implementation-diff-disposition-command/v2` and `implementation-diff-disposition-binding/v2`. The uniquely ordered `implementation-approval/v3` acceptance binds that exact result, transition, review evidence, packet, and disposition. It cannot fall back to a legacy product-delta or approval family.
+
 ## Packet data and rendering
 
 Build packet data from the reconciled structured evidence and render it deterministically. The packet must include identity and outcome; changes and rationale; program context; files by purpose; human review order; requirements and acceptance; exact commands and results; baseline failures; execution evidence; reviewer roles, findings, and dispositions; repairs and renewed verification; deviations and amendments; human judgment; edge cases and manual checks; implications; residual risks and deferred work; recovery; workspace and logical boundaries; and current state and next action.

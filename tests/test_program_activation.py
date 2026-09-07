@@ -2,6 +2,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -20,6 +21,7 @@ SCRIPT_ROOT = REPOSITORY_ROOT / "skills" / "implementing-staged-plans" / "script
 SCRIPT_PATH = SCRIPT_ROOT / "program_activation.py"
 DISCOVERY_PATH = SCRIPT_ROOT / "program_discovery.py"
 ACTIVATION = load_script_module("program_activation", SCRIPT_PATH)
+SETUP = sys.modules["program_setup"]
 
 
 def proposal_observation(fixture: BootstrapFixture):
@@ -89,7 +91,31 @@ def exact_plan_bytes(program_root: Path, observation) -> bytes:
             *(item.path for item in required if item.disposition == "Modify"),
         }
     )
-    preserve = ["catalog.txt"]
+    setup_v2 = (
+        manifest.get("setup_semantics", {}).get("schema_version")
+        == "implementation-program-setup-semantics/v2"
+        and manifest.get("setup_semantics", {}).get("operation_envelope", {}).get("schema_version")
+        == "implementation-operation-envelope/v2"
+    )
+    delete = sorted(
+        allocation["path"]
+        for allocation in manifest.get("setup_semantics", {})
+        .get("operation_envelope", {})
+        .get("allocations", [])
+        if allocation.get("operation") == "Delete"
+        and status["current_increment_id"] in allocation.get("increment_ids", [])
+        and allocation.get("kind") == "exact-path"
+    ) if setup_v2 else []
+    preserve = (
+        [
+            item.path
+            for item in required
+            if item.disposition == "Preserve"
+        ]
+        if setup_v2
+        else ["catalog.txt"]
+    )
+    product_paths -= set(delete)
     source = status["source_binding"]
     program = status["program_binding"]
     lines = [
@@ -113,11 +139,14 @@ def exact_plan_bytes(program_root: Path, observation) -> bytes:
         "## File map",
         "",
     ]
-    for disposition, paths in (
+    plan_operations = [
         ("Create", create),
         ("Modify", modify),
-        ("Preserve", preserve),
-    ):
+    ]
+    if setup_v2:
+        plan_operations.append(("Delete", delete))
+    plan_operations.append(("Preserve", preserve))
+    for disposition, paths in plan_operations:
         lines.extend(
             [
                 f"### {disposition}",
@@ -180,6 +209,31 @@ class ProgramActivationTests(unittest.TestCase):
 
         self.assertFalse(recovered)
         self.assertGreaterEqual(fsync.call_count, 2)
+
+    def test_delete_setup_activation_writer_emits_the_v2_record_family(self) -> None:
+        self.fixture.configure_delete_setup_v2()
+        decision = SETUP.adapt_setup_decision(
+            self.fixture.candidate,
+            "Yes",
+            role="user",
+            provenance="direct-user-message",
+        )
+
+        receipt = ACTIVATION.activate_program(
+            self.fixture.candidate, decision, self.observation
+        )
+
+        record = self.fixture.load_json("state/setup-activation-decision.json")
+        self.assertEqual(
+            record["schema_version"], "setup-activation-decision/v2"
+        )
+        self.assertEqual(receipt.increment_state, "awaiting-first-increment")
+        self.assertEqual(
+            ACTIVATION.validate_state_authority(
+                self.fixture.candidate, self.observation
+            ),
+            [],
+        )
 
     def test_activation_persists_three_records_then_active_preparing_status(self) -> None:
         prompt = ACTIVATION.render_program_launch_prompt(self.fixture.candidate)
@@ -394,6 +448,95 @@ class ProgramActivationTests(unittest.TestCase):
 
 
 class ExactPlanMaterializationTests(unittest.TestCase):
+    def test_v2_path_baselines_allocate_descriptor_bound_delete_storage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            program_root = workspace / "implementation-programs/DELETE-PROGRAM"
+            program_root.mkdir(parents=True)
+            target = workspace / "legacy.ts"
+            target.write_bytes(b"legacy bytes\n")
+            (program_root / "manifest.json").write_bytes(
+                canonical_json(
+                    {
+                        "program_id": "DELETE-PROGRAM",
+                        "program_revision": 1,
+                        "logical_roles": {"status": "state/status.json"},
+                        "increment_storage": {"root": "increments"},
+                    }
+                )
+            )
+            (program_root / "state").mkdir()
+            (program_root / "state/status.json").write_bytes(
+                canonical_json({"current_increment_id": "DELETE-1"})
+            )
+            paths, bindings = ACTIVATION._v2_path_baselines(
+                program_root,
+                workspace,
+                ACTIVATION.ExactFileMapV2((), (), ("legacy.ts",), ()),
+                {},
+                "DELETE-1",
+            )
+            self.assertEqual(paths[0]["disposition"], "Delete")
+            self.assertEqual(bindings[0]["path"], "legacy.ts")
+            self.assertTrue((program_root / bindings[0]["root_path"]).is_dir())
+            self.assertTrue(target.exists())
+
+    def test_v1_exact_plan_rejects_delete_section_explicitly(self) -> None:
+        fixture = BootstrapFixture()
+        try:
+            program_root, observation = activated_program(fixture)
+            plan_text = exact_plan_bytes(program_root, observation).decode("utf-8")
+            plan_text = plan_text.replace(
+                "### Preserve\n",
+                "### Delete\n\n- `obsolete.txt`\n\n### Preserve\n",
+                1,
+            )
+
+            with self.assertRaisesRegex(
+                ValueError, "Delete section requires setup-v2"
+            ):
+                ACTIVATION.prepare_exact_plan(
+                    program_root,
+                    plan_text.encode("utf-8"),
+                    observation,
+                )
+        finally:
+            fixture.close()
+
+    def test_v2_exact_plan_accepts_empty_delete_section_in_setup_context(self) -> None:
+        manifest = {
+            "schema_version": "implementation-program-manifest/v3",
+            "setup_semantics": {
+                "schema_version": "implementation-program-setup-semantics/v2",
+                "operation_envelope": {
+                    "schema_version": "implementation-operation-envelope/v2"
+                },
+            },
+        }
+        markdown = """# Plan
+
+## File map
+
+### Create
+
+- `review/evidence.json`
+
+### Modify
+
+- `state/status.json`
+
+### Delete
+
+### Preserve
+
+- `catalog.txt`
+"""
+        parsed = ACTIVATION._parse_exact_file_map_for_manifest(manifest, markdown)
+        self.assertEqual(parsed.create, ("review/evidence.json",))
+        self.assertEqual(parsed.modify, ("state/status.json",))
+        self.assertEqual(parsed.delete, ())
+        self.assertEqual(parsed.preserve, ("catalog.txt",))
+
     def test_successor_plan_candidate_inherits_only_canonical_rollover_products(self) -> None:
         from tests.test_program_rollover import ROLLOVER, accepted_continuation_program
 

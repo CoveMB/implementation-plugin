@@ -22,11 +22,13 @@ from program_authority import (
     sha256_file,
 )
 from program_setup import (
-    SETUP_ACTIVATION_SCHEMA,
     STATUS_SCHEMA_V3,
+    OPERATION_ENVELOPE_SCHEMA_V2,
     SOURCE_GATE_SATISFACTION_SCHEMA,
+    SETUP_SEMANTICS_SCHEMA_V2,
     derive_identifier,
     render_increment_start_handoff,
+    setup_family_contract,
     setup_semantic_identity,
     source_gate_satisfaction,
     validate_increment_start_intent,
@@ -39,21 +41,33 @@ from program_launch import (
     validate_submitted_program_launch_prompt,
 )
 from repository_preparation import (
+    ExactFileMap,
+    ExactFileMapV2,
     REQUIRED_PLAN_SECTIONS,
     _section_body,
     _validate_plan_naming_table,
     execution_baseline_from_value,
+    execution_baseline_v2_from_value,
+    product_path_states_v2_value,
     inspect_repository,
     parse_exact_file_map,
+    parse_exact_file_map_v2,
     validate_execution_workspace,
+    validate_execution_workspace_v2,
 )
 from state_authority import (
     ACTION_AUTHORIZATION_SCHEMA,
     APPROVAL_SCHEMA,
-    ExactFileMap,
     RepositoryObservation,
+    WorkspacePathSnapshot,
     atomic_append_json_line,
     atomic_replace_json,
+    adopt_delete_quarantine_receipt,
+    classify_delete_quarantine_recovery,
+    delete_quarantine_allocation,
+    descriptor_protection_context,
+    inspect_workspace_path,
+    quarantine_bound_regular_file,
     required_future_lifecycle_writes,
     validate_required_managed_file_map,
     validate_state_authority,
@@ -69,8 +83,11 @@ CURRENT_INCREMENT_AUTHORITY_SCHEMA = (
     "implementation-current-increment-authority-binding/v1"
 )
 EXECUTION_BASELINE_SCHEMA = "implementation-execution-baseline/v1"
+EXECUTION_BASELINE_SCHEMA_V2 = "implementation-execution-baseline/v2"
+PRODUCT_PATH_STATES_SCHEMA_V2 = "implementation-product-path-states/v2"
 PLAN_PREPARATION_SCHEMA = "implementation-exact-plan-preparation/v1"
 EXECUTION_TRANSITION_SCHEMA = "implementation-execution-transition/v1"
+EXECUTION_TRANSITION_SCHEMA_V2 = "implementation-execution-transition/v2"
 
 
 @dataclass(frozen=True)
@@ -111,6 +128,15 @@ class ExecutionTransitionReceipt:
     increment_state: str
     status_sha256: str
     product_delta_sha256: str
+    recovered: bool
+
+
+@dataclass(frozen=True)
+class ExecutionTransitionReceiptV2:
+    prior_state: str
+    increment_state: str
+    status_sha256: str
+    product_path_states: dict[str, object]
     recovered: bool
 
 
@@ -580,7 +606,7 @@ def _build_v3_setup_record(
         },
     )
     base: dict[str, object] = {
-        "schema_version": SETUP_ACTIVATION_SCHEMA,
+        "schema_version": setup_family_contract(manifest)["activation_schema"],
         "program_id": manifest["program_id"],
         "program_revision": manifest["program_revision"],
         "source_binding": source,
@@ -1037,7 +1063,7 @@ def _validate_plan_candidate_text(
     manifest: dict[str, object],
     status: dict[str, object],
     observation: RepositoryObservation,
-    file_map: ExactFileMap,
+    file_map: ExactFileMap | ExactFileMapV2,
 ) -> list[str]:
     issues: list[str] = []
     if len([line for line in markdown.splitlines() if line.startswith("# ")]) != 1:
@@ -1106,6 +1132,74 @@ def _path_baselines(
     return baselines
 
 
+def _v2_path_baselines(
+    root: Path,
+    workspace_root: Path,
+    file_map: ExactFileMapV2,
+    manifest: dict[str, object],
+    increment_id: str,
+    current_increment_authority_binding: dict[str, object] | None = None,
+    protected_paths: Sequence[str] = (),
+    protected_identities: Sequence[tuple[int, int]] = (),
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Capture v2 snapshots and allocate manifest-owned Delete storage."""
+    workspace = Path(workspace_root)
+    control_prefix = Path(os.path.relpath(os.fspath(root), os.fspath(workspace))).as_posix()
+    if control_prefix == ".." or control_prefix.startswith("../"):
+        raise ValueError("program root must be inside the selected workspace")
+    path_baselines: list[dict[str, object]] = []
+    bindings: list[dict[str, object]] = []
+    for operation, paths in (
+        ("Create", file_map.create),
+        ("Modify", file_map.modify),
+        ("Delete", file_map.delete),
+        ("Preserve", file_map.preserve),
+    ):
+        for relative in paths:
+            if relative == control_prefix or relative.startswith(control_prefix + "/"):
+                continue
+            snapshot = inspect_workspace_path(
+                workspace,
+                relative,
+                protected_paths=tuple(
+                    path for path in (*protected_paths, control_prefix) if path
+                ),
+                protected_identities=protected_identities,
+            )
+            if operation == "Delete":
+                if not snapshot.exists:
+                    raise ValueError(f"Delete path must be a present regular file: {relative}")
+                allocation = delete_quarantine_allocation(
+                    root,
+                    workspace,
+                    relative,
+                    {
+                        "increment_id": increment_id,
+                        "current_increment_authority_binding": current_increment_authority_binding,
+                        **asdict(snapshot),
+                    },
+                )
+                snapshot_value = asdict(snapshot)
+                path_baselines.append({"path": relative, "disposition": operation, "snapshot": snapshot_value})
+                bindings.append({
+                    "path": relative,
+                    "root_path": allocation.root_path,
+                    "root_owner": allocation.root_owner,
+                    "root_mode": allocation.root_mode,
+                    "root_device": allocation.root_device,
+                    "root_inode": allocation.root_inode,
+                    "entry_path": allocation.quarantine_path,
+                    "receipt_path": allocation.receipt_path,
+                })
+                continue
+            if operation == "Create" and snapshot.exists:
+                raise ValueError(f"Create path already exists: {relative}")
+            if operation in {"Modify", "Preserve"} and not snapshot.exists:
+                raise ValueError(f"{operation} path is missing: {relative}")
+            path_baselines.append({"path": relative, "disposition": operation, "snapshot": asdict(snapshot)})
+    return path_baselines, bindings
+
+
 def _user_work_baselines(
     root: Path,
     observation: RepositoryObservation,
@@ -1131,7 +1225,7 @@ def _user_work_baselines(
             if relative == control_prefix or relative.startswith(control_prefix + "/"):
                 continue
             categories.setdefault(relative, set()).add(category)
-    claimed = set(file_map.create) | set(file_map.modify)
+    claimed = set(file_map.create) | set(file_map.modify) | set(getattr(file_map, "delete", ()))
     overlap = claimed & set(categories)
     if overlap:
         raise ValueError(
@@ -1177,6 +1271,27 @@ def _stable_status_fields(status: dict[str, object]) -> dict[str, object]:
     return stable
 
 
+def _parse_exact_file_map_for_manifest(
+    manifest: dict[str, object], markdown: str
+) -> ExactFileMap | ExactFileMapV2:
+    setup_semantics = manifest.get("setup_semantics")
+    setup_operation_envelope = (
+        setup_semantics.get("operation_envelope")
+        if isinstance(setup_semantics, dict)
+        else None
+    )
+    if (
+        manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA
+        and isinstance(setup_semantics, dict)
+        and setup_semantics.get("schema_version") == SETUP_SEMANTICS_SCHEMA_V2
+        and isinstance(setup_operation_envelope, dict)
+        and setup_operation_envelope.get("schema_version")
+        == OPERATION_ENVELOPE_SCHEMA_V2
+    ):
+        return parse_exact_file_map_v2(markdown)
+    return parse_exact_file_map(markdown)
+
+
 def _build_plan_candidate(
     root: Path,
     plan_bytes: bytes,
@@ -1212,7 +1327,18 @@ def _build_plan_candidate(
         markdown = plan_bytes.decode("utf-8")
     except UnicodeDecodeError as error:
         raise ValueError("exact-file plan must be UTF-8") from error
-    file_map = parse_exact_file_map(markdown)
+    file_map = _parse_exact_file_map_for_manifest(manifest, markdown)
+    v2_protected_paths: tuple[str, ...] = ()
+    v2_protected_identities: tuple[tuple[int, int], ...] = ()
+    if isinstance(file_map, ExactFileMapV2):
+        protection_inspection = inspect_repository(
+            Path(observation.path), observation.base_commit
+        )
+        v2_protected_paths, v2_protected_identities = descriptor_protection_context(
+            Path(observation.path),
+            program_root=root,
+            inspection=protection_inspection,
+        )
     required = required_future_lifecycle_writes(
         root, Path(observation.path), str(status["current_increment_id"])
     )
@@ -1242,11 +1368,14 @@ def _build_plan_candidate(
                 (requirement.path, requirement.disposition)
                 for requirement in required
             }
-            for operation, paths in (
+            envelope_operations = [
                 ("Create", file_map.create),
                 ("Modify", file_map.modify),
-                ("Preserve", file_map.preserve),
-            ):
+            ]
+            if isinstance(file_map, ExactFileMapV2):
+                envelope_operations.append(("Delete", file_map.delete))
+            envelope_operations.append(("Preserve", file_map.preserve))
+            for operation, paths in envelope_operations:
                 for path in paths:
                     if (path, operation) in managed:
                         continue
@@ -1274,25 +1403,43 @@ def _build_plan_candidate(
                         )
                         continue
                     allocation = matches[0]
-                    workspace_path = Path(observation.path) / path
-                    if workspace_path.is_symlink():
-                        actual_facts = ("symlink", "symlink", None, "existing")
-                    elif not workspace_path.exists():
-                        actual_facts = ("absent", "none", None, "none")
-                    elif workspace_path.is_file():
-                        file_status = workspace_path.stat()
-                        actual_facts = (
-                            "regular-file",
-                            "hard-link" if file_status.st_nlink > 1 else "none",
-                            "100755" if file_status.st_mode & 0o111 else "100644",
-                            (
-                                "accepted-predecessor"
-                                if path in inherited_set
-                                else "existing"
-                            ),
-                        )
+                    if isinstance(file_map, ExactFileMapV2):
+                        try:
+                            observed = inspect_workspace_path(
+                                Path(observation.path),
+                                path,
+                                protected_paths=v2_protected_paths,
+                                protected_identities=v2_protected_identities,
+                            )
+                        except ValueError:
+                            observed = None
+                        if observed is None:
+                            actual_facts = ("unsafe", "none", None, "existing")
+                        elif not observed.exists:
+                            actual_facts = ("absent", "none", None, "none")
+                        else:
+                            actual_facts = (
+                                "regular-file",
+                                "none" if observed.link_count == 1 else "hard-link",
+                                "100755" if observed.mode and int(observed.mode, 8) & 0o111 else "100644",
+                                "accepted-predecessor" if path in inherited_set else "existing",
+                            )
                     else:
-                        actual_facts = ("unsupported", "none", None, "existing")
+                        workspace_path = Path(observation.path) / path
+                        if workspace_path.is_symlink():
+                            actual_facts = ("symlink", "symlink", None, "existing")
+                        elif not workspace_path.exists():
+                            actual_facts = ("absent", "none", None, "none")
+                        elif workspace_path.is_file():
+                            file_status = workspace_path.stat()
+                            actual_facts = (
+                                "regular-file",
+                                "hard-link" if file_status.st_nlink > 1 else "none",
+                                "100755" if file_status.st_mode & 0o111 else "100644",
+                                "accepted-predecessor" if path in inherited_set else "existing",
+                            )
+                        else:
+                            actual_facts = ("unsupported", "none", None, "existing")
                     expected_facts = (
                         allocation.get("file_kind"),
                         allocation.get("link_kind"),
@@ -1338,7 +1485,30 @@ def _build_plan_candidate(
         file_map,
         inherited_paths=inherited_paths,
     )
-    path_baselines = _path_baselines(root, Path(observation.path), file_map)
+    delete_quarantine_bindings: list[dict[str, object]] = []
+    if isinstance(file_map, ExactFileMapV2):
+        path_baselines, delete_quarantine_bindings = _v2_path_baselines(
+            root,
+            Path(observation.path),
+            file_map,
+            manifest,
+            str(status["current_increment_id"]),
+            status.get("current_increment_authority_binding"),
+            v2_protected_paths,
+            v2_protected_identities,
+        )
+    else:
+        path_baselines = _path_baselines(root, Path(observation.path), file_map)
+    if isinstance(file_map, ExactFileMapV2):
+        required = required_future_lifecycle_writes(
+            root,
+            Path(observation.path),
+            str(status["current_increment_id"]),
+            delete_quarantine_bindings=delete_quarantine_bindings,
+        )
+        managed_issues = validate_required_managed_file_map(file_map, required)
+        if managed_issues:
+            raise ValueError("; ".join(sorted(set(managed_issues))))
     baseline_observation = replace(
         observation,
         staged_paths=tuple(
@@ -1355,7 +1525,11 @@ def _build_plan_candidate(
         ),
     )
     baseline = {
-        "schema_version": EXECUTION_BASELINE_SCHEMA,
+        "schema_version": (
+            EXECUTION_BASELINE_SCHEMA_V2
+            if isinstance(file_map, ExactFileMapV2)
+            else EXECUTION_BASELINE_SCHEMA
+        ),
         "program_id": manifest["program_id"],
         "program_revision": manifest["program_revision"],
         "increment_id": status["current_increment_id"],
@@ -1366,10 +1540,42 @@ def _build_plan_candidate(
         "workspace_observation": _observation_value(baseline_observation),
         "file_map": asdict(file_map),
         "path_baselines": path_baselines,
+        **({"delete_quarantine_bindings": delete_quarantine_bindings} if isinstance(file_map, ExactFileMapV2) else {}),
+        **(
+            {
+                "protected_control_allocations": sorted(
+                    {
+                        *(
+                            path
+                            for path in (
+                                *file_map.create,
+                                *file_map.modify,
+                                *file_map.delete,
+                                *file_map.preserve,
+                            )
+                            if path.startswith(
+                                Path(os.path.relpath(os.fspath(root), os.fspath(observation.path))).as_posix()
+                                + "/"
+                            )
+                        ),
+                        *(binding["root_path"] for binding in delete_quarantine_bindings),
+                        *(binding["entry_path"] for binding in delete_quarantine_bindings),
+                        *(binding["receipt_path"] for binding in delete_quarantine_bindings),
+                    }
+                )
+            }
+            if isinstance(file_map, ExactFileMapV2)
+            else {}
+        ),
         "user_work_baselines": user_work_baselines,
         "inherited_paths": list(inherited_paths),
     }
-    execution_baseline_from_value(baseline)
+    if isinstance(file_map, ExactFileMapV2):
+        from repository_preparation import execution_baseline_v2_from_value
+
+        execution_baseline_v2_from_value(baseline)
+    else:
+        execution_baseline_from_value(baseline)
     baseline_bytes = _canonical_json_bytes(baseline)
     baseline_sha256 = _sha256_bytes(baseline_bytes)
     file_map_sha256 = _sha256_bytes(_canonical_json_bytes(asdict(file_map)))
@@ -1888,7 +2094,7 @@ def advance_execution_state(
     program_root: Path,
     target_increment_state: str,
     observation: RepositoryObservation,
-) -> ExecutionTransitionReceipt:
+) -> ExecutionTransitionReceipt | ExecutionTransitionReceiptV2:
     """Advance authorized execution through implementing and reviewing."""
     root = Path(program_root)
     fresh = inspect_repository(Path(observation.path), observation.base_commit)
@@ -1897,6 +2103,11 @@ def advance_execution_state(
         observation,
         fresh.observation,
         "workspace observation changed before execution transition",
+    )
+    protected_paths, protected_identities = descriptor_protection_context(
+        Path(normalized.path),
+        program_root=root,
+        inspection=fresh,
     )
     manifest, manifest_issues = load_json_object(root / "manifest.json")
     if manifest is None:
@@ -1925,18 +2136,140 @@ def advance_execution_state(
     baseline_value, baseline_issues = load_json_object(baseline_path)
     if baseline_value is None:
         raise ValueError("; ".join(baseline_issues))
-    baseline = execution_baseline_from_value(baseline_value)
-    assessment = validate_execution_workspace(
-        root,
-        baseline,
-        replace(fresh, observation=normalized),
-        increment_state=target_increment_state,
+    is_v2_baseline = (
+        isinstance(baseline_value, dict)
+        and baseline_value.get("schema_version") == EXECUTION_BASELINE_SCHEMA_V2
+    )
+    setup_semantics = manifest.get("setup_semantics")
+    setup_envelope = (
+        setup_semantics.get("operation_envelope")
+        if isinstance(setup_semantics, dict)
+        else None
+    )
+    is_v2_setup = (
+        isinstance(setup_semantics, dict)
+        and setup_semantics.get("schema_version") == SETUP_SEMANTICS_SCHEMA_V2
+        and isinstance(setup_envelope, dict)
+        and setup_envelope.get("schema_version") == OPERATION_ENVELOPE_SCHEMA_V2
+    )
+    if is_v2_baseline != is_v2_setup:
+        raise ValueError("execution v2 baseline/setup/envelope family mismatch")
+    baseline = (
+        execution_baseline_v2_from_value(baseline_value)
+        if is_v2_baseline
+        else execution_baseline_from_value(baseline_value)
+    )
+    v2_delete_execution = is_v2_baseline and current_state == "authorized" and target_increment_state == "implementing"
+    delete_recoveries: dict[str, object] = {}
+    delete_baselines: dict[str, dict[str, object]] = {}
+    if v2_delete_execution:
+        baseline_by_path = {item["path"]: item for item in baseline.path_baselines}
+        binding_by_path = {item["path"]: item for item in baseline.delete_quarantine_bindings}
+        for relative in baseline.file_map.delete:
+            item = baseline_by_path[relative]
+            binding = binding_by_path[relative]
+            snapshot = item["snapshot"]
+            if not isinstance(snapshot, dict):
+                snapshot = asdict(snapshot)
+            quarantine_baseline = {
+                "program_id": baseline.program_id,
+                "program_revision": baseline.program_revision,
+                "increment_id": baseline.increment_id,
+                **snapshot,
+                "quarantine_root_path": binding["root_path"],
+                "quarantine_root_device": binding["root_device"],
+                "quarantine_root_inode": binding["root_inode"],
+                "quarantine_root_mode": binding["root_mode"],
+                "quarantine_root_owner": binding["root_owner"],
+                "current_increment_authority_binding": baseline.current_increment_authority_binding,
+            }
+            recovery = classify_delete_quarantine_recovery(
+                root,
+                Path(normalized.path),
+                relative,
+                quarantine_baseline,
+                protected_paths=protected_paths,
+                protected_identities=protected_identities,
+            )
+            delete_recoveries[relative] = recovery
+            delete_baselines[relative] = quarantine_baseline
+            if recovery.disposition == "recovery-required":
+                raise ValueError(
+                    f"Delete quarantine recovery-required: {relative}"
+                )
+        state_issues = validate_state_authority(root, normalized)
+        blocking_issues = [
+            issue
+            for issue in state_issues
+            if "Delete" not in issue and "quarantine" not in issue
+        ]
+        if blocking_issues:
+            raise ValueError("; ".join(blocking_issues))
+        for relative in baseline.file_map.delete:
+            recovery = delete_recoveries[relative]
+            quarantine_baseline = delete_baselines[relative]
+            if recovery.disposition == "retry-ready":
+                quarantine_bound_regular_file(
+                    root,
+                    Path(normalized.path),
+                    relative,
+                    quarantine_baseline,
+                    protected_paths=protected_paths,
+                    protected_identities=protected_identities,
+                )
+            elif recovery.disposition == "receipt-adoption-ready":
+                adopt_delete_quarantine_receipt(
+                    root,
+                    Path(normalized.path),
+                    relative,
+                    quarantine_baseline,
+                    protected_paths=protected_paths,
+                    protected_identities=protected_identities,
+                )
+            elif recovery.disposition != "resume":
+                raise ValueError(
+                    f"Delete quarantine recovery-required: {relative}"
+                )
+    assessment = (
+        validate_execution_workspace_v2(
+            root,
+            baseline,
+            replace(fresh, observation=normalized),
+            increment_state=target_increment_state,
+            protected_paths=protected_paths,
+            protected_identities=protected_identities,
+        )
+        if is_v2_baseline
+        else validate_execution_workspace(
+            root,
+            baseline,
+            replace(fresh, observation=normalized),
+            increment_state=target_increment_state,
+        )
     )
     if not assessment.valid:
         raise ValueError("; ".join(assessment.issues))
 
     if current_state == target_increment_state:
         transition = status.get("execution_transition_binding")
+        if is_v2_baseline:
+            product_value = transition.get("product_path_states") if isinstance(transition, dict) else None
+            expected_product = product_path_states_v2_value(assessment.product_states)
+            if (
+                not isinstance(transition, dict)
+                or transition.get("schema_version") != EXECUTION_TRANSITION_SCHEMA_V2
+                or transition.get("target_increment_state") != target_increment_state
+                or product_value != expected_product
+                or transition.get("product_path_states_sha256") != assessment.product_states.sha256
+            ):
+                raise ValueError("execution-transition-recovery-required: status binding differs")
+            return ExecutionTransitionReceiptV2(
+                prior_state=str(transition["prior_increment_state"]),
+                increment_state=target_increment_state,
+                status_sha256=sha256_file(status_path),
+                product_path_states=expected_product,
+                recovered=True,
+            )
         if (
             not isinstance(transition, dict)
             or transition.get("schema_version") != EXECUTION_TRANSITION_SCHEMA
@@ -1956,9 +2289,10 @@ def advance_execution_state(
         raise ValueError(
             f"illegal execution transition {current_state!r} -> {target_increment_state!r}"
         )
-    state_issues = validate_state_authority(root, normalized)
-    if state_issues:
-        raise ValueError("; ".join(state_issues))
+    if not v2_delete_execution:
+        state_issues = validate_state_authority(root, normalized)
+        if state_issues:
+            raise ValueError("; ".join(state_issues))
     execution_authorization = status.get("execution_authorization")
     if not isinstance(execution_authorization, dict):
         raise ValueError("execution authorization binding is required")
@@ -1978,19 +2312,20 @@ def advance_execution_state(
             f"increment:{status['current_increment_id']}",
         )
     prior_sha256 = sha256_file(status_path)
-    event_id = _identifier(
-        "execution-transition",
-        {
-            "program_id": status["program_id"],
-            "program_revision": status["program_revision"],
-            "increment_id": status["current_increment_id"],
-            "prior_status_sha256": prior_sha256,
-            "prior_increment_state": current_state,
-            "target_increment_state": target_increment_state,
-            "product_delta_sha256": assessment.product_delta_sha256,
-            "authorization_id": authorization_id,
-        },
-    )
+    event_seed = {
+        "program_id": status["program_id"],
+        "program_revision": status["program_revision"],
+        "increment_id": status["current_increment_id"],
+        "prior_status_sha256": prior_sha256,
+        "prior_increment_state": current_state,
+        "target_increment_state": target_increment_state,
+        "authorization_id": authorization_id,
+    }
+    if is_v2_baseline:
+        event_seed["product_path_states_sha256"] = assessment.product_states.sha256
+    else:
+        event_seed["product_delta_sha256"] = assessment.product_delta_sha256
+    event_id = _identifier("execution-transition", event_seed)
     new_status = dict(status)
     new_status.update(
         state_sequence=int(status["state_sequence"]) + 1,
@@ -2005,7 +2340,19 @@ def advance_execution_state(
             "event_id": event_id,
             "authorization_id": authorization_id,
         },
-        execution_transition_binding={
+        execution_transition_binding=(
+            {
+                "schema_version": EXECUTION_TRANSITION_SCHEMA_V2,
+                "event_id": event_id,
+                "authorization_id": authorization_id,
+                "prior_increment_state": current_state,
+                "target_increment_state": target_increment_state,
+                "prior_status_sha256": prior_sha256,
+                "product_path_states_sha256": assessment.product_states.sha256,
+                "product_path_states": product_path_states_v2_value(assessment.product_states),
+            }
+            if is_v2_baseline
+            else {
             "schema_version": EXECUTION_TRANSITION_SCHEMA,
             "event_id": event_id,
             "authorization_id": authorization_id,
@@ -2013,7 +2360,8 @@ def advance_execution_state(
             "target_increment_state": target_increment_state,
             "prior_status_sha256": prior_sha256,
             "product_delta_sha256": assessment.product_delta_sha256,
-        },
+            }
+        ),
     )
     if transition_gate_satisfaction is not None:
         new_status["source_gate_satisfaction"] = transition_gate_satisfaction
@@ -2022,6 +2370,14 @@ def advance_execution_state(
     validation_issues = validate_state_authority(root, normalized)
     if validation_issues:
         raise ValueError("; ".join(validation_issues))
+    if is_v2_baseline:
+        return ExecutionTransitionReceiptV2(
+            prior_state=current_state,
+            increment_state=target_increment_state,
+            status_sha256=sha256_file(status_path),
+            product_path_states=product_path_states_v2_value(assessment.product_states),
+            recovered=False,
+        )
     return ExecutionTransitionReceipt(
         prior_state=current_state,
         increment_state=target_increment_state,

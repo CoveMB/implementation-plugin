@@ -113,6 +113,230 @@ class ProgramSetupTests(unittest.TestCase):
         self.assertNotIn("Observed head commit:", recap)
         self.assertNotIn(self.fixture.head, recap)
 
+    def test_delete_setup_v2_selects_its_recap_checkpoint_and_adapter_family(
+        self,
+    ) -> None:
+        self.tearDown()
+        self.fixture = BootstrapFixture()
+        self.fixture.configure_delete_setup_v2()
+
+        self.assertEqual(SETUP.validate_setup_semantics(self.fixture.candidate), [])
+        recap = SETUP.render_setup_recap(self.fixture.candidate)
+        checkpoint = SETUP.setup_recap_checkpoint(self.fixture.candidate, recap)
+        adapter = SETUP.adapt_setup_decision(
+            self.fixture.candidate,
+            "Yes",
+            role="user",
+            provenance="direct-user-message",
+            checkpoint=checkpoint,
+        )
+
+        self.assertIn("Supported operations: Create, Modify, Delete, Preserve.", recap)
+        self.assertIn("Delete catalog.txt", recap)
+        self.assertEqual(
+            checkpoint["schema_version"],
+            "implementation-program-setup-recap-checkpoint/v2",
+        )
+        self.assertEqual(
+            checkpoint["renderer_schema"],
+            "implementation-program-setup-recap/v2",
+        )
+        self.assertEqual(checkpoint["renderer_version"], 2)
+        self.assertEqual(adapter["schema_version"], "setup-approval-decision/v2")
+        self.assertEqual(
+            SETUP.validate_setup_decision(self.fixture.candidate, adapter), []
+        )
+
+    def test_setup_v1_rejects_delete_without_mutating_candidate_bytes(self) -> None:
+        manifest = self.manifest()
+        envelope = manifest["setup_semantics"]["operation_envelope"]
+        envelope["supported_operations"] = [
+            "Create",
+            "Modify",
+            "Delete",
+            "Preserve",
+        ]
+        delete = copy.deepcopy(envelope["allocations"][1])
+        delete.update(
+            operation="Delete",
+            ownership="program",
+            accepted_state="absent",
+            content_disposition="obsolete",
+            rationale="The accepted program no longer needs the catalog.",
+        )
+        envelope["allocations"][1] = delete
+        manifest["setup_semantics_sha256"] = canonical_compact_sha256(
+            manifest["setup_semantics"]
+        )
+        self.fixture.write_json("manifest.json", manifest)
+        before = repository_snapshot(self.fixture.candidate)
+
+        issues = SETUP.validate_setup_semantics(self.fixture.candidate)
+
+        self.assertIn(
+            "operation envelope must support exactly Create/Modify/Preserve", issues
+        )
+        self.assertIn("operation allocation 1 operation is unsupported", issues)
+        self.assertIn(
+            "operation allocation 1 contains unsupported field accepted_state", issues
+        )
+        self.assertEqual(repository_snapshot(self.fixture.candidate), before)
+        self.assertEqual(
+            SETUP.SETUP_SEMANTICS_SCHEMA,
+            "implementation-program-setup-semantics/v1",
+        )
+        self.assertEqual(
+            SETUP.OPERATION_ENVELOPE_SCHEMA,
+            "implementation-operation-envelope/v1",
+        )
+        self.assertEqual(SETUP.SUPPORTED_OPERATIONS, ("Create", "Modify", "Preserve"))
+
+    def test_setup_decision_adapters_cannot_substitute_across_families(self) -> None:
+        for delete_capable, foreign_schema in (
+            (False, "setup-approval-decision/v2"),
+            (True, "setup-approval-decision/v1"),
+        ):
+            with self.subTest(delete_capable=delete_capable):
+                self.tearDown()
+                self.fixture = BootstrapFixture()
+                if delete_capable:
+                    self.fixture.configure_delete_setup_v2()
+                else:
+                    self.fixture.configure_setup_v3()
+                adapter = SETUP.adapt_setup_decision(
+                    self.fixture.candidate,
+                    "Yes",
+                    role="user",
+                    provenance="direct-user-message",
+                )
+                adapter["schema_version"] = foreign_schema
+                base = dict(adapter)
+                base.pop("adapter_id")
+                adapter["adapter_id"] = SETUP.derive_identifier(
+                    "setup-approval-adapter", base
+                )
+
+                self.assertIn(
+                    "setup decision adapter schema mismatch",
+                    SETUP.validate_setup_decision(self.fixture.candidate, adapter),
+                )
+
+    def test_delete_setup_v2_enforces_delete_fields_and_exact_path(self) -> None:
+        cases = (
+            ("kind", "bounded-path-class", "Delete allocation kind must be exact-path"),
+            ("accepted_state", "present", "Delete allocation accepted_state must be absent"),
+            (
+                "content_disposition",
+                "archive",
+                "Delete allocation content_disposition is unsupported",
+            ),
+            ("rationale", "", "Delete allocation rationale is required"),
+            ("ownership", "user", "Delete allocation ownership must be program"),
+            ("collision", "none", "Delete allocation collision is unsupported"),
+        )
+        for field, value, expected_issue in cases:
+            with self.subTest(field=field):
+                self.tearDown()
+                self.fixture = BootstrapFixture()
+                self.fixture.configure_delete_setup_v2()
+                manifest = self.manifest()
+                allocation = manifest["setup_semantics"]["operation_envelope"][
+                    "allocations"
+                ][-1]
+                allocation[field] = value
+                manifest["setup_semantics_sha256"] = canonical_compact_sha256(
+                    manifest["setup_semantics"]
+                )
+                self.fixture.write_json("manifest.json", manifest)
+
+                self.assertIn(
+                    expected_issue,
+                    SETUP.validate_setup_semantics(self.fixture.candidate),
+                )
+
+    def test_delete_only_fields_are_rejected_on_non_delete_operations(self) -> None:
+        self.tearDown()
+        self.fixture = BootstrapFixture()
+        self.fixture.configure_delete_setup_v2()
+        manifest = self.manifest()
+        create = manifest["setup_semantics"]["operation_envelope"]["allocations"][0]
+        create.update(
+            accepted_state="absent",
+            content_disposition="obsolete",
+            rationale="Not valid for Create.",
+        )
+        manifest["setup_semantics_sha256"] = canonical_compact_sha256(
+            manifest["setup_semantics"]
+        )
+        self.fixture.write_json("manifest.json", manifest)
+
+        issues = SETUP.validate_setup_semantics(self.fixture.candidate)
+
+        self.assertIn(
+            "operation allocation 0 contains unsupported field accepted_state", issues
+        )
+
+    def test_accepted_predecessor_delete_requires_same_path_create_in_ancestry(
+        self,
+    ) -> None:
+        self.tearDown()
+        self.fixture = BootstrapFixture()
+        self.fixture.configure_successor_chain(
+            ("ARCHIVE-INDEX", "ARCHIVE-VERIFY", "ARCHIVE-REMOVE")
+        )
+        self.fixture.configure_delete_setup_v2(
+            path="archive-output.txt",
+            increment_id="ARCHIVE-REMOVE",
+            collision="accepted-predecessor",
+        )
+        manifest = self.manifest()
+        allocations = manifest["setup_semantics"]["operation_envelope"][
+            "allocations"
+        ]
+        create = next(
+            allocation
+            for allocation in allocations
+            if allocation["path"] == "archive-output.txt"
+            and allocation["operation"] == "Create"
+        )
+        create["increment_ids"] = ["ARCHIVE-INDEX"]
+        manifest["setup_semantics_sha256"] = canonical_compact_sha256(
+            manifest["setup_semantics"]
+        )
+        self.fixture.write_json("manifest.json", manifest)
+        self.assertEqual(SETUP.validate_setup_semantics(self.fixture.candidate), [])
+
+        create["path"] = "other-output.txt"
+        manifest["setup_semantics_sha256"] = canonical_compact_sha256(
+            manifest["setup_semantics"]
+        )
+        self.fixture.write_json("manifest.json", manifest)
+
+        self.assertIn(
+            "Delete allocation accepted-predecessor lacks a same-path Create in a strict predecessor",
+            SETUP.validate_setup_semantics(self.fixture.candidate),
+        )
+
+    def test_mixed_setup_family_is_rejected_before_proposal_publication(self) -> None:
+        manifest = self.manifest()
+        semantics = manifest["setup_semantics"]
+        semantics["operation_envelope"][
+            "schema_version"
+        ] = "implementation-operation-envelope/v2"
+        manifest["setup_semantics_sha256"] = canonical_compact_sha256(semantics)
+        self.fixture.write_json("manifest.json", manifest)
+        before = repository_snapshot(self.fixture.repository)
+
+        with self.assertRaisesRegex(ValueError, "exact supported pair"):
+            BOOTSTRAP.publish_program_proposal(
+                self.fixture.repository,
+                self.fixture.source_plan,
+                self.fixture.candidate,
+                self.fixture.source_sha256,
+            )
+
+        self.assertEqual(repository_snapshot(self.fixture.repository), before)
+
     def test_authoritative_source_and_increment_dependencies_are_exact(self) -> None:
         manifest = self.manifest()
         manifest["setup_semantics"]["sources"][0]["sha256"] = "f" * 64
@@ -513,6 +737,121 @@ class SetupActivationTests(unittest.TestCase):
         return ACTIVATION.materialize_exact_plan(
             self.fixture.program_root, prepared.plan_prompt, self.observation()
         )
+
+    def test_setup_v2_delete_materializes_typed_baseline_and_quarantine_binding(self):
+        fixture = BootstrapFixture()
+        try:
+            fixture.configure_delete_setup_v2(path="catalog.txt")
+            BOOTSTRAP.publish_program_proposal(
+                fixture.repository, fixture.source_plan, fixture.candidate, fixture.source_sha256
+            )
+            observation = ACTIVATION.inspect_repository(fixture.repository, fixture.head).observation
+            decision = SETUP.adapt_setup_decision(
+                fixture.program_root, "Yes", role="user", provenance="direct-user-message"
+            )
+            activation = ACTIVATION.activate_program(fixture.program_root, decision, observation)
+            intent = SETUP.adapt_increment_start_intent(
+                fixture.program_root, activation.handoff, role="user", provenance="direct-user-message"
+            )
+            ACTIVATION.start_first_increment(fixture.program_root, intent, observation)
+            observation = ACTIVATION.inspect_repository(fixture.repository, fixture.head).observation
+            plan = _exact_plan_bytes(fixture.program_root, observation)
+            prepared = ACTIVATION.prepare_exact_plan(fixture.program_root, plan, observation)
+            ACTIVATION.materialize_exact_plan(fixture.program_root, prepared.plan_prompt, observation)
+            baseline = json.loads(
+                (fixture.program_root / "increments/ARCHIVE-INDEX/execution-baseline.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(baseline["schema_version"], "implementation-execution-baseline/v2")
+            self.assertEqual(baseline["file_map"]["delete"], ["catalog.txt"])
+            binding = baseline["delete_quarantine_bindings"][0]
+            self.assertTrue((fixture.program_root / binding["root_path"]).is_dir())
+            self.assertEqual(binding["root_mode"], "40700")
+            self.assertEqual(binding["entry_path"].rsplit("/", 1)[0], binding["root_path"])
+        finally:
+            fixture.close()
+
+    def test_setup_v2_transition_executes_delete_and_persists_v2_result(self):
+        fixture = BootstrapFixture()
+        try:
+            fixture.configure_delete_setup_v2(path="catalog.txt")
+            BOOTSTRAP.publish_program_proposal(fixture.repository, fixture.source_plan, fixture.candidate, fixture.source_sha256)
+            observation = ACTIVATION.inspect_repository(fixture.repository, fixture.head).observation
+            decision = SETUP.adapt_setup_decision(fixture.program_root, "Yes", role="user", provenance="direct-user-message")
+            activation = ACTIVATION.activate_program(fixture.program_root, decision, observation)
+            intent = SETUP.adapt_increment_start_intent(fixture.program_root, activation.handoff, role="user", provenance="direct-user-message")
+            ACTIVATION.start_first_increment(fixture.program_root, intent, observation)
+            observation = ACTIVATION.inspect_repository(fixture.repository, fixture.head).observation
+            prepared = ACTIVATION.prepare_exact_plan(fixture.program_root, _exact_plan_bytes(fixture.program_root, observation), observation)
+            ACTIVATION.materialize_exact_plan(fixture.program_root, prepared.plan_prompt, observation)
+            implementing = ACTIVATION.advance_execution_state(fixture.program_root, "implementing", observation)
+            self.assertEqual(implementing.product_path_states["schema_version"], "implementation-product-path-states/v2")
+            status = json.loads((fixture.program_root / "state/status.json").read_text(encoding="utf-8"))
+            transition = status["execution_transition_binding"]
+            self.assertEqual(transition["schema_version"], "implementation-execution-transition/v2")
+            self.assertNotIn("product_delta_sha256", transition)
+            self.assertEqual(transition["product_path_states"], implementing.product_path_states)
+            self.assertFalse((fixture.repository / "catalog.txt").exists())
+            self.assertEqual(len(transition["product_path_states"]["delete_quarantine_bindings"]), 1)
+        finally:
+            fixture.close()
+
+    def test_setup_v2_multi_delete_retry_adopts_interrupted_prefix(self):
+        fixture = BootstrapFixture()
+        try:
+            second = fixture.repository / "legacy-two.txt"
+            second.write_bytes(b"second delete target\n")
+            from tests.program_bootstrap_support import run_git
+
+            run_git(fixture.repository, "add", "legacy-two.txt")
+            run_git(fixture.repository, "commit", "-m", "seed second delete target")
+            fixture.head = run_git(fixture.repository, "rev-parse", "HEAD")
+            workspace_binding = fixture.load_json("state/workspace.json")
+            workspace_binding["implementation_workspace"]["base_commit"] = fixture.head
+            workspace_binding["implementation_workspace"]["head_commit_at_selection"] = fixture.head
+            fixture.write_json("state/workspace.json", workspace_binding)
+            fixture.configure_delete_setup_v2(additional_delete_paths=("legacy-two.txt",))
+            BOOTSTRAP.publish_program_proposal(
+                fixture.repository, fixture.source_plan, fixture.candidate, fixture.source_sha256
+            )
+            observation = ACTIVATION.inspect_repository(fixture.repository, fixture.head).observation
+            activation = ACTIVATION.activate_program(
+                fixture.program_root,
+                SETUP.adapt_setup_decision(fixture.program_root, "Yes", role="user", provenance="direct-user-message"),
+                observation,
+            )
+            intent = SETUP.adapt_increment_start_intent(
+                fixture.program_root, activation.handoff, role="user", provenance="direct-user-message"
+            )
+            ACTIVATION.start_first_increment(fixture.program_root, intent, observation)
+            observation = ACTIVATION.inspect_repository(fixture.repository, fixture.head).observation
+            prepared = ACTIVATION.prepare_exact_plan(
+                fixture.program_root, _exact_plan_bytes(fixture.program_root, observation), observation
+            )
+            ACTIVATION.materialize_exact_plan(fixture.program_root, prepared.plan_prompt, observation)
+            original_write = STATE._write_delete_receipt
+            attempts = [0]
+
+            def fail_first(*args, **kwargs):
+                attempts[0] += 1
+                if attempts[0] == 1:
+                    raise RuntimeError("receipt interruption")
+                return original_write(*args, **kwargs)
+
+            with mock.patch.object(STATE, "_write_delete_receipt", side_effect=fail_first):
+                with self.assertRaisesRegex(RuntimeError, "receipt interruption"):
+                    ACTIVATION.advance_execution_state(fixture.program_root, "implementing", observation)
+            self.assertTrue(fixture.repository.joinpath("legacy-two.txt").exists())
+            interrupted = DISCOVERY.discover_programs(fixture.repository)
+            self.assertEqual(interrupted.disposition, "execution-transition-recovery-required", interrupted)
+            observation = ACTIVATION.inspect_repository(fixture.repository, fixture.head).observation
+            retry = ACTIVATION.advance_execution_state(fixture.program_root, "implementing", observation)
+            self.assertEqual(retry.product_path_states["schema_version"], "implementation-product-path-states/v2")
+            self.assertFalse(fixture.repository.joinpath("catalog.txt").exists())
+            self.assertFalse(fixture.repository.joinpath("legacy-two.txt").exists())
+            self.assertEqual(len(retry.product_path_states["delete_quarantine_bindings"]), 2)
+        finally:
+            fixture.close()
+
 
     def persist_gate(
         self,

@@ -25,8 +25,14 @@ from program_authority import (
 from state_authority import (
     ActionBinding,
     ExactFileMap,
+    ExactFileMapV2,
     RepositoryObservation,
+    WorkspacePathSnapshot,
     decide_action_authorization,
+    classify_delete_quarantine_recovery,
+    delete_quarantine_allocation,
+    descriptor_protection_context,
+    inspect_workspace_path,
     validate_state_authority,
 )
 
@@ -34,6 +40,8 @@ from state_authority import (
 REPOSITORY_INSPECTION_SCHEMA = "implementation-repository-inspection/v1"
 EVIDENCE_RECORD_SCHEMA = "implementation-evidence-record/v1"
 EXECUTION_BASELINE_SCHEMA = "implementation-execution-baseline/v1"
+EXECUTION_BASELINE_SCHEMA_V2 = "implementation-execution-baseline/v2"
+PRODUCT_PATH_STATES_SCHEMA_V2 = "implementation-product-path-states/v2"
 
 MATERIAL_EVIDENCE_PREDICATES = frozenset(
     {
@@ -171,6 +179,58 @@ class ExecutionWorkspaceAssessment:
     issues: tuple[str, ...]
     product_delta: tuple[dict[str, object], ...]
     product_delta_sha256: str
+
+
+@dataclass(frozen=True)
+class ExecutionBaselineV2:
+    schema_version: str
+    program_id: str
+    program_revision: int
+    increment_id: str
+    exact_file_plan_sha256: str
+    current_increment_authority_binding: dict[str, object]
+    workspace_observation: dict[str, object]
+    file_map: ExactFileMapV2
+    path_baselines: tuple[dict[str, object], ...]
+    delete_quarantine_bindings: tuple[dict[str, object], ...]
+    protected_control_allocations: tuple[str, ...]
+    user_work_baselines: tuple[UserWorkBaseline, ...]
+    inherited_paths: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ProductPathStateV2:
+    path: str
+    operation: str
+    exists: bool
+    sha256: str | None
+    mode: str | None
+    device: int | None
+    inode: int | None
+    link_count: int | None
+
+
+@dataclass(frozen=True)
+class ProductPathStatesV2:
+    schema_version: str
+    program_id: str
+    program_revision: int
+    increment_id: str
+    ordered_path_states: tuple[ProductPathStateV2, ...]
+    delete_quarantine_bindings: tuple[dict[str, object], ...]
+    sha256: str
+
+
+@dataclass(frozen=True)
+class ExecutionWorkspaceAssessmentV2:
+    valid: bool
+    issues: tuple[str, ...]
+    product_states: ProductPathStatesV2
+
+    @property
+    def product_delta_sha256(self) -> str:
+        """Compatibility accessor; v2 authority binds product states by sha256."""
+        return self.product_states.sha256
 
 
 @dataclass(frozen=True)
@@ -939,7 +999,9 @@ def _normalized_file_map_path(raw_path: str) -> str:
     return raw_path
 
 
-def parse_exact_file_map(markdown: str) -> ExactFileMap:
+def _parse_exact_file_map(
+    markdown: str, *, supported_delete: bool
+) -> ExactFileMap | ExactFileMapV2:
     """Parse exactly one disposition-aware file map from an exact plan."""
     file_map_matches = list(
         re.finditer(r"^## File map\s*$", markdown, flags=re.MULTILINE)
@@ -951,13 +1013,23 @@ def parse_exact_file_map(markdown: str) -> ExactFileMap:
     end = start + next_heading.start() if next_heading else len(markdown)
     body = markdown[start:end]
     headings = list(
-        re.finditer(r"^### (Create|Modify|Preserve)\s*$", body, flags=re.MULTILINE)
+        re.finditer(
+            r"^### (Create|Modify|Delete|Preserve)\s*$",
+            body,
+            flags=re.MULTILINE,
+        )
     )
-    if tuple(match.group(1) for match in headings) != (
-        "Create",
-        "Modify",
-        "Preserve",
-    ):
+    heading_names = tuple(match.group(1) for match in headings)
+    if supported_delete:
+        if heading_names != ("Create", "Modify", "Delete", "Preserve"):
+            raise ValueError(
+                "exact-file map must contain one ordered Create, Modify, Delete, and Preserve section"
+            )
+    elif heading_names == ("Create", "Modify", "Preserve"):
+        pass
+    elif "Delete" in heading_names:
+        raise ValueError("Delete section requires setup-v2 exact-file map")
+    else:
         raise ValueError(
             "exact-file map must contain one ordered Create, Modify, and Preserve section"
         )
@@ -982,14 +1054,331 @@ def parse_exact_file_map(markdown: str) -> ExactFileMap:
                 raise ValueError(f"exact-file map path is duplicated: {path}")
             seen.add(path)
             paths.append(path)
-        if not paths:
+        if not paths and disposition != "Delete":
             raise ValueError(f"exact-file map {disposition} section must not be empty")
         parsed[disposition] = tuple(paths)
+    if supported_delete:
+        return ExactFileMapV2(
+            create=parsed["Create"],
+            modify=parsed["Modify"],
+            delete=parsed["Delete"],
+            preserve=parsed["Preserve"],
+        )
     return ExactFileMap(
         create=parsed["Create"],
         modify=parsed["Modify"],
         preserve=parsed["Preserve"],
     )
+
+
+def parse_exact_file_map(markdown: str) -> ExactFileMap:
+    """Parse the v1 exact-file map family."""
+    parsed = _parse_exact_file_map(markdown, supported_delete=False)
+    if isinstance(parsed, ExactFileMapV2):
+        raise AssertionError("v1 exact-file maps must not produce v2 results")
+    return parsed
+
+
+def parse_exact_file_map_v2(markdown: str) -> ExactFileMapV2:
+    """Parse the v2 exact-file map family."""
+    parsed = _parse_exact_file_map(markdown, supported_delete=True)
+    if isinstance(parsed, ExactFileMap):
+        raise AssertionError("v2 exact-file maps must not produce v1 results")
+    return parsed
+
+
+def _snapshot_from_value(value: object, *, expected_path: str) -> WorkspacePathSnapshot:
+    if not isinstance(value, dict):
+        raise ValueError("execution baseline v2 snapshot is invalid")
+    try:
+        path = _normalized_file_map_path(str(value["path"]))
+        snapshot = WorkspacePathSnapshot(
+            path=path,
+            exists=value["exists"],
+            sha256=value.get("sha256"),
+            mode=value.get("mode"),
+            device=value.get("device"),
+            inode=value.get("inode"),
+            link_count=value.get("link_count"),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("execution baseline v2 snapshot is invalid") from error
+    if path != expected_path or not isinstance(snapshot.exists, bool):
+        raise ValueError("execution baseline v2 snapshot is invalid")
+    if snapshot.exists:
+        if (
+            not isinstance(snapshot.sha256, str)
+            or not _SHA256.fullmatch(snapshot.sha256)
+            or not isinstance(snapshot.mode, str)
+            or not isinstance(snapshot.device, int)
+            or not isinstance(snapshot.inode, int)
+            or snapshot.link_count != 1
+        ):
+            raise ValueError("execution baseline v2 snapshot is invalid")
+    elif any(
+        value is not None
+        for value in (snapshot.sha256, snapshot.mode, snapshot.device, snapshot.inode, snapshot.link_count)
+    ):
+        raise ValueError("absent execution baseline v2 snapshot must have null facts")
+    return snapshot
+
+
+def _delete_binding_from_value(value: object, *, expected_path: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError("execution baseline v2 Delete binding is invalid")
+    required = (
+        "path", "root_path", "root_owner", "root_mode", "root_device",
+        "root_inode", "entry_path", "receipt_path",
+    )
+    if any(field not in value for field in required):
+        raise ValueError("execution baseline v2 Delete binding is invalid")
+    path = _normalized_file_map_path(str(value["path"]))
+    if path != expected_path:
+        raise ValueError("execution baseline v2 Delete binding is invalid")
+    for field in ("root_path", "entry_path", "receipt_path"):
+        _normalized_file_map_path(str(value[field]))
+    if not all(isinstance(value[field], int) and not isinstance(value[field], bool) for field in ("root_owner", "root_device", "root_inode")):
+        raise ValueError("execution baseline v2 Delete binding is invalid")
+    if not isinstance(value["root_mode"], str):
+        raise ValueError("execution baseline v2 Delete binding is invalid")
+    return {str(key): value[key] for key in value}
+
+
+def execution_baseline_v2_from_value(value: object) -> ExecutionBaselineV2:
+    """Parse the immutable descriptor-bound execution baseline v2 contract."""
+    if not isinstance(value, dict) or value.get("schema_version") != EXECUTION_BASELINE_SCHEMA_V2:
+        raise ValueError("unsupported execution baseline schema")
+    try:
+        file_map_value = value["file_map"]
+        path_values = value["path_baselines"]
+        user_values = value["user_work_baselines"]
+        inherited_values = value["inherited_paths"]
+        if not isinstance(file_map_value, dict) or not isinstance(path_values, list):
+            raise TypeError("baseline inventory")
+        file_map = ExactFileMapV2(
+            create=tuple(_normalized_file_map_path(item) for item in file_map_value["create"]),
+            modify=tuple(_normalized_file_map_path(item) for item in file_map_value["modify"]),
+            delete=tuple(_normalized_file_map_path(item) for item in file_map_value["delete"]),
+            preserve=tuple(_normalized_file_map_path(item) for item in file_map_value["preserve"]),
+        )
+        path_baselines: list[dict[str, object]] = []
+        for item in path_values:
+            if not isinstance(item, dict):
+                raise TypeError("path baseline")
+            path = _normalized_file_map_path(str(item["path"]))
+            disposition = str(item["disposition"])
+            if disposition not in {"Create", "Modify", "Delete", "Preserve"}:
+                raise ValueError("execution baseline v2 disposition is invalid")
+            snapshot = _snapshot_from_value(item["snapshot"], expected_path=path)
+            path_baselines.append({"path": path, "disposition": disposition, "snapshot": snapshot})
+        authority = value["current_increment_authority_binding"]
+        workspace = value["workspace_observation"]
+        if not isinstance(authority, dict) or not isinstance(workspace, dict) or not isinstance(user_values, list) or not isinstance(inherited_values, list):
+            raise TypeError("binding")
+        user_baselines = tuple(
+            UserWorkBaseline(path=str(item["path"]), categories=tuple(item["categories"]), sha256=item.get("sha256"))
+            for item in user_values if isinstance(item, dict)
+        )
+        bindings_value = value["delete_quarantine_bindings"]
+        if not isinstance(bindings_value, list):
+            raise TypeError("Delete bindings")
+        bindings = tuple(_delete_binding_from_value(item, expected_path=str(item["path"])) for item in bindings_value)
+        protected_values = value.get("protected_control_allocations", [])
+        if not isinstance(protected_values, list):
+            raise TypeError("protected control allocations")
+        baseline = ExecutionBaselineV2(
+            schema_version=str(value["schema_version"]),
+            program_id=str(value["program_id"]),
+            program_revision=int(value["program_revision"]),
+            increment_id=str(value["increment_id"]),
+            exact_file_plan_sha256=str(value["exact_file_plan_sha256"]),
+            current_increment_authority_binding=dict(authority),
+            workspace_observation=dict(workspace),
+            file_map=file_map,
+            path_baselines=tuple(path_baselines),
+            delete_quarantine_bindings=bindings,
+            protected_control_allocations=tuple(_normalized_file_map_path(path) for path in protected_values),
+            user_work_baselines=user_baselines,
+            inherited_paths=tuple(_normalized_file_map_path(path) for path in inherited_values),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("execution baseline structure is invalid") from error
+    map_sections = (
+        *baseline.file_map.create,
+        *baseline.file_map.modify,
+        *baseline.file_map.delete,
+        *baseline.file_map.preserve,
+    )
+    if len(set(map_sections)) != len(map_sections):
+        raise ValueError("execution baseline v2 file map is duplicated")
+    expected_paths = set(file_map.create) | set(file_map.modify) | set(file_map.delete) | set(file_map.preserve)
+    actual_paths = {item["path"] for item in baseline.path_baselines}
+    if actual_paths != expected_paths - set(baseline.protected_control_allocations):
+        raise ValueError("execution baseline v2 path inventory does not match its file map")
+    if len(baseline.path_baselines) != len(expected_paths - set(baseline.protected_control_allocations)):
+        raise ValueError("execution baseline v2 path inventory is duplicated")
+    expected_order = [
+        path
+        for path in map_sections
+        if path not in set(baseline.protected_control_allocations)
+    ]
+    if [item["path"] for item in baseline.path_baselines] != expected_order:
+        raise ValueError("execution baseline v2 path inventory is not in operation order")
+    expected_dispositions = {path: operation for operation, paths in (("Create", file_map.create), ("Modify", file_map.modify), ("Delete", file_map.delete), ("Preserve", file_map.preserve)) for path in paths}
+    if any(expected_dispositions[item["path"]] != item["disposition"] for item in baseline.path_baselines):
+        raise ValueError("execution baseline v2 path disposition mismatch")
+    if (
+        [item["path"] for item in baseline.delete_quarantine_bindings]
+        != list(file_map.delete)
+    ):
+        raise ValueError("each Delete path requires exactly one quarantine binding")
+    protected_allocations = set(baseline.protected_control_allocations)
+    for binding in baseline.delete_quarantine_bindings:
+        if not {
+            binding["root_path"],
+            binding["entry_path"],
+            binding["receipt_path"],
+        }.issubset(protected_allocations):
+            raise ValueError(
+                "execution baseline v2 quarantine allocations must be protected"
+            )
+    snapshots = {item["path"]: item["snapshot"] for item in baseline.path_baselines}
+    for binding in baseline.delete_quarantine_bindings:
+        snapshot = snapshots[binding["path"]]
+        seed = {
+            "program_id": baseline.program_id,
+            "program_revision": baseline.program_revision,
+            "increment_id": baseline.increment_id,
+            "path": binding["path"],
+            "baseline_sha256": snapshot.sha256,
+            "device": snapshot.device,
+            "inode": snapshot.inode,
+            "mode": snapshot.mode,
+            "link_count": snapshot.link_count,
+        }
+        digest = hashlib.sha256(
+            (json.dumps(seed, ensure_ascii=False, separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8")
+        ).hexdigest()
+        if (
+            binding["entry_path"] != f'{binding["root_path"]}/delete-{digest}.bin'
+            or binding["receipt_path"] != f'{binding["root_path"]}/delete-{digest}.receipt.json'
+        ):
+            raise ValueError("execution baseline v2 Delete binding is not deterministic")
+    return baseline
+
+
+def product_path_states_v2_from_value(value: object) -> ProductPathStatesV2:
+    """Parse and verify typed product path states and Delete receipt bindings."""
+    if not isinstance(value, dict) or value.get("schema_version") != PRODUCT_PATH_STATES_SCHEMA_V2:
+        raise ValueError("unsupported product path states schema")
+    try:
+        raw_states = value["ordered_path_states"]
+        raw_bindings = value["delete_quarantine_bindings"]
+        if not isinstance(raw_states, list) or not isinstance(raw_bindings, list):
+            raise TypeError("product path state inventory")
+        states: list[ProductPathStateV2] = []
+        wire_exact = True
+        if set(value) != {
+            "schema_version",
+            "sha256",
+            "ordered_path_states",
+            "delete_quarantine_bindings",
+        }:
+            raise ValueError("product path states fields are invalid")
+        for raw in raw_states:
+            if not isinstance(raw, dict):
+                raise TypeError("product path state")
+            if set(raw) != {
+                "path",
+                "exists",
+                "sha256",
+                "mode",
+                "device",
+                "inode",
+                "link_count",
+            }:
+                raise ValueError("product path state fields are invalid")
+            path = _normalized_file_map_path(str(raw["path"]))
+            operation = "Delete" if any(
+                isinstance(binding, dict) and binding.get("path") == path
+                for binding in raw_bindings
+            ) else ""
+            if operation not in {"Create", "Modify", "Delete", "Preserve", ""}:
+                raise ValueError("product path state operation is invalid")
+            state = ProductPathStateV2(path, operation, raw["exists"], raw.get("sha256"), raw.get("mode"), raw.get("device"), raw.get("inode"), raw.get("link_count"))
+            if not isinstance(state.exists, bool):
+                raise ValueError("product path state exists is invalid")
+            if state.exists and (
+                not isinstance(state.sha256, str)
+                or not _SHA256.fullmatch(state.sha256)
+                or not isinstance(state.mode, str)
+                or not isinstance(state.device, int)
+                or isinstance(state.device, bool)
+                or not isinstance(state.inode, int)
+                or isinstance(state.inode, bool)
+                or not isinstance(state.link_count, int)
+                or isinstance(state.link_count, bool)
+                or state.link_count != 1
+            ):
+                raise ValueError("product path state facts are invalid")
+            if not state.exists and any(fact is not None for fact in (state.sha256, state.mode, state.device, state.inode, state.link_count)):
+                raise ValueError("absent product path state must have null facts")
+            if operation == "Delete" and state.exists:
+                raise ValueError("Delete product path state must be absent")
+            states.append(state)
+        if len({state.path for state in states}) != len(states):
+            raise ValueError("product path state inventory is duplicated")
+        bindings = tuple(dict(item) for item in raw_bindings if isinstance(item, dict))
+        if len(bindings) != len(raw_bindings):
+            raise ValueError("product Delete binding is invalid")
+        for item in bindings:
+            if set(item) != {"path", "receipt_path", "receipt_sha256"} or not isinstance(item["receipt_sha256"], str) or not _SHA256.fullmatch(item["receipt_sha256"]):
+                raise ValueError("product Delete binding is invalid")
+            _normalized_file_map_path(str(item["path"]))
+            _normalized_file_map_path(str(item["receipt_path"]))
+        delete_paths = [state.path for state in states if state.operation == "Delete"]
+        if [item["path"] for item in bindings] != delete_paths:
+            raise ValueError("product Delete bindings do not match Delete states")
+        digest_value = value["sha256"]
+        if not isinstance(digest_value, str) or not _SHA256.fullmatch(digest_value):
+            raise ValueError("product path states digest is invalid")
+        canonical = {"ordered_path_states": [
+            ({key: item for key, item in asdict(state).items() if key != "operation"} if wire_exact else asdict(state))
+            for state in states
+        ], "delete_quarantine_bindings": list(bindings)}
+        expected_digest = hashlib.sha256(json.dumps(canonical, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest()
+        if digest_value != expected_digest:
+            raise ValueError("product path states digest mismatch")
+    except (KeyError, TypeError, ValueError) as error:
+        if str(error) in {"product path states digest mismatch", "product path state facts are invalid", "Delete product path state must be absent", "absent product path state must have null facts"}:
+            raise
+        raise ValueError("product path states structure is invalid") from error
+    return ProductPathStatesV2(str(value["schema_version"]), str(value.get("program_id", "")), int(value.get("program_revision", 0)), str(value.get("increment_id", "")), tuple(states), bindings, digest_value)
+
+
+def product_path_states_v2_value(value: ProductPathStatesV2) -> dict[str, object]:
+    """Return the exact four-field v2 product-result wire value."""
+    states = [
+        {
+            key: item
+            for key, item in asdict(state).items()
+            if key != "operation"
+        }
+        for state in value.ordered_path_states
+    ]
+    canonical = {
+        "ordered_path_states": states,
+        "delete_quarantine_bindings": list(value.delete_quarantine_bindings),
+    }
+    digest = hashlib.sha256(
+        json.dumps(canonical, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return {
+        "schema_version": PRODUCT_PATH_STATES_SCHEMA_V2,
+        "sha256": digest,
+        "ordered_path_states": states,
+        "delete_quarantine_bindings": list(value.delete_quarantine_bindings),
+    }
 
 
 def execution_baseline_from_value(value: object) -> ExecutionBaseline:
@@ -1288,6 +1677,198 @@ def validate_execution_workspace(
         product_delta=tuple(product_delta),
         product_delta_sha256=delta_sha256,
     )
+
+
+def _product_state_digest(states: Sequence[ProductPathStateV2], bindings: Sequence[dict[str, object]]) -> str:
+    value = {
+        "ordered_path_states": [
+            {key: item for key, item in asdict(state).items() if key != "operation"}
+            for state in states
+        ],
+        "delete_quarantine_bindings": list(bindings),
+    }
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def validate_execution_workspace_v2(
+    program_root: Path,
+    baseline: ExecutionBaselineV2,
+    inspection: RepositoryInspection,
+    *,
+    increment_state: str,
+    protected_paths: Sequence[str] = (),
+    protected_identities: Sequence[tuple[int, int]] = (),
+) -> ExecutionWorkspaceAssessmentV2:
+    """Validate v2 product paths and immutable Delete quarantine state."""
+    workspace = Path(inspection.observation.path)
+    issues: list[str] = []
+    states: list[ProductPathStateV2] = []
+    bindings: list[dict[str, object]] = []
+    baseline_by_path = {item["path"]: item for item in baseline.path_baselines}
+    delete_by_path = {item["path"]: item for item in baseline.delete_quarantine_bindings}
+    control_prefix = _relative_control_prefix(Path(program_root), workspace)
+    context_paths, context_identities = descriptor_protection_context(
+        workspace,
+        program_root=Path(program_root),
+        inspection=inspection,
+        extra_paths=tuple(
+            path for path in (control_prefix, *protected_paths) if path
+        ),
+    )
+    protected_paths = context_paths
+    protected_identities = tuple(
+        dict.fromkeys((*context_identities, *protected_identities))
+    )
+
+    recorded = baseline.workspace_observation
+    for field, actual in (
+        ("repository", inspection.observation.repository),
+        ("path", inspection.observation.path),
+        ("branch", inspection.observation.branch),
+        ("base_commit", inspection.observation.base_commit),
+        ("head_commit", inspection.observation.head_commit),
+    ):
+        if recorded.get(field) != actual:
+            issues.append(f"execution workspace {field} drift")
+    if not inspection.selected_base_is_ancestor:
+        issues.append("execution workspace selected base is no longer an ancestor")
+    if inspection.observation.active_git_operation != recorded.get("active_git_operation"):
+        issues.append("execution workspace active Git operation changed")
+    inherited_paths = set(baseline.inherited_paths)
+    current_dirty = _without_control_paths(
+        (*inspection.observation.staged_paths, *inspection.observation.modified_paths, *inspection.observation.untracked_paths, *inspection.observation.conflicted_paths),
+        control_prefix,
+    )
+    recorded_dirty = _without_control_paths(
+        (*tuple(recorded.get("staged_paths", ())), *tuple(recorded.get("modified_paths", ())), *tuple(recorded.get("untracked_paths", ())), *tuple(recorded.get("conflicted_paths", ()))),
+        control_prefix,
+    )
+    product_paths = set(baseline.file_map.create) | set(baseline.file_map.modify) | set(baseline.file_map.delete) | inherited_paths
+    unexpected_dirty = current_dirty - recorded_dirty - product_paths
+    if unexpected_dirty:
+        issues.append("execution workspace has unmapped dirty paths: " + ", ".join(sorted(unexpected_dirty)))
+    if recorded_dirty - current_dirty:
+        issues.append("execution workspace no longer preserves pre-existing user work: " + ", ".join(sorted(recorded_dirty - current_dirty)))
+    user_paths = {item.path for item in baseline.user_work_baselines}
+    if user_paths != recorded_dirty:
+        issues.append("execution baseline user-work inventory does not match launch dirt")
+    for item in baseline.user_work_baselines:
+        try:
+            actual_user = inspect_workspace_path(
+                workspace,
+                item.path,
+                protected_paths=protected_paths,
+                protected_identities=protected_identities,
+            )
+        except ValueError:
+            issues.append(f"pre-existing user work path is unsafe: {item.path}")
+            continue
+        if actual_user.sha256 != item.sha256:
+            issues.append(f"pre-existing user work changed: {item.path}")
+
+    def snapshot(path: str) -> WorkspacePathSnapshot:
+        return inspect_workspace_path(
+            workspace,
+            path,
+            protected_paths=protected_paths,
+            protected_identities=protected_identities,
+        )
+
+    for operation, paths in (
+        ("Create", baseline.file_map.create),
+        ("Modify", baseline.file_map.modify),
+        ("Delete", baseline.file_map.delete),
+        ("Preserve", baseline.file_map.preserve),
+    ):
+        for relative in paths:
+            if relative == control_prefix or relative.startswith(control_prefix + "/"):
+                continue
+            item = baseline_by_path.get(relative)
+            if item is None:
+                issues.append(f"execution baseline is missing product path: {relative}")
+                continue
+            try:
+                actual = snapshot(relative)
+            except ValueError as error:
+                issues.append(f"execution path is unsafe: {relative} ({error})")
+                actual = WorkspacePathSnapshot(relative, False, None, None, None, None, None)
+            expected = item["snapshot"]
+            expected_value = expected if isinstance(expected, WorkspacePathSnapshot) else _snapshot_from_value(expected, expected_path=relative)
+            changed = actual != expected_value
+            if operation == "Create":
+                if increment_state == "authorized" and actual.exists:
+                    issues.append(f"authorized workspace already created path: {relative}")
+                elif increment_state in {"reviewing", "verified", "awaiting-diff-approval", "accepted"} and not actual.exists:
+                    issues.append(f"reviewing workspace is missing Create path: {relative}")
+            elif operation == "Modify":
+                if not actual.exists:
+                    issues.append(f"execution workspace deleted Modify path: {relative}")
+                elif increment_state == "authorized" and changed:
+                    issues.append(f"authorized workspace changed Modify path: {relative}")
+                elif increment_state in {"reviewing", "verified", "awaiting-diff-approval", "accepted"} and not changed:
+                    issues.append(f"reviewing workspace has unchanged Modify path: {relative}")
+            elif operation == "Preserve" and changed:
+                issues.append(f"preserved path changed: {relative}")
+            elif operation == "Delete":
+                binding = delete_by_path[relative]
+                auth = {
+                    "increment_id": baseline.increment_id,
+                    **asdict(expected_value),
+                    **binding,
+                    "quarantine_root_path": binding["root_path"],
+                    "quarantine_root_device": binding["root_device"],
+                    "quarantine_root_inode": binding["root_inode"],
+                    "quarantine_root_mode": binding["root_mode"],
+                    "quarantine_root_owner": binding["root_owner"],
+                }
+                try:
+                    recovery = classify_delete_quarantine_recovery(
+                        program_root,
+                        workspace,
+                        relative,
+                        auth,
+                        protected_paths=protected_paths,
+                        protected_identities=protected_identities,
+                    )
+                except (OSError, ValueError) as error:
+                    issues.append(f"Delete recovery inspection failed: {relative} ({error})")
+                    recovery = None
+                if increment_state == "authorized":
+                    if recovery is None or recovery.disposition != "retry-ready":
+                        issues.append(f"authorized Delete source does not match baseline: {relative}")
+                    if not actual.exists or changed:
+                        issues.append(f"authorized Delete source does not match baseline: {relative}")
+                elif increment_state == "implementing":
+                    allowed_partial = {"retry-ready", "receipt-adoption-ready", "resume"}
+                    if recovery is None or recovery.disposition not in allowed_partial:
+                        issues.append(f"authorized Delete source does not match baseline: {relative}")
+                elif increment_state in {"reviewing", "verified", "awaiting-diff-approval", "accepted"}:
+                    if recovery is None or recovery.disposition != "resume":
+                        issues.append(f"reviewing Delete lacks exact quarantine receipt: {relative}")
+                if recovery is not None and recovery.disposition == "resume":
+                    receipt_snapshot = inspect_workspace_path(
+                        program_root,
+                        str(binding["receipt_path"]),
+                    )
+                    bindings.append({"path": relative, "receipt_path": binding["receipt_path"], "receipt_sha256": receipt_snapshot.sha256})
+            states.append(ProductPathStateV2(relative, operation, actual.exists, actual.sha256, actual.mode, actual.device, actual.inode, actual.link_count))
+
+    for path in baseline.file_map.delete:
+        if not any(binding["path"] == path for binding in bindings):
+            if increment_state not in {"authorized", "implementing"}:
+                issues.append(f"Delete quarantine receipt binding is missing: {path}")
+    product = ProductPathStatesV2(
+        PRODUCT_PATH_STATES_SCHEMA_V2,
+        baseline.program_id,
+        baseline.program_revision,
+        baseline.increment_id,
+        tuple(states),
+        tuple(bindings),
+        _product_state_digest(states, bindings),
+    )
+    return ExecutionWorkspaceAssessmentV2(not issues, tuple(sorted(set(issues))), product)
 
 
 def _validate_plan_naming_table(markdown: str) -> list[str]:
