@@ -317,6 +317,57 @@ class ProgramSetupTests(unittest.TestCase):
             SETUP.validate_setup_semantics(self.fixture.candidate),
         )
 
+    def test_accepted_predecessor_rejects_malformed_create_increment_ids(self) -> None:
+        self.fixture.close()
+        self.fixture = BootstrapFixture()
+        self.fixture.configure_successor_chain(
+            ("ARCHIVE-INDEX", "ARCHIVE-VERIFY", "ARCHIVE-REMOVE")
+        )
+        self.fixture.configure_delete_setup_v2(
+            path="archive-output.txt",
+            increment_id="ARCHIVE-REMOVE",
+            collision="accepted-predecessor",
+        )
+        manifest = self.manifest()
+        allocations = manifest["setup_semantics"]["operation_envelope"]["allocations"]
+        create_index = next(
+            index
+            for index, allocation in enumerate(allocations)
+            if allocation["path"] == "archive-output.txt"
+            and allocation["operation"] == "Create"
+        )
+        for case, increment_ids in (
+            ("null", None),
+            ("integer", 7),
+            ("boolean", True),
+            ("mixed-elements", ["ARCHIVE-INDEX", None]),
+        ):
+            with self.subTest(case=case):
+                allocations[create_index]["increment_ids"] = increment_ids
+                manifest["setup_semantics_sha256"] = canonical_compact_sha256(
+                    manifest["setup_semantics"]
+                )
+                self.fixture.write_json("manifest.json", manifest)
+                before = repository_snapshot(self.fixture.repository)
+                try:
+                    try:
+                        issues = SETUP.validate_setup_semantics(self.fixture.candidate)
+                    except TypeError as error:
+                        self.fail(f"setup validation raised TypeError: {error}")
+                    self.assertIn(
+                        f"operation allocation {create_index} increment allocation is invalid",
+                        issues,
+                    )
+                    self.assertIn(
+                        "Delete allocation accepted-predecessor lacks a same-path Create in a strict predecessor",
+                        issues,
+                    )
+                    self.assertNotIn("setup_semantics digest mismatch", issues)
+                finally:
+                    self.assertEqual(
+                        repository_snapshot(self.fixture.repository), before
+                    )
+
     def test_mixed_setup_family_is_rejected_before_proposal_publication(self) -> None:
         manifest = self.manifest()
         semantics = manifest["setup_semantics"]

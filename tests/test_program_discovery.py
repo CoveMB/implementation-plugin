@@ -12,6 +12,7 @@ from tests.test_program_authority import ProgramAuthorityFixture
 from tests.program_bootstrap_support import (
     BootstrapFixture,
     _exact_plan_bytes,
+    canonical_compact_sha256,
     canonical_json,
     repository_snapshot,
     write_raw_review_reports,
@@ -117,6 +118,88 @@ class SetupV3DiscoveryTests(unittest.TestCase):
         self.assertEqual(result.disposition, "program-setup-ready")
         self.assertEqual(result.required_input, "program-setup-approval")
         self.assertFalse(result.stop_required)
+
+    def test_discovery_cli_reports_malformed_create_allocation_without_writes(self) -> None:
+        self.fixture.close()
+        self.fixture = BootstrapFixture()
+        self.fixture.configure_successor_chain(
+            ("ARCHIVE-INDEX", "ARCHIVE-VERIFY", "ARCHIVE-REMOVE")
+        )
+        self.fixture.configure_delete_setup_v2(
+            path="archive-output.txt",
+            increment_id="ARCHIVE-REMOVE",
+            collision="accepted-predecessor",
+        )
+        manifest = self.fixture.load_json("manifest.json")
+        allocations = manifest["setup_semantics"]["operation_envelope"]["allocations"]
+        create_index = next(
+            index
+            for index, allocation in enumerate(allocations)
+            if allocation["path"] == "archive-output.txt"
+            and allocation["operation"] == "Create"
+        )
+        shutil.copytree(self.fixture.candidate, self.fixture.program_root)
+        for case, increment_ids in (
+            ("valid", ["ARCHIVE-INDEX"]),
+            ("null", None),
+            ("integer", 7),
+            ("boolean", True),
+        ):
+            with self.subTest(case=case):
+                allocations[create_index]["increment_ids"] = increment_ids
+                manifest["setup_semantics_sha256"] = canonical_compact_sha256(
+                    manifest["setup_semantics"]
+                )
+                (self.fixture.program_root / "manifest.json").write_bytes(
+                    canonical_json(manifest)
+                )
+                before = repository_snapshot(self.fixture.repository)
+                try:
+                    completed = subprocess.run(
+                        [
+                            sys.executable,
+                            "-B",
+                            str(SCRIPT_PATH),
+                            "discover",
+                            str(self.fixture.repository),
+                        ],
+                        cwd=REPOSITORY_ROOT,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                        timeout=30,
+                    )
+                    self.assertTrue(completed.stdout.strip(), completed.stderr)
+                    result = json.loads(completed.stdout)
+                    self.assertEqual(completed.stderr, "")
+                    self.assertIsNone(result["resume_expectations"])
+                    if case == "valid":
+                        self.assertEqual(completed.returncode, 0)
+                        self.assertEqual(result["disposition"], "program-setup-ready")
+                        self.assertFalse(result["stop_required"])
+                        self.assertEqual(result["required_input"], "program-setup-approval")
+                        self.assertEqual(result["issues"], [])
+                    else:
+                        self.assertEqual(completed.returncode, 1)
+                        self.assertEqual(result["disposition"], "invalid")
+                        self.assertTrue(result["stop_required"])
+                        self.assertIsNone(result["required_input"])
+                        self.assertTrue(
+                            any(
+                                f"operation allocation {create_index} increment allocation is invalid"
+                                in issue
+                                for issue in result["issues"]
+                            ),
+                            result["issues"],
+                        )
+                        self.assertFalse(
+                            any("digest mismatch" in issue for issue in result["issues"]),
+                            result["issues"],
+                        )
+                finally:
+                    self.assertEqual(
+                        repository_snapshot(self.fixture.repository), before
+                    )
 
     def test_sequence_one_routes_to_fresh_task_first_start(self) -> None:
         ACTIVATION.activate_program(

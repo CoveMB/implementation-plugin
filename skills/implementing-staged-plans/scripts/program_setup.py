@@ -772,6 +772,7 @@ def validate_setup_semantics(program_root: Path) -> list[str]:
                 for allocation in allocation_values
                 if allocation.get("operation") == "Create"
                 and allocation.get("kind") == "exact-path"
+                and _text_list(allocation.get("increment_ids"), nonempty=True)
             ]
             for allocation in allocation_values:
                 if not (
