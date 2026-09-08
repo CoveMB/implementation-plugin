@@ -244,6 +244,13 @@ class SetupV3DiscoveryTests(unittest.TestCase):
                     result.disposition, "program-activation-recovery-required"
                 )
                 self.assertTrue(result.stop_required)
+                candidate, route, issues = DISCOVERY._load_setup_candidate(
+                    self.fixture.repository.resolve(),
+                    self.fixture.program_root / "manifest.json",
+                )
+                self.assertIsNotNone(candidate)
+                self.assertEqual(route, "program-activation-recovery-required")
+                self.assertEqual(issues, ())
                 self.assertEqual(repository_snapshot(self.fixture.program_root), before)
 
     def test_delete_setup_v2_all_executable_states_prioritize_recovery(self) -> None:

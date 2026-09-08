@@ -1351,7 +1351,7 @@ def _load_setup_candidate(
         status_sha256=sha256_file(status_path),
         status_sequence=sequence,
     )
-    _, setup_path_issues = resolve_managed_path(
+    setup_path, setup_path_issues = resolve_managed_path(
         root,
         roles.get("setup_activation_decision"),
         role="logical role setup_activation_decision",
@@ -1398,6 +1398,7 @@ def _load_setup_candidate(
         )
     program_state = status.get("program_state")
     increment_state = status.get("current_increment_state")
+    setup_exists = bool(setup_path and (setup_path.exists() or setup_path.is_symlink()))
     if sequence == 0:
         prefix = inspect_sequence_zero_activation_prefix(root)
         prefix_issues = [str(issue) for issue in prefix.get("issues", [])]
