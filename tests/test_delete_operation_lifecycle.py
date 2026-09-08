@@ -1,7 +1,10 @@
 import copy
 import hashlib
 import json
+import tempfile
 import unittest
+from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
@@ -957,6 +960,179 @@ class DeleteOperationLifecycleTests(unittest.TestCase):
             )
         finally:
             fixture.close()
+
+
+class DeleteReceiptReinspectionTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture, self.legacy_bytes = _authorized_delete_program_with_successor()
+        self.addCleanup(self.fixture.close)
+        self.root = self.fixture.program_root
+        ACTIVATION.advance_execution_state(
+            self.root, "implementing", _fresh_observation(self.fixture)
+        )
+        (self.fixture.repository / "archive-output.txt").write_text(
+            "archive output\n", encoding="utf-8"
+        )
+        write_raw_review_reports(self.fixture.repository)
+        self.baseline = ACTIVATION.execution_baseline_v2_from_value(
+            json.loads(
+                (self.root / "increments/ARCHIVE-INDEX/execution-baseline.json")
+                .read_text(encoding="utf-8")
+            )
+        )
+        self.binding = self.baseline.delete_quarantine_bindings[0]
+        self.receipt_path = self.root / self.binding["receipt_path"]
+        self.validate = ACTIVATION.validate_execution_workspace_v2
+
+    def assess(self):
+        inspection = ACTIVATION.inspect_repository(self.fixture.repository, self.fixture.head)
+        normalized = ACTIVATION._without_owned_program_paths(self.root, inspection.observation)
+        return self.validate(
+            self.root,
+            self.baseline,
+            replace(inspection, observation=normalized),
+            increment_state="reviewing",
+        )
+
+    @contextmanager
+    def receipt_race(self, kind):
+        namespace = self.validate.__globals__
+        classify = namespace["classify_delete_quarantine_recovery"]
+        inspect = namespace["inspect_workspace_path"]
+        events = []
+        with tempfile.TemporaryDirectory() as directory:
+            saved = Path(directory) / "receipt.json"
+            displaced = Path(directory) / "receipt-link"
+
+            def classify_then_race(*args, **kwargs):
+                recovery = classify(*args, **kwargs)
+                if not events and recovery.disposition == "resume":
+                    events.append("classified-resume")
+                    if kind in {"missing", "symlink"}:
+                        self.receipt_path.rename(saved)
+                        if kind == "symlink":
+                            self.receipt_path.symlink_to(saved)
+                return recovery
+
+            def inspect_receipt(root, relative, **kwargs):
+                if (
+                    Path(root) != self.root
+                    or relative != self.binding["receipt_path"]
+                    or events != ["classified-resume"]
+                ):
+                    return inspect(root, relative, **kwargs)
+                events.append("reinspected")
+                try:
+                    if kind == "oserror":
+                        raise OSError("injected receipt descriptor failure")
+                    snapshot = inspect(root, relative, **kwargs)
+                    if kind == "null-sha":
+                        return replace(snapshot, sha256=None)
+                    if kind == "invalid-sha":
+                        return replace(snapshot, sha256="invalid")
+                    return snapshot
+                finally:
+                    if saved.exists():
+                        if self.receipt_path.is_symlink():
+                            self.receipt_path.rename(displaced)
+                        saved.rename(self.receipt_path)
+
+            with mock.patch.dict(
+                namespace,
+                {
+                    "classify_delete_quarantine_recovery": classify_then_race,
+                    "inspect_workspace_path": inspect_receipt,
+                },
+            ):
+                yield events
+
+    def test_receipt_reinspection_failure_returns_invalid_assessment(self):
+        for kind in ("missing", "symlink", "oserror", "null-sha", "invalid-sha"):
+            with self.subTest(kind=kind):
+                before = repository_snapshot(self.fixture.repository)
+                with self.receipt_race(kind) as events:
+                    assessment = self.assess()
+                self.assertEqual(events, ["classified-resume", "reinspected"])
+                self.assertFalse(assessment.valid)
+                self.assertTrue(any(
+                    issue.startswith("Delete quarantine receipt ")
+                    for issue in assessment.issues
+                ), assessment.issues)
+                self.assertEqual(assessment.product_states.delete_quarantine_bindings, ())
+                self.assertEqual(repository_snapshot(self.fixture.repository), before)
+
+    def assert_reviewing_rejected(self, kind):
+        status_path = self.root / "state/status.json"
+        before_status = status_path.read_bytes()
+        before = repository_snapshot(self.fixture.repository)
+        with self.receipt_race(kind) as events:
+            with mock.patch.object(
+                ACTIVATION, "atomic_replace_json",
+                wraps=ACTIVATION.atomic_replace_json,
+            ) as writer:
+                with self.assertRaises(ValueError) as raised:
+                    ACTIVATION.advance_execution_state(
+                        self.root, "reviewing", _fresh_observation(self.fixture)
+                    )
+                writer.assert_not_called()
+        self.assertIn("Delete quarantine receipt ", str(raised.exception))
+        self.assertEqual(events, ["classified-resume", "reinspected"])
+        self.assertEqual(status_path.read_bytes(), before_status)
+        self.assertEqual(repository_snapshot(self.fixture.repository), before)
+        self.assertFalse((self.fixture.repository / "legacy.ts").exists())
+        self.assertEqual(
+            (self.root / self.binding["entry_path"]).read_bytes(),
+            self.legacy_bytes,
+        )
+
+    def test_missing_receipt_blocks_reviewing_before_status_write(self):
+        self.assert_reviewing_rejected("missing")
+
+    def test_symlink_receipt_blocks_reviewing_before_status_write(self):
+        self.assert_reviewing_rejected("symlink")
+
+    def test_receipt_oserror_blocks_reviewing_before_status_write(self):
+        self.assert_reviewing_rejected("oserror")
+
+    def test_null_receipt_sha_blocks_reviewing_before_status_write(self):
+        self.assert_reviewing_rejected("null-sha")
+
+    def test_invalid_receipt_sha_blocks_reviewing_before_status_write(self):
+        self.assert_reviewing_rejected("invalid-sha")
+
+    def test_valid_receipt_keeps_exact_digest_and_reviewing_transition(self):
+        receipt_bytes = self.receipt_path.read_bytes()
+        expected_digest = hashlib.sha256(receipt_bytes).hexdigest()
+        assessment = self.assess()
+        self.assertTrue(assessment.valid, assessment.issues)
+        expected_bindings = ({
+            "path": "legacy.ts",
+            "receipt_path": self.binding["receipt_path"],
+            "receipt_sha256": expected_digest,
+        },)
+        self.assertEqual(assessment.product_states.delete_quarantine_bindings, expected_bindings)
+        prior = json.loads((self.root / "state/status.json").read_text())
+        transition = ACTIVATION.advance_execution_state(
+            self.root, "reviewing", _fresh_observation(self.fixture)
+        )
+        status = json.loads((self.root / "state/status.json").read_text())
+        self.assertEqual(transition.increment_state, "reviewing")
+        self.assertEqual(status["state_sequence"], prior["state_sequence"] + 1)
+        result = status["execution_transition_binding"]["product_path_states"]
+        self.assertEqual(result["delete_quarantine_bindings"], list(expected_bindings))
+        tombstone = next(row for row in result["ordered_path_states"] if row["path"] == "legacy.ts")
+        self.assertFalse(tombstone["exists"])
+        self.assertIsNone(tombstone["sha256"])
+        self.assertEqual(self.receipt_path.read_bytes(), receipt_bytes)
+        self.assertEqual((self.root / self.binding["entry_path"]).read_bytes(), self.legacy_bytes)
+        self.assertEqual(
+            ACTIVATION.validate_state_authority(
+                self.root,
+                ACTIVATION._without_owned_program_paths(
+                    self.root, _fresh_observation(self.fixture)
+                ),
+            ), []
+        )
 
 
 if __name__ == "__main__":

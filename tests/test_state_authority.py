@@ -892,16 +892,45 @@ class DeleteQuarantineTests(unittest.TestCase):
         )
         self.assertEqual(recovery.disposition, "recovery-required")
 
-        shutil.rmtree(self.workspace)
-        self.setUp()
-        root = self.program_root / "increments/DELETE-1"
-        root.mkdir(parents=True)
-        (root / "delete-quarantine").mkdir(mode=0o755)
-        with self.assertRaises(ValueError):
+    def test_preallocated_quarantine_mode_drift_fails_before_move(self) -> None:
+        baseline = {
+            **self.baseline.__dict__,
+            "program_id": "DELETE-PROGRAM",
+            "program_revision": 7,
+            "increment_id": "DELETE-1",
+        }
+        allocation = self.allocate(baseline)
+        root = self.program_root / allocation.root_path
+        original = root.stat()
+        source_bytes = self.target.read_bytes()
+        self.assertEqual(original.st_mode & 0o777, 0o700)
+        self.assertEqual(
+            AUTHORITY.classify_delete_quarantine_recovery(
+                self.program_root, self.workspace, "legacy.ts", baseline
+            ).disposition,
+            "retry-ready",
+        )
+
+        root.chmod(0o755)
+        changed = root.stat()
+        self.assertEqual(changed.st_mode & 0o777, 0o755)
+        self.assertEqual(
+            (changed.st_dev, changed.st_ino, changed.st_uid),
+            (original.st_dev, original.st_ino, original.st_uid),
+        )
+        with self.assertRaisesRegex(
+            ValueError, "^Delete quarantine allocation binding changed$"
+        ):
             AUTHORITY.quarantine_bound_regular_file(
                 self.program_root, self.workspace, "legacy.ts", baseline
             )
-        self.assertEqual(self.target.read_bytes(), b"bytes retained by quarantine\n")
+        self.assertEqual(self.target.read_bytes(), source_bytes)
+        self.assertEqual(source_bytes, b"bytes retained by quarantine\n")
+        self.assertEqual(
+            AUTHORITY.inspect_workspace_path(self.workspace, "legacy.ts"), self.baseline
+        )
+        self.assertFalse((self.program_root / allocation.quarantine_path).exists())
+        self.assertFalse((self.program_root / allocation.receipt_path).exists())
 
     def test_rename_failure_is_fail_closed_and_recovery_reports_exact_snapshots(self) -> None:
         baseline = {

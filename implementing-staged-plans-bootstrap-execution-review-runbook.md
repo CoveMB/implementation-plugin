@@ -40,9 +40,10 @@ For manifest v3, activation appends or adopts these separate typed records in
 order:
 
 1. setup decision;
-2. program approval;
-3. workspace-selection approval; and
-4. active/awaiting-first-increment status last.
+2. any due pre-activation gate decisions;
+3. program approval;
+4. workspace-selection approval; and
+5. active/awaiting-first-increment status last.
 
 The returned semantic handoff is navigation only. Its direct submission in a
 fresh task can append or adopt the first-increment grant and write

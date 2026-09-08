@@ -1848,11 +1848,30 @@ def validate_execution_workspace_v2(
                     if recovery is None or recovery.disposition != "resume":
                         issues.append(f"reviewing Delete lacks exact quarantine receipt: {relative}")
                 if recovery is not None and recovery.disposition == "resume":
-                    receipt_snapshot = inspect_workspace_path(
-                        program_root,
-                        str(binding["receipt_path"]),
-                    )
-                    bindings.append({"path": relative, "receipt_path": binding["receipt_path"], "receipt_sha256": receipt_snapshot.sha256})
+                    try:
+                        receipt_snapshot = inspect_workspace_path(
+                            program_root,
+                            str(binding["receipt_path"]),
+                        )
+                    except (OSError, ValueError) as error:
+                        issues.append(
+                            f"Delete quarantine receipt inspection failed: {relative} ({error})"
+                        )
+                    else:
+                        if (
+                            not receipt_snapshot.exists
+                            or not isinstance(receipt_snapshot.sha256, str)
+                            or not _SHA256.fullmatch(receipt_snapshot.sha256)
+                        ):
+                            issues.append(
+                                f"Delete quarantine receipt is missing or invalid: {relative}"
+                            )
+                        else:
+                            bindings.append({
+                                "path": relative,
+                                "receipt_path": binding["receipt_path"],
+                                "receipt_sha256": receipt_snapshot.sha256,
+                            })
             states.append(ProductPathStateV2(relative, operation, actual.exists, actual.sha256, actual.mode, actual.device, actual.inode, actual.link_count))
 
     for path in baseline.file_map.delete:
