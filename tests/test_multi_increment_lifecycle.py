@@ -11,6 +11,7 @@ from tests.program_bootstrap_support import (
     repository_snapshot,
     run_program_discovery,
 )
+from tests.test_program_setup import ACTIVATION, BOOTSTRAP, SETUP
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -199,6 +200,180 @@ class MultiIncrementLifecycleTests(unittest.TestCase):
         self.publish_and_advance_first_to_diff()
         rollover = self.rollover("accepted-state")
         self.assertEqual(rollover["successor_increment_id"], "ARCHIVE-VERIFY")
+
+    def start_sparse_program(self, mode="approval:full-increment"):
+        self.fixture.close()
+        self.fixture = BootstrapFixture()
+        self.fixture.configure_approval_mode(mode)
+        schedule = self.fixture.configure_portable_successors()
+        BOOTSTRAP.publish_program_proposal(self.fixture.repository, self.fixture.source_plan, self.fixture.candidate, self.fixture.source_sha256)
+        observation = ACTIVATION.inspect_repository(self.fixture.repository, self.fixture.head).observation
+        decision = SETUP.adapt_setup_decision(self.fixture.program_root, "Yes", role="user", provenance="direct-user-message")
+        activation = ACTIVATION.activate_program(self.fixture.program_root, decision, observation)
+        intent = SETUP.adapt_increment_start_intent(self.fixture.program_root, activation.handoff, role="user", provenance="direct-user-message")
+        ACTIVATION.start_first_increment(self.fixture.program_root, intent, observation)
+        return schedule
+
+    def test_portable_nine_increment_chain_uses_both_continuation_routes(self):
+        schedule = self.start_sparse_program()
+        manifest_bytes = (self.fixture.program_root / "manifest.json").read_bytes()
+        prefix = "implementation-programs/ARCHIVE-PROGRAM/"
+        for index, current in enumerate(schedule):
+            with self.subTest(current=current):
+                self.assertEqual(self.load_status()["current_increment_id"], current)
+                _, rendered = self.run_phase("render-exact-plan")
+                paths = set(rendered["required_future_paths"])
+                if index < 8:
+                    self.assertIn(prefix + f"increments/{current}/handoff.md", paths)
+                    self.assertIn(prefix + f"increments/{schedule[index + 1]}/brief.md", paths)
+                    self.assertNotIn(prefix + "closure/reconciliation.json", paths)
+                    self.advance_current_to_diff()
+                    receipt = self.rollover("immediate" if index % 2 == 0 else "accepted-state")
+                    self.assertEqual(receipt["successor_increment_id"], schedule[index + 1])
+                    records = [json.loads(line) for line in (self.fixture.program_root / "state/rollovers.jsonl").read_text().splitlines()]
+                    self.assertEqual([(row["current_increment_id"], row["successor_increment_id"]) for row in records], list(zip(schedule[:index + 1], schedule[1:index + 2])))
+                    self.assertIn("archive-output.txt", self.load_status()["inherited_workspace_binding"]["inherited_paths"])
+                    self.assertEqual(self.discover()["disposition"], "resume")
+                else:
+                    self.assertIn(prefix + "closure/reconciliation.json", paths)
+                    self.assertIn(prefix + "closure/closure-packet.md", paths)
+                    self.assertNotIn(prefix + f"increments/{current}/handoff.md", paths)
+                    self.materialize_current_plan()
+                self.assertEqual((self.fixture.program_root / "manifest.json").read_bytes(), manifest_bytes)
+
+    def test_sparse_first_boundary_supports_later_continuation(self):
+        self.start_sparse_program()
+        self.advance_current_to_diff()
+        receipt = self.rollover("accepted-state")
+        self.assertEqual(receipt["successor_increment_id"], "ARCHIVE-VERIFY")
+        self.materialize_current_plan()
+
+    def test_completed_history_must_match_the_approved_serial_edge(self):
+        from tests.test_program_rollover import ROLLOVER
+        from tests.test_program_setup import AUTHORITY
+
+        self.start_sparse_program()
+        self.advance_current_to_diff()
+        self.rollover("immediate")
+        root = self.fixture.program_root
+        manifest_path = root / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        traceability_path = root / "program/traceability.json"
+        traceability = json.loads(traceability_path.read_text())
+        increments = manifest["setup_semantics"]["increments"]
+        increments[1], increments[2] = increments[2], increments[1]
+        schedule = [item["increment_id"] for item in increments]
+        for index, increment in enumerate(increments):
+            increment["depends_on"] = schedule[index - 1:index] if index else []
+        for requirement in traceability["atomic_requirements"]:
+            requirement["assigned_increments"].sort(key=schedule.index)
+        semantic_digest = bootstrap_support.canonical_compact_sha256([
+            {field: item[field] for field in AUTHORITY.SEMANTIC_FIELDS}
+            for item in traceability["atomic_requirements"]
+        ])
+        traceability["coverage_assertion"]["semantic_requirements_sha256"] = semantic_digest
+        traceability_path.write_bytes(bootstrap_support.canonical_json(traceability))
+        manifest["program_binding"]["traceability_sha256"] = AUTHORITY.sha256_file(traceability_path)
+        manifest["setup_semantics"]["bindings"]["program"].update(manifest["program_binding"], semantic_requirements_sha256=semantic_digest)
+        manifest["setup_semantics_sha256"] = bootstrap_support.canonical_compact_sha256(manifest["setup_semantics"])
+        manifest_path.write_bytes(bootstrap_support.canonical_json(manifest))
+        self.assertEqual(SETUP.validate_setup_semantics(root), [])
+        before = repository_snapshot(root)
+        with self.assertRaisesRegex(ValueError, "schedule|successor"):
+            ROLLOVER._validated_completed_rollover_records(root, self.load_status(), allow_unbound_suffix=False)
+        self.assertEqual(repository_snapshot(root), before)
+
+    def test_sparse_exact_plan_prefixes_are_discovered_and_replayed(self):
+        cases = [
+            ("approval:standard", "prepare-plan", "exact-plan"),
+            ("approval:standard", "prepare-plan", "awaiting-plan-status"),
+            *[("approval:standard", "materialize-plan", label) for label in ("plan-approval", "execution-baseline", "plan-action-authorization", "authorized-status")],
+            *[("approval:full-increment", "prepare-plan", label) for label in ("exact-plan", "execution-baseline", "plan-action-authorization", "authorized-status")],
+        ]
+        for mode, phase, label in cases:
+            with self.subTest(mode=mode, phase=phase, label=label):
+                self.start_sparse_program(mode)
+                _, rendered = self.run_phase("render-exact-plan")
+                plan = rendered["plan"].encode()
+                prompt = None
+                if phase == "materialize-plan":
+                    _, prepared = self.run_phase("prepare-plan", exact_plan=plan)
+                    prompt = prepared["plan_prompt"]
+                failed, _ = self.run_phase(phase, exact_plan=plan, prompt=prompt, fail_label=label, check=False)
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertIn("injected-after:", failed.stderr)
+                expected = "plan-preparation-retry-ready" if label in {"exact-plan", "awaiting-plan-status"} else "plan-materialization-retry-ready"
+                if label == "authorized-status":
+                    expected = "resume"
+                self.assertEqual(self.discover()["disposition"], expected)
+                self.run_phase(phase, exact_plan=plan, prompt=prompt)
+                before = repository_snapshot(self.fixture.repository)
+                self.run_phase(phase, exact_plan=plan, prompt=prompt)
+                self.assertEqual(repository_snapshot(self.fixture.repository), before)
+
+    def test_sparse_acceptance_and_rollover_prefixes_replay_one_bound_transaction(self):
+        labels = ("action-authorization", "successor-grant", "handoff", "successor-brief", "rollover-record", "successor-status")
+        for domain in ("immediate", "accepted-state"):
+            for label in (("diff-approval", "accepted-status") + labels if domain == "immediate" else labels):
+                with self.subTest(domain=domain, label=label):
+                    self.start_sparse_program()
+                    self.advance_current_to_diff()
+                    if domain == "accepted-state":
+                        _, stopped = self.run_phase("render-accept-stop")
+                        self.run_phase("accept", prompt=stopped["prompt"])
+                    _, choice = self.run_phase("render-accept-continue" if domain == "immediate" else "render-later-continuation")
+                    prompt = choice["prompt"]
+                    phase = "dispose-diff" if domain == "immediate" else "rollover"
+                    manifest_bytes = (self.fixture.program_root / "manifest.json").read_bytes()
+                    failed, _ = self.run_phase(phase, prompt=prompt, fail_label=label, check=False)
+                    self.assertNotEqual(failed.returncode, 0)
+                    self.assertIn("injected-after:", failed.stderr)
+                    if label == "successor-status":
+                        expected = "resume"
+                    elif label == "diff-approval":
+                        expected = "increment-acceptance-retry-ready"
+                    elif label == "accepted-status":
+                        expected = "accepted-continuation-retry-ready"
+                    elif label in {"action-authorization", "successor-grant"}:
+                        expected = "increment-continuation-retry-ready" if domain == "immediate" else "accepted-state-continuation-retry-ready"
+                    else:
+                        expected = "increment-rollover-retry-ready" if domain == "immediate" else "accepted-state-rollover-retry-ready"
+                    self.assertEqual(self.discover()["disposition"], expected)
+                    _, receipt = self.run_phase(phase, prompt=prompt)
+                    self.assertEqual(receipt["successor_increment_id"], "ARCHIVE-VERIFY")
+                    self.assertFalse(receipt["requires_retry"])
+                    before = repository_snapshot(self.fixture.repository)
+                    self.run_phase(phase, prompt=prompt)
+                    self.assertEqual(repository_snapshot(self.fixture.repository), before)
+                    self.assertEqual((self.fixture.program_root / "manifest.json").read_bytes(), manifest_bytes)
+                    self.assertEqual(len((self.fixture.program_root / "state/rollovers.jsonl").read_text().splitlines()), 1)
+                    self.assertEqual(len((self.fixture.program_root / "state/increment-grants.jsonl").read_text().splitlines()), 2)
+
+    def test_incompatible_closure_only_plan_and_successor_prefix_preserve_all_bytes(self):
+        self.start_sparse_program()
+        _, rendered = self.run_phase("render-exact-plan")
+        old_plan = rendered["plan"].replace("increments/ARCHIVE-INDEX/handoff.md", "closure/reconciliation.json").replace("increments/ARCHIVE-VERIFY/brief.md", "closure/closure-packet.md").encode()
+        (self.fixture.program_root / "increments/ARCHIVE-INDEX/exact-file-plan.md").write_bytes(old_plan)
+        before = repository_snapshot(self.fixture.repository)
+        self.assertEqual(self.discover()["disposition"], "plan-preparation-recovery-required")
+        failed, _ = self.run_phase("prepare-plan", exact_plan=old_plan, check=False)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertEqual(repository_snapshot(self.fixture.repository), before)
+
+        self.start_sparse_program()
+        self.advance_current_to_diff()
+        _, choice = self.run_phase("render-accept-continue")
+        failed, _ = self.run_phase("dispose-diff", prompt=choice["prompt"], fail_label="action-authorization", check=False)
+        self.assertIn("injected-after:", failed.stderr)
+        path = self.fixture.program_root / "state/action-authorizations.jsonl"
+        records = [json.loads(line) for line in path.read_text().splitlines()]
+        records[-1]["successor_increment_id"] = "ARCHIVE-CATALOG"
+        path.write_text("".join(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n" for record in records))
+        before = repository_snapshot(self.fixture.repository)
+        self.assertIn(self.discover()["disposition"], {"increment-continuation-recovery-required", "continuation-recovery-required"})
+        failed, _ = self.run_phase("dispose-diff", prompt=choice["prompt"], check=False)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertEqual(repository_snapshot(self.fixture.repository), before)
 
     def test_each_successor_mode_materializes_inherited_history_after_both_routes(
         self,

@@ -1985,14 +1985,15 @@ class SetupActivationTests(unittest.TestCase):
     def test_v3_successor_rollover_uses_successor_grant_kind_and_gate_family(self) -> None:
         self.tearDown()
         self.fixture = BootstrapFixture()
-        self.fixture.configure_successor_chain(("ARCHIVE-INDEX", "ARCHIVE-VERIFY"))
+        self.fixture.configure_portable_successors()
+        increments = self.fixture.load_json("manifest.json")["setup_semantics"]["increments"]
         successor_gate = gate_definition(
             "SOURCE-GATE-SUCCESSOR", "before-increment-start"
         )
         successor_gate["source_sha256"] = self.fixture.source_sha256
         successor_gate["protected_subject"] = "increment:ARCHIVE-VERIFY"
         self.fixture.configure_setup_v3(
-            source_gate_definitions=(successor_gate,)
+            source_gate_definitions=(successor_gate,), increments=increments,
         )
         BOOTSTRAP.publish_program_proposal(
             self.fixture.repository,
@@ -2029,6 +2030,9 @@ class SetupActivationTests(unittest.TestCase):
             ).read_text().splitlines()
         ]
         self.assertEqual(actions[-1]["actions"], ["rollover-increment"])
+        self.assertFalse((self.fixture.program_root / "increments/ARCHIVE-INDEX/handoff.md").exists())
+        self.assertFalse((self.fixture.program_root / "increments/ARCHIVE-VERIFY/brief.md").exists())
+        self.assertEqual((self.fixture.program_root / "state/rollovers.jsonl").read_bytes(), b"")
         self.persist_gate(successor_gate, actions[-1])
 
         receipt = DIFF.persist_diff_disposition(

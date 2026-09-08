@@ -21,7 +21,6 @@ from diff_disposition import (
     DiffAcceptanceCandidate,
     _render_accept_continue_envelope,
 )
-from continuity_closure import select_unique_satisfied_successor
 from program_activation import (
     _canonical_json_bytes,
     _canonical_json_line,
@@ -152,27 +151,6 @@ def _load_role(
     return value, path
 
 
-def _accepted_increment_ids(
-    root: Path,
-    status: Mapping[str, object],
-    *,
-    allow_unbound_rollover_suffix: bool,
-) -> set[str]:
-    current_increment_id = status.get("current_increment_id")
-    if not isinstance(current_increment_id, str) or not current_increment_id:
-        raise ValueError("status current increment is required")
-    from program_rollover import _validated_completed_rollover_records
-
-    completed = _validated_completed_rollover_records(
-        root,
-        status,
-        allow_unbound_suffix=allow_unbound_rollover_suffix,
-    )
-    accepted = {current_increment_id}
-    accepted.update(str(record["current_increment_id"]) for record in completed)
-    return accepted
-
-
 def _successor_selection(
     root: Path,
     manifest: dict[str, object],
@@ -180,24 +158,15 @@ def _successor_selection(
     *,
     allow_unbound_rollover_suffix: bool = False,
 ) -> tuple[str | None, str]:
-    traceability, _ = _load_role(root, manifest, "traceability")
-    requirements = traceability.get("atomic_requirements")
-    if not isinstance(requirements, list):
-        raise ValueError("traceability atomic_requirements must be a list")
-    current = status.get("current_increment_id")
-    if not isinstance(current, str) or not current:
-        raise ValueError("status current increment is required")
-    for requirement in requirements:
-        assigned = requirement.get("assigned_increments") if isinstance(requirement, dict) else None
-        if not isinstance(assigned, list):
-            raise ValueError("traceability assigned_increments must be a list")
-    accepted = _accepted_increment_ids(
-        root,
-        status,
+    from state_authority import resolve_program_successor
+
+    resolution = resolve_program_successor(
+        root, manifest, status,
         allow_unbound_rollover_suffix=allow_unbound_rollover_suffix,
     )
-    return select_unique_satisfied_successor(requirements, current, accepted)
-
+    if resolution.kind == "terminal":
+        return None, "no allocated successor"
+    return resolution.successor_increment_id, resolution.reason
 
 def continuation_unavailability_reason(
     program_root: Path,
@@ -738,7 +707,7 @@ def _build_continuation_extension(
         _manifest,
         status,
         _workspace,
-        successor,
+        input_successor,
         brief_bytes,
         accepted_product,
         accepted_product_sha256,
@@ -750,6 +719,8 @@ def _build_continuation_extension(
         observation,
         allow_unbound_rollover_suffix=allow_unbound_rollover_suffix,
     )
+    if input_successor != successor:
+        raise ValueError("accepted continuation successor changed")
     roles = manifest["logical_roles"]
     workspace_path, workspace_path_issues = resolve_managed_path(
         root, roles.get("workspace"), role="logical role workspace"

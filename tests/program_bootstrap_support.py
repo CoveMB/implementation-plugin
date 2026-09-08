@@ -1,5 +1,6 @@
 import hashlib
 import argparse
+import copy
 from dataclasses import asdict
 import json
 import os
@@ -24,6 +25,26 @@ COMPATIBILITY_FIXTURE = (
     REPOSITORY_ROOT / "tests/fixtures/program-bootstrap/v0.1.1"
 )
 COMPATIBILITY_WORKSPACE_SEED = COMPATIBILITY_FIXTURE / "seed-workspace/catalog.txt"
+
+
+def successor_allocation_fixture() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    fixture = json.loads((REPOSITORY_ROOT / "tests/fixtures/continuity-closure/pipeflow-successor-allocations.json").read_text())
+    increments = fixture["increments"]
+    requirements = []
+    for group_index, group in enumerate(fixture["allocation_groups"], start=1):
+        for row_index in range(1, group["count"] + 1):
+            requirement_id = (
+                fixture["named_sparse_requirements"][row_index - 1]
+                if group["positions"] == [1, 8, 9]
+                else f"ALLOCATION-{group_index}-{row_index}"
+            )
+            requirements.append({
+                "id": requirement_id,
+                "assigned_increments": [increments[position - 1]["increment_id"] for position in group["positions"]],
+            })
+    for increment in increments:
+        increment["requirement_ids"] = [item["id"] for item in requirements if increment["increment_id"] in item["assigned_increments"]]
+    return increments, requirements
 
 
 def canonical_json(value: object) -> bytes:
@@ -477,6 +498,43 @@ class BootstrapFixture:
         ] = semantic_sha256
         self.write_json("state/status.json", status)
 
+    def configure_portable_successors(self) -> tuple[str, ...]:
+        """Build all 570 sparse allocations with an independent generic schedule."""
+        increments, allocations = successor_allocation_fixture()
+        schedule = ("ARCHIVE-INDEX", "ARCHIVE-VERIFY", "ARCHIVE-CATALOG", "ARCHIVE-SCAN", "ARCHIVE-RESTORE", "ARCHIVE-MIGRATE", "ARCHIVE-PACK", "ARCHIVE-EXPORT", "ARCHIVE-RELEASE")
+        names = dict(zip((item["increment_id"] for item in increments), schedule, strict=True))
+        traceability = self.load_json("program/traceability.json")
+        template = traceability["atomic_requirements"][0]
+        requirements = []
+        for allocation in allocations:
+            requirement = copy.deepcopy(template)
+            requirement.update(allocation)
+            requirement["assigned_increments"] = [names[item] for item in allocation["assigned_increments"]]
+            requirements.append(requirement)
+        traceability["atomic_requirements"] = requirements
+        for unit in traceability["source_units"]:
+            unit["requirement_ids"] = [item["id"] for item in requirements if unit["id"] in item["source_unit_ids"]]
+        semantic_fields = ("id", "group_id", "source_unit_ids", "normalized_requirement", "acceptance_criteria", "assigned_parts", "assigned_tasks", "assigned_increments")
+        semantic_sha256 = canonical_compact_sha256([{field: item[field] for field in semantic_fields} for item in requirements])
+        traceability["coverage_assertion"]["semantic_requirements_sha256"] = semantic_sha256
+        self.write_json("program/traceability.json", traceability)
+        manifest = self.load_json("manifest.json")
+        manifest["program_binding"]["traceability_sha256"] = hashlib.sha256(canonical_json(traceability)).hexdigest()
+        self.write_json("manifest.json", manifest)
+        status = self.load_json("state/status.json")
+        status["program_binding"]["semantic_requirements_sha256"] = semantic_sha256
+        self.write_json("state/status.json", status)
+        for increment in increments:
+            increment["increment_id"] = names[increment["increment_id"]]
+            increment["depends_on"] = [names[item] for item in increment["depends_on"]]
+            increment.update(
+                acceptance_meaning=["Verify the allocated archive outcome."],
+                intended_outcome="Verify the allocated archive outcome.",
+                expected_checks=["python3 -m unittest tests.test_archive_output"],
+            )
+        self.configure_setup_v3(increments=increments)
+        return schedule
+
     def configure_approval_mode(self, approval_mode: str) -> None:
         """Select one supported Plan A approval mode before publication."""
         if approval_mode not in {
@@ -496,6 +554,7 @@ class BootstrapFixture:
         self,
         *,
         source_gate_definitions: Sequence[dict[str, object]] = (),
+        increments: Sequence[dict[str, object]] | None = None,
     ) -> None:
         """Upgrade the candidate fixture to the closed setup/activation family."""
         manifest = self.load_json("manifest.json")
@@ -523,6 +582,7 @@ class BootstrapFixture:
             for increment_id in atomic_requirement["assigned_increments"]:
                 if increment_id not in increment_ids:
                     increment_ids.append(increment_id)
+        explicit_increments = copy.deepcopy(increments)
         increments = []
         for increment_index, increment_id in enumerate(increment_ids):
             assigned = [
@@ -552,6 +612,9 @@ class BootstrapFixture:
                     ],
                 }
             )
+        if explicit_increments is not None:
+            increments = explicit_increments
+            increment_ids = [item["increment_id"] for item in increments]
         setup_semantics = {
             "schema_version": "implementation-program-setup-semantics/v1",
             "program": {
@@ -725,9 +788,10 @@ class BootstrapFixture:
         collision: str = "existing",
         content_disposition: str = "obsolete",
         rationale: str = "The accepted program no longer needs the archive catalog.",
+        increments: Sequence[dict[str, object]] | None = None,
     ) -> None:
         """Configure the manifest-v3 fixture with the Delete-capable setup pair."""
-        self.configure_setup_v3(source_gate_definitions=source_gate_definitions)
+        self.configure_setup_v3(source_gate_definitions=source_gate_definitions, increments=increments)
         manifest = self.load_json("manifest.json")
         setup_semantics = manifest["setup_semantics"]
         setup_semantics["schema_version"] = (

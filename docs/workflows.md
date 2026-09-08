@@ -92,8 +92,8 @@ repair findings or advance the lifecycle.
 ## 5. Dispose the Current Diff
 
 The new-model typed diff-disposition prompt always offers `accept-stop`. It
-offers `accept-continue` only when traceability names one successor and every
-dependency is satisfied. Both choices persist the same Plan A acceptance prefix
+offers `accept-continue` only when the [successor contract](../skills/implementing-staged-plans/references/state-authorization.md#allocate-lifecycle-writes-before-authority)
+resolves the next increment. Both choices persist the same Plan A acceptance prefix
 and accepted status first. Already persisted legacy programs using
 `approval:full` or `approval:full-diff` retain automatic acceptance.
 The continue choice then completes its prompt-bound rollover with no second
@@ -132,8 +132,10 @@ separate.
 
 ## 9. Close a Final Program
 
-Use this route only after the accepted increment is final and traceability
-allocates no successor.
+Use this route only after current acceptance and an explicit terminal result from
+the [successor contract](../skills/implementing-staged-plans/references/state-authorization.md#allocate-lifecycle-writes-before-authority).
+Unavailable selection cannot authorize closure. PLUG-002's accepted-chain and
+terminal Delete closure/disposal work remains separate.
 
 ```text
 Use $implementing-staged-plans to prepare closure for the accepted final

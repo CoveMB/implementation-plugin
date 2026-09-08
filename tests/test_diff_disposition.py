@@ -1,4 +1,5 @@
 import json
+from contextlib import nullcontext
 import sys
 import unittest
 from pathlib import Path
@@ -388,41 +389,49 @@ class DiffDispositionTests(unittest.TestCase):
         )
         for successors, reason in cases:
             with self.subTest(reason=reason):
-                fixture, program_root, _observation = awaiting_diff_program(successors)
+                # Unsafe allocations now stop before a new exact plan. Inject the
+                # unavailable boundary here to exercise stop-choice policy for
+                # an independently valid acceptance, including historical callers.
+                fixture, program_root, _observation = awaiting_diff_program()
                 try:
-                    prompt = DIFF.render_diff_disposition_prompt(program_root)
-                    candidate = DIFF.build_diff_acceptance_candidate(
-                        program_root, _observation
+                    selection = (
+                        mock.patch.object(DIFF._continuation, "_successor_selection", return_value=(None, reason))
+                        if successors is not None else nullcontext()
                     )
-                    expected = f"Accept and stop.\n\n{candidate.prompt}"
-                    if reason != "no allocated successor":
-                        expected += f"\nContinuation unavailable: {reason}.\n"
-                    self.assertEqual(prompt, expected)
-                    self.assertEqual(prompt.count("Accept and stop."), 1)
-                    self.assertNotIn("Accept and continue", prompt)
-                    if successors is None:
-                        from program_continuation import (
-                            build_continuation_extension,
-                            continuation_unavailability_reason,
-                        )
-
+                    with selection:
+                        prompt = DIFF.render_diff_disposition_prompt(program_root)
                         candidate = DIFF.build_diff_acceptance_candidate(
                             program_root, _observation
                         )
-                        self.assertIsNone(
-                            build_continuation_extension(
-                                program_root, candidate, _observation
+                        expected = f"Accept and stop.\n\n{candidate.prompt}"
+                        if reason != "no allocated successor":
+                            expected += f"\nContinuation unavailable: {reason}.\n"
+                        self.assertEqual(prompt, expected)
+                        self.assertEqual(prompt.count("Accept and stop."), 1)
+                        self.assertNotIn("Accept and continue", prompt)
+                        if successors is None:
+                            from program_continuation import (
+                                build_continuation_extension,
+                                continuation_unavailability_reason,
                             )
-                        )
-                        self.assertEqual(
-                            continuation_unavailability_reason(
-                                program_root, candidate
-                            ),
-                            reason,
-                        )
-                    else:
-                        self.assertIn(reason, prompt)
-                    self.assertEqual(prompt.count("$implementing-staged-plans"), 1)
+
+                            candidate = DIFF.build_diff_acceptance_candidate(
+                                program_root, _observation
+                            )
+                            self.assertIsNone(
+                                build_continuation_extension(
+                                    program_root, candidate, _observation
+                                )
+                            )
+                            self.assertEqual(
+                                continuation_unavailability_reason(
+                                    program_root, candidate
+                                ),
+                                reason,
+                            )
+                        else:
+                            self.assertIn(reason, prompt)
+                        self.assertEqual(prompt.count("$implementing-staged-plans"), 1)
                 finally:
                     fixture.close()
 

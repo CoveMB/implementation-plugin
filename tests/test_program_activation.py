@@ -9,6 +9,7 @@ from unittest import mock
 
 from tests.program_bootstrap_support import (
     BootstrapFixture,
+    _exact_plan_bytes,
     canonical_json,
     repository_snapshot,
     run_program_discovery,
@@ -448,6 +449,116 @@ class ProgramActivationTests(unittest.TestCase):
 
 
 class ExactPlanMaterializationTests(unittest.TestCase):
+    def test_legacy_unsafe_successor_stops_at_prospective_allocation(self):
+        for successors, diagnostic in (
+            ({"ARCHIVE-VERIFY": ("ARCHIVE-INDEX",), "ARCHIVE-EXPORT": ("ARCHIVE-INDEX",)}, "multiple allocated successors"),
+            ({"ARCHIVE-VERIFY": ("ARCHIVE-BLOCKER",)}, "successor dependencies are unsatisfied"),
+        ):
+            with self.subTest(diagnostic=diagnostic):
+                fixture = BootstrapFixture()
+                self.addCleanup(fixture.close)
+                fixture.configure_successors(successors)
+                root, observation = activated_program(fixture)
+                before = repository_snapshot(fixture.repository)
+                with self.assertRaisesRegex(ValueError, diagnostic):
+                    ACTIVATION.required_future_lifecycle_writes(root, fixture.repository, "ARCHIVE-INDEX")
+                self.assertEqual(repository_snapshot(fixture.repository), before)
+
+    def test_inactive_lifecycle_alternative_is_rejected_before_plan_writes(self):
+        for successor in (False, True):
+            with self.subTest(successor=successor):
+                fixture = BootstrapFixture()
+                self.addCleanup(fixture.close)
+                if successor:
+                    fixture.configure_successor_chain(("ARCHIVE-INDEX", "ARCHIVE-VERIFY"))
+                root, observation = activated_program(fixture)
+                extra = "closure/reconciliation.json" if successor else "increments/ARCHIVE-INDEX/handoff.md"
+                plan = exact_plan_bytes(root, observation).replace(b"### Create\n", f"### Create\n\n- `implementation-programs/ARCHIVE-PROGRAM/{extra}` — exact owned path.\n".encode())
+                before = repository_snapshot(fixture.repository)
+                with self.assertRaisesRegex(ValueError, "lifecycle|allocation"):
+                    ACTIVATION.prepare_exact_plan(root, plan, observation)
+                self.assertEqual(repository_snapshot(fixture.repository), before)
+
+    def sparse_preparing_program(self, mode="approval:full-increment"):
+        bootstrap = load_script_module("program_bootstrap", SCRIPT_ROOT / "program_bootstrap.py")
+
+        fixture = BootstrapFixture()
+        self.addCleanup(fixture.close)
+        fixture.configure_approval_mode(mode)
+        fixture.configure_portable_successors()
+        bootstrap.publish_program_proposal(fixture.repository, fixture.source_plan, fixture.candidate, fixture.source_sha256)
+        observation = ACTIVATION.inspect_repository(fixture.repository, fixture.head).observation
+        decision = SETUP.adapt_setup_decision(fixture.program_root, "Yes", role="user", provenance="direct-user-message")
+        activation = ACTIVATION.activate_program(fixture.program_root, decision, observation)
+        intent = SETUP.adapt_increment_start_intent(fixture.program_root, activation.handoff, role="user", provenance="direct-user-message")
+        ACTIVATION.start_first_increment(fixture.program_root, intent, observation)
+        return fixture, observation
+
+    def test_sparse_sequence_two_allocates_only_the_immediate_navigation(self):
+        fixture, observation = self.sparse_preparing_program()
+        status = json.loads((fixture.program_root / "state/status.json").read_text())
+        self.assertEqual((status["state_sequence"], status["current_increment_state"]), (2, "preparing"))
+        required = ACTIVATION.required_future_lifecycle_writes(fixture.program_root, fixture.repository, "ARCHIVE-INDEX")
+        created = {item.path for item in required if item.disposition == "Create"}
+        prefix = "implementation-programs/ARCHIVE-PROGRAM/"
+        self.assertEqual(created, {
+            prefix + "increments/ARCHIVE-INDEX/execution-baseline.json",
+            prefix + "increments/ARCHIVE-INDEX/review-evidence.json",
+            prefix + "increments/ARCHIVE-INDEX/review-packet.md",
+            prefix + "increments/ARCHIVE-INDEX/handoff.md",
+            prefix + "increments/ARCHIVE-VERIFY/brief.md",
+        })
+
+    def test_sparse_full_increment_correct_plan_authorizes_without_plan_question(self):
+        fixture, observation = self.sparse_preparing_program()
+        plan = _exact_plan_bytes(fixture.program_root, observation)
+        # Substitute a literal navigation oracle even while the old allocator is wrong.
+        plan = plan.replace(b"closure/reconciliation.json", b"increments/ARCHIVE-INDEX/handoff.md")
+        plan = plan.replace(b"closure/closure-packet.md", b"increments/ARCHIVE-VERIFY/brief.md")
+        receipt = ACTIVATION.prepare_exact_plan(fixture.program_root, plan, observation)
+        self.assertEqual(receipt.increment_state, "authorized")
+        self.assertIsNone(receipt.plan_prompt)
+        actions = [json.loads(line) for line in (fixture.program_root / "state/action-authorizations.jsonl").read_text().splitlines()]
+        self.assertEqual(len(actions), 1)
+        status = json.loads((fixture.program_root / "state/status.json").read_text())
+        self.assertEqual(actions[0]["increment_grant_id"], status["current_increment_authority_binding"]["grant_id"])
+
+    def test_sparse_plan_rejects_each_missing_or_misclassified_lifecycle_path_without_writes(self):
+        fixture, observation = self.sparse_preparing_program()
+        plan = _exact_plan_bytes(fixture.program_root, observation).decode()
+        file_map = ACTIVATION.parse_exact_file_map(plan)
+        prefix = "implementation-programs/ARCHIVE-PROGRAM/"
+        before = repository_snapshot(fixture.repository)
+        for correct, paths in (("Create", file_map.create), ("Modify", file_map.modify), ("Preserve", file_map.preserve)):
+            for path in paths:
+                if not path.startswith(prefix):
+                    continue
+                line = next(line for line in plan.splitlines(keepends=True) if f"`{path}`" in line)
+                omitted = plan.replace(line, "")
+                for disposition in (None, "Create", "Modify", "Preserve", "Delete"):
+                    if disposition == correct:
+                        continue
+                    with self.subTest(path=path, disposition=disposition):
+                        changed = omitted
+                        if disposition is not None:
+                            heading = f"### {disposition}\n"
+                            if heading not in changed:
+                                changed = changed.replace("### Preserve\n", heading + "\n" + line + "\n### Preserve\n")
+                            else:
+                                changed = changed.replace(heading, heading + "\n" + line)
+                        with self.assertRaises(ValueError):
+                            ACTIVATION.prepare_exact_plan(fixture.program_root, changed.encode(), observation)
+                        self.assertEqual(repository_snapshot(fixture.repository), before)
+
+    def test_unavailable_history_allocates_nothing_and_preserves_bytes(self):
+        fixture, observation = self.sparse_preparing_program()
+        rollover_path = fixture.program_root / "state/rollovers.jsonl"
+        rollover_path.write_text(json.dumps({"current_increment_id": "ARCHIVE-INDEX", "successor_increment_id": "ARCHIVE-VERIFY"}) + "\n")
+        before = repository_snapshot(fixture.repository)
+        with self.assertRaisesRegex(ValueError, "unbound rollover"):
+            ACTIVATION.required_future_lifecycle_writes(fixture.program_root, fixture.repository, "ARCHIVE-INDEX")
+        self.assertEqual(repository_snapshot(fixture.repository), before)
+
     def test_v2_path_baselines_allocate_descriptor_bound_delete_storage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)

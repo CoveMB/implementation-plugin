@@ -605,57 +605,13 @@ def validate_setup_semantics(program_root: Path) -> list[str]:
                     issues.append(f"{label} {field} must be a suitable string list")
             if not _is_text(increment.get("intended_outcome")):
                 issues.append(f"{label} intended_outcome is required")
-        if len(increment_ids) != len(set(increment_ids)):
-            issues.append("setup increment IDs must be unique")
-        positions = {
-            increment_id: index for index, increment_id in enumerate(increment_ids)
-        }
-        dependency_graph_invalid = False
-        for index, increment in enumerate(increments):
-            dependencies = (
-                increment.get("depends_on") if isinstance(increment, dict) else None
-            )
-            if not _text_list(dependencies):
-                dependency_graph_invalid = True
-                continue
-            if len(dependencies) != len(set(dependencies)) or any(
-                dependency not in positions or positions[dependency] >= index
-                for dependency in dependencies
-            ):
-                dependency_graph_invalid = True
-        if dependency_graph_invalid:
-            issues.append("setup increment dependency graph is invalid")
-    if semantics.get("first_increment_id") not in increment_ids:
-        issues.append("setup first increment must be allocated")
-    atomic_requirements = (
-        traceability.get("atomic_requirements")
-        if isinstance(traceability, dict)
-        else None
-    )
-    if isinstance(atomic_requirements, list):
-        traceability_increment_ids = {
-            increment_id
-            for requirement in atomic_requirements
-            if isinstance(requirement, dict)
-            for increment_id in requirement.get("assigned_increments", [])
-            if isinstance(increment_id, str)
-        }
-        if set(increment_ids) != traceability_increment_ids:
-            issues.append("setup increments do not cover exact traceability allocation")
-        for increment in increments if isinstance(increments, list) else []:
-            if not isinstance(increment, dict):
-                continue
-            expected_requirement_ids = [
-                str(requirement.get("id"))
-                for requirement in atomic_requirements
-                if isinstance(requirement, dict)
-                and increment.get("increment_id")
-                in requirement.get("assigned_increments", [])
-            ]
-            if increment.get("requirement_ids") != expected_requirement_ids:
-                issues.append(
-                    f"setup increment {increment.get('increment_id')} requirement allocation mismatch"
-                )
+    from program_authority import validated_increment_schedule
+
+    try:
+        validated_increment_schedule(manifest, traceability.get("atomic_requirements"))
+    except ValueError as error:
+        issues.append(str(error))
+
     for index, definition in enumerate(
         manifest.get("source_gate_definitions", [])
         if isinstance(manifest.get("source_gate_definitions"), list)

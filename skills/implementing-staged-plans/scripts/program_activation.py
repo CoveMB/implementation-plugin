@@ -69,7 +69,7 @@ from state_authority import (
     inspect_workspace_path,
     quarantine_bound_regular_file,
     required_future_lifecycle_writes,
-    validate_required_managed_file_map,
+    validate_program_lifecycle_file_map,
     validate_state_authority,
 )
 from task_prompt import parse_exact_prompt, render_exact_prompt
@@ -1342,7 +1342,7 @@ def _build_plan_candidate(
     required = required_future_lifecycle_writes(
         root, Path(observation.path), str(status["current_increment_id"])
     )
-    managed_issues = validate_required_managed_file_map(file_map, required)
+    managed_issues = validate_program_lifecycle_file_map(root, Path(observation.path), str(status["current_increment_id"]), file_map, required)
     if isinstance(status.get("rollover_binding"), dict):
         from program_rollover import validated_inherited_paths
 
@@ -1506,7 +1506,7 @@ def _build_plan_candidate(
             str(status["current_increment_id"]),
             delete_quarantine_bindings=delete_quarantine_bindings,
         )
-        managed_issues = validate_required_managed_file_map(file_map, required)
+        managed_issues = validate_program_lifecycle_file_map(root, Path(observation.path), str(status["current_increment_id"]), file_map, required)
         if managed_issues:
             raise ValueError("; ".join(sorted(set(managed_issues))))
     baseline_observation = replace(

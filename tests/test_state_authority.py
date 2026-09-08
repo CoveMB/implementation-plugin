@@ -338,36 +338,37 @@ class ManagedLifecycleWriteTests(unittest.TestCase):
     def test_traceability_successor_does_not_cross_disjoint_allocations(self) -> None:
         traceability = {
             "atomic_requirements": [
-                {"assigned_increments": ["INCREMENT-A", "INCREMENT-B"]},
-                {"assigned_increments": ["INCREMENT-C", "INCREMENT-D"]},
+                {"id": "REQ-ONE", "assigned_increments": ["INCREMENT-A", "INCREMENT-B"]},
+                {"id": "REQ-TWO", "assigned_increments": ["INCREMENT-C", "INCREMENT-D"]},
             ]
         }
 
-        self.assertIsNone(
-            AUTHORITY._traceability_successor(traceability, "INCREMENT-B")
-        )
+        resolution = AUTHORITY.resolve_increment_successor({"schema_version": "implementation-program-manifest/v2"}, traceability["atomic_requirements"], "INCREMENT-B", ("INCREMENT-A",))
+        self.assertEqual(resolution.kind, "unavailable")
+        self.assertIn("outstanding allocated work", resolution.reason)
 
     def test_traceability_successor_suppresses_multiple_direct_successors(self) -> None:
         traceability = {
             "atomic_requirements": [
-                {"assigned_increments": ["INCREMENT-A", "INCREMENT-B"]},
-                {"assigned_increments": ["INCREMENT-A", "INCREMENT-C"]},
+                {"id": "REQ-ONE", "assigned_increments": ["INCREMENT-A", "INCREMENT-B"]},
+                {"id": "REQ-TWO", "assigned_increments": ["INCREMENT-A", "INCREMENT-C"]},
             ]
         }
 
-        self.assertIsNone(
-            AUTHORITY._traceability_successor(traceability, "INCREMENT-A")
-        )
+        resolution = AUTHORITY.resolve_increment_successor({"schema_version": "implementation-program-manifest/v2"}, traceability["atomic_requirements"], "INCREMENT-A", ())
+        self.assertEqual(resolution.kind, "unavailable")
+        self.assertEqual(resolution.reason, "multiple allocated successors")
 
     def test_traceability_successor_rejects_duplicate_allocation_entries(self) -> None:
         traceability = {
             "atomic_requirements": [
-                {"assigned_increments": ["INCREMENT-A", "INCREMENT-A"]},
+                {"id": "REQ-ONE", "assigned_increments": ["INCREMENT-A", "INCREMENT-A"]},
             ]
         }
 
-        with self.assertRaisesRegex(ValueError, "unique strings"):
-            AUTHORITY._traceability_successor(traceability, "INCREMENT-A")
+        resolution = AUTHORITY.resolve_increment_successor({"schema_version": "implementation-program-manifest/v2"}, traceability["atomic_requirements"], "INCREMENT-A", ())
+        self.assertEqual(resolution.kind, "unavailable")
+        self.assertIn("unique safe strings", resolution.reason)
 
     def test_unique_traceability_successor_replaces_closure_with_navigation(self) -> None:
         fixture = BootstrapFixture()
@@ -509,7 +510,7 @@ class RolloverHistoryAuthorityTests(unittest.TestCase):
 
     def test_arbitrary_genesis_rollover_row_is_not_state_authority(self) -> None:
         fixture, program_root, observation = awaiting_diff_program(
-            {"ARCHIVE-VERIFY": ("ARCHIVE-BLOCKER",)}
+            {"ARCHIVE-VERIFY": ("ARCHIVE-INDEX",)}
         )
         try:
             rollover_path = program_root / "state/rollovers.jsonl"

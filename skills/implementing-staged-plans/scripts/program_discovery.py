@@ -1462,69 +1462,69 @@ def _load_setup_candidate(
                 and setup_envelope.get("schema_version")
                 == "implementation-operation-envelope/v2"
             )
-            if setup_v2:
-                authority_root = root.resolve()
-                has_rollover_prefix = bool(rollovers) or isinstance(
-                    status.get("rollover_binding"), dict
-                )
-                if has_rollover_prefix:
-                    from program_rollover import inspect_increment_rollover
+            authority_root = root.resolve()
+            has_rollover_prefix = (
+                bool(rollovers)
+                or isinstance(status.get("rollover_binding"), dict)
+                or any(action.get("actions") == ["rollover-increment"] for action in actions)
+                or (increment_state == "accepted" and isinstance(status.get("diff_disposition_binding"), dict))
+            )
+            if has_rollover_prefix:
+                from program_rollover import inspect_increment_rollover
 
-                    rollover = inspect_increment_rollover(
-                        authority_root, observation
-                    )
-                    if rollover.disposition is not None and (
-                        rollover.disposition != "resume" or rollover.issues
-                    ):
-                        return candidate, rollover.disposition, ()
-                authority_issues = validate_state_authority(
+                rollover = inspect_increment_rollover(
                     authority_root, observation
                 )
-                if any(
-                    "Delete" in issue or "quarantine" in issue
-                    for issue in authority_issues
+                if rollover.disposition is not None and (
+                    rollover.disposition != "resume" or rollover.issues
                 ):
-                    return candidate, "execution-transition-recovery-required", ()
-                ledgers = {
-                    "approvals": approvals,
-                    "increment_grants": grants,
-                    "action_authorizations": actions,
-                }
-                transaction_files, transaction_issues = _inspect_transaction_files(
-                    authority_root, manifest, status
-                )
-                for prefix_disposition in (
-                    _exact_plan_prefix_disposition(
-                        authority_root,
-                        manifest,
-                        status,
-                        ledgers,
-                        transaction_files,
-                    ),
-                    _exact_closure_prefix_disposition(
-                        authority_root,
-                        manifest,
-                        status,
-                        ledgers,
-                        transaction_files,
-                    ),
-                    _exact_acceptance_prefix_disposition(
-                        authority_root, manifest, status, ledgers
-                    ),
-                ):
-                    if prefix_disposition is not None:
-                        return candidate, prefix_disposition, ()
-                review_prefix_disposition = _exact_review_prefix_disposition(
-                    authority_root, manifest, status, transaction_files
-                )
-                if review_prefix_disposition not in {None, "resume"}:
-                    return candidate, review_prefix_disposition, ()
-                issues.extend(
-                    f"{display_path}: {issue}" for issue in transaction_issues
-                )
-            issues.extend(
-                authority_issues if setup_v2 else validate_state_authority(root, observation)
+                    return candidate, rollover.disposition, ()
+            authority_issues = validate_state_authority(
+                authority_root, observation
             )
+            if setup_v2 and any(
+                "Delete" in issue or "quarantine" in issue
+                for issue in authority_issues
+            ):
+                return candidate, "execution-transition-recovery-required", ()
+            ledgers = {
+                "approvals": approvals,
+                "increment_grants": grants,
+                "action_authorizations": actions,
+            }
+            transaction_files, transaction_issues = _inspect_transaction_files(
+                authority_root, manifest, status
+            )
+            for prefix_disposition in (
+                _exact_plan_prefix_disposition(
+                    authority_root,
+                    manifest,
+                    status,
+                    ledgers,
+                    transaction_files,
+                ),
+                _exact_closure_prefix_disposition(
+                    authority_root,
+                    manifest,
+                    status,
+                    ledgers,
+                    transaction_files,
+                ),
+                _exact_acceptance_prefix_disposition(
+                    authority_root, manifest, status, ledgers
+                ),
+            ):
+                if prefix_disposition is not None:
+                    return candidate, prefix_disposition, ()
+            review_prefix_disposition = _exact_review_prefix_disposition(
+                authority_root, manifest, status, transaction_files
+            )
+            if review_prefix_disposition not in {None, "resume"}:
+                return candidate, review_prefix_disposition, ()
+            issues.extend(
+                f"{display_path}: {issue}" for issue in transaction_issues
+            )
+            issues.extend(authority_issues)
         except (KeyError, OSError, TypeError, ValueError) as error:
             issues.append(str(error))
         if issues:

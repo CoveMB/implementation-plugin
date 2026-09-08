@@ -596,6 +596,10 @@ def persist_diff_disposition(
     if (
         status.get("current_increment_state") == "preparing"
         and isinstance(status.get("rollover_binding"), dict)
+    ) or (
+        status.get("current_increment_state") == "accepted"
+        and isinstance(status.get("diff_disposition_binding"), dict)
+        and status["diff_disposition_binding"].get("decision") == "accept-continue"
     ):
         from program_rollover import persist_increment_rollover
 

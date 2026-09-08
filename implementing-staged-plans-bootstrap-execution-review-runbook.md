@@ -99,8 +99,8 @@ retain automatic acceptance:
 accept-stop
 ```
 
-When exactly one traceability successor is dependency-ready, the prompt also
-offers `accept-continue`. Direct submission appends or adopts the exact diff
+When the [successor contract](skills/implementing-staged-plans/references/state-authorization.md#allocate-lifecycle-writes-before-authority)
+resolves the next increment, the prompt also offers `accept-continue`. Direct submission appends or adopts the exact diff
 approval and writes accepted status last. Stop ends there. Continue completes
 its bound rollover with no second routine checkpoint. Neither choice stages or
 commits files or performs an external action.
@@ -140,8 +140,10 @@ recorded prior states with status last.
 
 ## Close a Final Program
 
-Closure is available only when the accepted increment is final and no successor
-is allocated. Resolve the reconciliation and packet paths from
+Closure requires current acceptance and explicit terminal resolution under the
+successor contract; unavailable selection never means finality. This eligibility
+check leaves PLUG-002's accepted-chain and terminal Delete closure/disposal
+requirements unchanged. Resolve the reconciliation and packet paths from
 `implementation-closure-storage/v1`, and require both paths under the accepted
 exact plan's `Create` map.
 
@@ -202,7 +204,7 @@ Before accepting the 0.1.3 candidate, verify:
 4. required raw reviews, findings, dispositions, and final verification match
    the accepted delta;
 5. `accept-stop` remains byte-compatible and `accept-continue` appears only for
-   one dependency-ready successor;
+   the canonical successor;
 6. accepted-state continuation uses a distinct prompt and status-current grant;
 7. blocked recovery restores only sink-recorded prior states;
 8. Plan A closure is final-only and uses only manifest-derived paths;

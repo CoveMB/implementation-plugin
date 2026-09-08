@@ -53,7 +53,7 @@ def _fresh_observation(fixture: BootstrapFixture):
 
 
 def _authorized_delete_program_with_successor(
-    *, recreate_in_successor=False, third_successor=False
+    *, recreate_in_successor=False, third_successor=False, sparse=False
 ):
     fixture = BootstrapFixture()
     legacy_bytes = b"legacy implementation\n"
@@ -65,13 +65,17 @@ def _authorized_delete_program_with_successor(
     workspace["implementation_workspace"]["base_commit"] = fixture.head
     workspace["implementation_workspace"]["head_commit_at_selection"] = fixture.head
     fixture.write_json("state/workspace.json", workspace)
-    if third_successor:
+    increments = None
+    if sparse:
+        fixture.configure_portable_successors()
+        increments = fixture.load_json("manifest.json")["setup_semantics"]["increments"]
+    elif third_successor:
         fixture.configure_successor_chain(
             ("ARCHIVE-INDEX", "ARCHIVE-VERIFY", "ARCHIVE-REPORT")
         )
     else:
         fixture.configure_successors({"ARCHIVE-VERIFY": ("ARCHIVE-INDEX",)})
-    fixture.configure_delete_setup_v2(path="legacy.ts")
+    fixture.configure_delete_setup_v2(path="legacy.ts", increments=increments)
     if recreate_in_successor:
         manifest = fixture.load_json("manifest.json")
         semantics = manifest["setup_semantics"]
@@ -138,11 +142,12 @@ def _authorized_delete_program_with_successor(
 
 
 def _reviewed_delete_program(
-    *, recreate_in_successor=False, third_successor=False
+    *, recreate_in_successor=False, third_successor=False, sparse=False
 ):
     fixture, legacy_bytes = _authorized_delete_program_with_successor(
         recreate_in_successor=recreate_in_successor,
         third_successor=third_successor,
+        sparse=sparse,
     )
     program_root = fixture.program_root
     baseline = json.loads(
@@ -203,6 +208,35 @@ def _product_result(states, receipts):
 
 
 class DeleteOperationLifecycleTests(unittest.TestCase):
+    def test_sparse_continuation_routes_preserve_v2_tombstones_and_receipts(self):
+        for domain in ("immediate", "accepted-state"):
+            with self.subTest(domain=domain):
+                fixture, legacy_bytes, allocation = _reviewed_delete_program(sparse=True)
+                self.addCleanup(fixture.close)
+                root = fixture.program_root
+                if domain == "immediate":
+                    prompt = CONTINUATION.render_accept_continue_prompt(root)
+                    receipt = DIFF.persist_diff_disposition(root, prompt, _fresh_observation(fixture))
+                else:
+                    acceptance = DIFF.build_diff_acceptance_candidate(root, _fresh_observation(fixture))
+                    DIFF.persist_accept_stop(root, "Accept and stop.\n\n" + acceptance.prompt, _fresh_observation(fixture))
+                    prompt = CONTINUATION.render_accepted_state_continuation_prompt(root)
+                    receipt = ROLLOVER.persist_increment_rollover(root, prompt, _fresh_observation(fixture))
+                self.assertEqual(receipt.successor_increment_id, "ARCHIVE-VERIFY")
+                status = json.loads((root / "state/status.json").read_text())
+                inherited = status["inherited_workspace_binding"]
+                self.assertEqual(inherited["schema_version"], "implementation-inherited-workspace/v2")
+                states = {item["path"]: item for item in inherited["inherited_path_states"]}
+                self.assertFalse(states["legacy.ts"]["exists"])
+                self.assertTrue(states["archive-output.txt"]["exists"])
+                self.assertEqual((root / allocation["entry_path"]).read_bytes(), legacy_bytes)
+                self.assertFalse((fixture.repository / "legacy.ts").exists())
+                self.assertTrue(any(item["receipt_path"] == allocation["receipt_path"] for item in inherited["delete_quarantine_bindings"]))
+                prepared = ACTIVATION.prepare_exact_plan(root, _exact_plan_bytes(root, _fresh_observation(fixture)), _fresh_observation(fixture))
+                ACTIVATION.materialize_exact_plan(root, prepared.plan_prompt, _fresh_observation(fixture))
+                self.assertFalse((fixture.repository / "legacy.ts").exists())
+                self.assertEqual((root / allocation["entry_path"]).read_bytes(), legacy_bytes)
+
     def test_unmapped_names_cannot_bypass_delete_authority_before_mutation(self):
         for filename in ("unmapped.txt", "unmapped-Delete.txt", "unmapped-quarantine.txt"):
             with self.subTest(filename=filename):

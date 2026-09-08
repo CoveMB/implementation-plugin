@@ -48,6 +48,7 @@ from state_authority import (
     classify_delete_quarantine_recovery,
     inspect_workspace_path,
     required_future_lifecycle_writes,
+    validate_program_lifecycle_file_map,
     validate_state_authority,
 )
 
@@ -256,28 +257,19 @@ def _required_increment_rollover_writes(
     if extension is None or extension.successor_increment_id != successor_increment_id:
         raise ValueError("requested successor is not uniquely allocated and satisfied")
     return required_future_lifecycle_writes(
-        root, Path(workspace_root), str(status["current_increment_id"])
+        root, Path(workspace_root), str(status["current_increment_id"]),
+        allow_unbound_rollover_suffix=allow_unbound_rollover_suffix,
     )
 
 
 def _validate_rollover_file_map(
+    program_root: Path,
+    workspace_root: Path,
+    increment_id: str,
     file_map: ExactFileMap,
     required: Sequence[ManagedWriteRequirement],
 ) -> None:
-    actual = {
-        path: disposition
-        for disposition, paths in (
-            ("Create", file_map.create),
-            ("Modify", file_map.modify),
-            ("Preserve", file_map.preserve),
-        )
-        for path in paths
-    }
-    issues = [
-        f"rollover allocation {item.path} must be {item.disposition}"
-        for item in required
-        if actual.get(item.path) != item.disposition
-    ]
+    issues = validate_program_lifecycle_file_map(program_root, workspace_root, increment_id, file_map, required)
     if issues:
         raise ValueError("; ".join(issues))
 
@@ -440,7 +432,7 @@ def _build_rollover_candidate(
         successor_increment_id,
         allow_unbound_rollover_suffix=True,
     )
-    _validate_rollover_file_map(baseline.file_map, required)
+    _validate_rollover_file_map(root, Path(normalized.path), current_increment_id, baseline.file_map, required)
 
     prompt_sha256 = _sha256_bytes(submitted_prompt.encode("utf-8"))
     prior_status_sha256 = sha256_file(status_path)
@@ -1579,6 +1571,11 @@ def _validated_completed_rollover_records(
             ),
         )
     expected_current: str | None = None
+    accepted_prefix: tuple[str, ...] = ()
+    if manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA:
+        from program_authority import resolve_increment_successor
+
+        traceability, _ = _load_role_object(root, manifest, "traceability")
     for index, record in enumerate(completed):
         record_is_v2 = record.get("schema_version") == ROLLOVER_RECORD_SCHEMA_V2
         if record.get("schema_version") != (
@@ -1600,6 +1597,13 @@ def _validated_completed_rollover_records(
             raise ValueError("rollover chain increment authority is invalid")
         if index and current != expected_current:
             raise ValueError("rollover chain is not contiguous")
+        if manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA:
+            resolution = resolve_increment_successor(
+                manifest, traceability.get("atomic_requirements"), current, accepted_prefix
+            )
+            if resolution.kind != "successor" or resolution.successor_increment_id != successor:
+                raise ValueError(f"rollover successor disagrees with approved schedule: {resolution.reason or successor}")
+            accepted_prefix += (current,)
         if record.get("prior_increment_authority_binding") != expected_authority:
             raise ValueError("rollover chain prior increment authority is invalid")
         matching_actions = [

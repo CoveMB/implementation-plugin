@@ -53,7 +53,7 @@ Review preparation stops at the exact diff-disposition prompt. Questions or disc
 
 ## Dispose the Current Diff
 
-The exact `accept-stop` choice is always available for new-model typed dispositions and preserves Plan A bytes. Already persisted legacy programs using `approval:full` or `approval:full-diff` retain automatic acceptance. When traceability identifies exactly one successor whose dependencies are satisfied, the same prompt may also offer exact `accept-continue`. Direct submission persists or adopts the diff-acceptance prefix and accepted status first. `accept-continue` then completes its bound successor rollover with no second routine checkpoint; it does not grant any later or external action.
+The exact `accept-stop` choice is always available for new-model typed dispositions and preserves Plan A bytes. Already persisted legacy programs using `approval:full` or `approval:full-diff` retain automatic acceptance. When the [successor contract](references/state-authorization.md#allocate-lifecycle-writes-before-authority) resolves the next increment, the same prompt may also offer exact `accept-continue`. Direct submission persists or adopts the diff-acceptance prefix and accepted status first. `accept-continue` then completes its bound successor rollover with no second routine checkpoint; it does not grant any later or external action.
 
 ## Continue an Accepted Program
 
@@ -61,7 +61,7 @@ Replaying `accept-stop` only recovers or reports the same accepted-stop state. A
 
 ## Authorize a Successor Increment
 
-Validate the current accepted projection, canonical rollover chain, successor dependencies, accepted product bytes, workspace, and prompt before writing. Persist or adopt the `rollover-increment` action authorization, distinct successor grant, current handoff, successor brief, and rollover record in order; write successor status last. Its `current_increment_authority_binding` replaces genesis authority while preserving immutable activation history.
+Validate the current accepted projection, canonical rollover chain and [successor contract](references/state-authorization.md#allocate-lifecycle-writes-before-authority), accepted product bytes, workspace, and prompt before writing. Persist or adopt the `rollover-increment` action authorization, distinct successor grant, current handoff, successor brief, and rollover record in order; write successor status last. Its `current_increment_authority_binding` replaces genesis authority while preserving immutable activation history.
 
 Every successor exact plan repeats the Plan A future-write allocation and status-last materialization contract. Its execution baseline uses `inherited_paths` only for validated accepted product states with exact current-plan ownership; user-work baselines remain separate.
 
@@ -73,7 +73,7 @@ Only the typed blocked transaction may enter or leave blocked state. Entry is le
 
 ## Close a Final Program
 
-An accepted final increment with no traceability-allocated successor may use typed closure preparation. Resolve both paths from `implementation-closure-storage/v1`, require exact-plan `Create` allocation, reconcile every requirement, validate accepted review and fresh verification, create reconciliation then packet, and write awaiting-closure status last.
+Current acceptance and an explicit terminal result from the [successor contract](references/state-authorization.md#allocate-lifecycle-writes-before-authority) are required for typed closure preparation and approval/retry. Unavailable selection never implies finality. Resolve both paths from `implementation-closure-storage/v1`, require exact-plan `Create` allocation, reconcile every requirement, validate accepted review and fresh verification, create reconciliation then packet, and write awaiting-closure status last.
 
 Render one exact closure-only prompt. Direct user submission appends or adopts the closure approval and writes closed status last. Closure performs no later action and grants none.
 

@@ -59,9 +59,11 @@ from program_authority import (
     NEW_PROGRAM_MANIFEST_SCHEMA,
     PROPOSAL_VALIDATION_MODE,
     SETUP_PROGRAM_MANIFEST_SCHEMA,
+    SuccessorResolution,
     load_json_lines,
     load_json_object,
     resolve_managed_path,
+    resolve_increment_successor,
     resolve_program_closure_paths,
     sha256_file,
     validate_program_authority,
@@ -358,38 +360,65 @@ def _nested_schema_versions(value: object) -> set[str]:
     return schemas
 
 
-def _traceability_successor(
-    traceability: dict[str, object], increment_id: str
-) -> str | None:
-    atomic_requirements = traceability.get("atomic_requirements")
-    if not isinstance(atomic_requirements, list):
-        raise ValueError("traceability atomic_requirements must be a list")
-    current_found = False
-    candidates: set[str] = set()
-    for requirement in atomic_requirements:
-        assigned = (
-            requirement.get("assigned_increments")
-            if isinstance(requirement, dict)
-            else None
+def resolve_program_successor(
+    program_root: Path,
+    manifest: dict[str, object],
+    status: dict[str, object],
+    *,
+    allow_unbound_rollover_suffix: bool = False,
+) -> SuccessorResolution:
+    """Project validated completed history without granting current acceptance."""
+    from program_rollover import _validated_completed_rollover_records
+
+    try:
+        root = Path(program_root)
+        current = status.get("current_increment_id")
+        authority = status.get("current_increment_authority_binding")
+        if isinstance(authority, dict) and authority.get("increment_id") != current:
+            raise ValueError("successor status-current authority mismatch")
+        traceability_path, issues = resolve_managed_path(
+            root,
+            manifest.get("logical_roles", {}).get("traceability"),
+            role="logical role traceability",
         )
-        if (
-            not isinstance(assigned, list)
-            or not assigned
-            or not all(isinstance(candidate, str) and candidate for candidate in assigned)
-            or len(assigned) != len(set(assigned))
-        ):
-            raise ValueError(
-                "traceability assigned_increments must be unique strings"
-            )
-        if increment_id not in assigned:
-            continue
-        current_found = True
-        successor_index = assigned.index(increment_id) + 1
-        if successor_index < len(assigned):
-            candidates.add(assigned[successor_index])
-    if not current_found:
-        raise ValueError("current increment is absent from traceability allocation")
-    return next(iter(candidates)) if len(candidates) == 1 else None
+        if traceability_path is None:
+            raise ValueError("; ".join(issues))
+        traceability, issues = load_json_object(traceability_path)
+        if traceability is None:
+            raise ValueError("; ".join(issues))
+        completed = _validated_completed_rollover_records(
+            root, status, allow_unbound_suffix=allow_unbound_rollover_suffix
+        )
+        return resolve_increment_successor(
+            manifest,
+            traceability.get("atomic_requirements"),
+            current,
+            tuple(record["current_increment_id"] for record in completed),
+        )
+    except (OSError, ValueError) as error:
+        return SuccessorResolution("unavailable", None, str(error))
+
+
+def _allocated_lifecycle_file(
+    root: Path,
+    descriptor: dict[str, object],
+    field: str,
+    increment_id: str | None = None,
+) -> Path:
+    storage_root = descriptor.get("root")
+    filename = descriptor.get(field)
+    if not isinstance(storage_root, str) or not isinstance(filename, str):
+        raise ValueError(f"lifecycle storage root and {field} must be strings")
+    relative = (
+        f"{storage_root}/{filename}" if increment_id is None
+        else f"{storage_root}/{increment_id}/{filename}"
+    )
+    path, issues = resolve_managed_path(
+        root, relative, role=f"allocated lifecycle {field}", require_file=False
+    )
+    if path is None:
+        raise ValueError("; ".join(issues))
+    return path
 
 
 def required_future_lifecycle_writes(
@@ -398,6 +427,7 @@ def required_future_lifecycle_writes(
     increment_id: str,
     *,
     delete_quarantine_bindings: Sequence[dict[str, object]] = (),
+    allow_unbound_rollover_suffix: bool = False,
 ) -> tuple[ManagedWriteRequirement, ...]:
     """Derive disposition-aware current and future control-plane allocations."""
     if (
@@ -455,23 +485,8 @@ def required_future_lifecycle_writes(
                 )
             )
 
-    increment_root = increment_storage.get("root")
-    if not isinstance(increment_root, str):
-        raise ValueError("increment storage root must be a string")
-
     def allocated_increment_file(target_increment: str, field: str) -> Path:
-        filename = increment_storage.get(field)
-        if not isinstance(filename, str):
-            raise ValueError(f"increment storage {field} must be a string")
-        path, path_issues = resolve_managed_path(
-            root,
-            f"{increment_root}/{target_increment}/{filename}",
-            role=f"allocated increment {field}",
-            require_file=False,
-        )
-        if path is None:
-            raise ValueError("; ".join(path_issues))
-        return path
+        return _allocated_lifecycle_file(root, increment_storage, field, target_increment)
 
     for field in (
         "execution_baseline_filename",
@@ -487,16 +502,24 @@ def required_future_lifecycle_writes(
             )
         )
 
-    traceability_path, path_issues = resolve_managed_path(
-        root, logical_roles.get("traceability"), role="logical role traceability"
+    status_path, status_issues = resolve_managed_path(
+        root, logical_roles.get("status"), role="logical role status"
     )
-    if traceability_path is None:
-        raise ValueError("; ".join(path_issues))
-    traceability, traceability_issues = load_json_object(traceability_path)
-    if traceability is None:
-        raise ValueError("; ".join(traceability_issues))
-    successor = _traceability_successor(traceability, increment_id)
-    if successor is not None:
+    if status_path is None:
+        raise ValueError("; ".join(status_issues))
+    status, status_issues = load_json_object(status_path)
+    if status is None:
+        raise ValueError("; ".join(status_issues))
+    if status.get("current_increment_id") != increment_id:
+        raise ValueError("lifecycle allocation must match status current increment")
+    resolution = resolve_program_successor(
+        root, manifest, status,
+        allow_unbound_rollover_suffix=allow_unbound_rollover_suffix,
+    )
+    if resolution.kind == "unavailable":
+        raise ValueError(f"successor allocation unavailable: {resolution.reason}")
+    successor = resolution.successor_increment_id
+    if resolution.kind == "successor":
         requirements.extend(
             (
                 ManagedWriteRequirement(
@@ -516,21 +539,8 @@ def required_future_lifecycle_writes(
             )
         )
     else:
-        closure_root = closure_storage.get("root")
-        if not isinstance(closure_root, str):
-            raise ValueError("closure storage root must be a string")
         for field in ("reconciliation_filename", "packet_filename"):
-            filename = closure_storage.get(field)
-            if not isinstance(filename, str):
-                raise ValueError(f"closure storage {field} must be a string")
-            path, path_issues = resolve_managed_path(
-                root,
-                f"{closure_root}/{filename}",
-                role=f"allocated closure {field}",
-                require_file=False,
-            )
-            if path is None:
-                raise ValueError("; ".join(path_issues))
+            path = _allocated_lifecycle_file(root, closure_storage, field)
             requirements.append(
                 ManagedWriteRequirement(
                     _workspace_relative_path(workspace_root, path), "Create"
@@ -592,6 +602,64 @@ def validate_required_managed_file_map(
                 issues.append(
                     f"required path {requirement.path} is {actual}, expected {requirement.disposition}"
                 )
+    return sorted(set(issues))
+
+
+def validate_program_lifecycle_file_map(
+    program_root: Path,
+    workspace_root: Path,
+    increment_id: str,
+    file_map: ExactFileMap,
+    required: Sequence[ManagedWriteRequirement],
+) -> list[str]:
+    """Reject writes to inactive lifecycle alternatives as well as missing paths."""
+    issues = validate_required_managed_file_map(file_map, required)
+    root = Path(program_root)
+    try:
+        manifest, load_issues = load_json_object(root / "manifest.json")
+        if manifest is None:
+            raise ValueError("; ".join(load_issues))
+        traceability_path, load_issues = resolve_managed_path(
+            root, manifest["logical_roles"].get("traceability"),
+            role="logical role traceability",
+        )
+        if traceability_path is None:
+            raise ValueError("; ".join(load_issues))
+        traceability, load_issues = load_json_object(traceability_path)
+        if traceability is None:
+            raise ValueError("; ".join(load_issues))
+        increment_storage = manifest["increment_storage"]
+        reserved = [
+            _allocated_lifecycle_file(root, manifest["closure_storage"], field)
+            for field in ("reconciliation_filename", "packet_filename")
+        ]
+        reserved.append(
+            _allocated_lifecycle_file(root, increment_storage, "handoff_filename", increment_id)
+        )
+        allocated_ids = {
+            item for requirement in traceability["atomic_requirements"]
+            for item in requirement["assigned_increments"]
+        }
+        reserved.extend(
+            _allocated_lifecycle_file(root, increment_storage, "brief_filename", item)
+            for item in allocated_ids if item != increment_id
+        )
+        reserved_paths = {
+            _workspace_relative_path(workspace_root, path) for path in reserved
+        }
+        allowed = {(item.path, item.disposition) for item in required}
+        for disposition, paths in (
+            ("Create", file_map.create),
+            ("Modify", file_map.modify),
+            ("Delete", getattr(file_map, "delete", ())),
+        ):
+            for path in paths:
+                if path in reserved_paths and (path, disposition) not in allowed:
+                    issues.append(
+                        f"inactive lifecycle allocation cannot be {disposition}: {path}"
+                    )
+    except (OSError, KeyError, TypeError, ValueError) as error:
+        issues.append(str(error))
     return sorted(set(issues))
 
 
