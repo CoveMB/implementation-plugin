@@ -19,7 +19,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 _ORIGINAL_OS_RENAME = os.rename
-_LIBC = _ctypes.CDLL(None, use_errno=True)
+_LIBC = _ctypes.CDLL(None, use_errno=True) if sys.platform == "darwin" else None
 _RENAMEATX_NP = getattr(_LIBC, "renameatx_np", None)
 if _RENAMEATX_NP is not None:
     _RENAMEATX_NP.argtypes = [

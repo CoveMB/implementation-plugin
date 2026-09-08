@@ -3,7 +3,10 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
@@ -2717,6 +2720,55 @@ class StateApplicationAndCliTests(StateAuthorityTestCase):
                 with redirect_stdout(output):
                     self.assertEqual(AUTHORITY.main([command]), 2)
                 self.assertIn("usage:", output.getvalue())
+
+
+class PlatformImportCompatibilityTests(unittest.TestCase):
+    def test_non_darwin_imports_keep_legacy_authority_available(self) -> None:
+        script = textwrap.dedent("""
+            import ctypes
+            import pathlib
+            import shutil
+            import subprocess
+            import sys
+            import tempfile
+            import unittest
+            from unittest import mock
+
+            # Initialize native standard-library backends before spoofing only
+            # the optional application library-selection condition.
+            selected_platform = sys.argv[1]
+            sys.path.insert(0, sys.argv[2])
+            with mock.patch.object(sys, "platform", selected_platform):
+                with mock.patch.object(
+                    ctypes, "CDLL",
+                    side_effect=TypeError("Windows loader requires a string"),
+                ) as loader:
+                    from tests.test_state_authority import WorkspaceAndBindingTests
+                    import program_discovery
+                    import program_activation
+                    suite = unittest.TestSuite([
+                        WorkspaceAndBindingTests(
+                            "test_valid_state_authority_and_workspace_pass"
+                        )
+                    ])
+                    result = unittest.TextTestRunner(verbosity=2).run(suite)
+                    loader.assert_not_called()
+                    if not result.wasSuccessful():
+                        raise SystemExit(1)
+        """)
+        for selected_platform in ("win32", "linux"):
+            with self.subTest(platform=selected_platform):
+                completed = subprocess.run(
+                    [sys.executable, "-c", script, selected_platform, str(SCRIPT_ROOT)],
+                    cwd=REPOSITORY_ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(
+                    completed.returncode, 0,
+                    completed.stdout + completed.stderr,
+                )
 
 
 if __name__ == "__main__":

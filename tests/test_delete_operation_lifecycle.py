@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 import unittest
@@ -199,6 +200,202 @@ def _product_result(states, receipts):
 
 
 class DeleteOperationLifecycleTests(unittest.TestCase):
+    def test_unmapped_names_cannot_bypass_delete_authority_before_mutation(self):
+        for filename in ("unmapped.txt", "unmapped-Delete.txt", "unmapped-quarantine.txt"):
+            with self.subTest(filename=filename):
+                fixture, legacy_bytes = _authorized_delete_program_with_successor()
+                try:
+                    root = fixture.program_root
+                    (fixture.repository / filename).write_text("unmapped user work\n", encoding="utf-8")
+                    baseline = json.loads((root / "increments/ARCHIVE-INDEX/execution-baseline.json").read_text())
+                    allocation = baseline["delete_quarantine_bindings"][0]
+                    before = repository_snapshot(fixture.repository)
+                    status_before = (root / "state/status.json").read_bytes()
+                    with mock.patch.object(
+                        ACTIVATION, "quarantine_bound_regular_file",
+                        wraps=ACTIVATION.quarantine_bound_regular_file,
+                    ) as move, mock.patch.object(
+                        ACTIVATION, "adopt_delete_quarantine_receipt",
+                        wraps=ACTIVATION.adopt_delete_quarantine_receipt,
+                    ) as adopt:
+                        with self.assertRaisesRegex(ValueError, "unmapped dirty paths"):
+                            ACTIVATION.advance_execution_state(root, "implementing", _fresh_observation(fixture))
+                        move.assert_not_called()
+                        adopt.assert_not_called()
+                    self.assertEqual(repository_snapshot(fixture.repository), before)
+                    self.assertEqual((root / "state/status.json").read_bytes(), status_before)
+                    self.assertEqual((fixture.repository / "legacy.ts").read_bytes(), legacy_bytes)
+                    self.assertFalse((root / allocation["entry_path"]).exists())
+                    self.assertFalse((root / allocation["receipt_path"]).exists())
+                finally:
+                    fixture.close()
+
+    def test_exact_delete_prefix_recovery_still_blocks_unmapped_work(self):
+        for boundary in ("receipt", "status"):
+            with self.subTest(boundary=boundary):
+                fixture, legacy_bytes = _authorized_delete_program_with_successor()
+                try:
+                    root = fixture.program_root
+                    baseline = json.loads((root / "increments/ARCHIVE-INDEX/execution-baseline.json").read_text())
+                    allocation = baseline["delete_quarantine_bindings"][0]
+                    entry_path = root / allocation["entry_path"]
+                    receipt_path = root / allocation["receipt_path"]
+                    status_before = (root / "state/status.json").read_bytes()
+                    fault = mock.Mock(side_effect=RuntimeError("interrupted Delete prefix"))
+                    patcher = (
+                        mock.patch.dict(
+                            ACTIVATION.quarantine_bound_regular_file.__globals__,
+                            {"_write_delete_receipt": fault},
+                        ) if boundary == "receipt" else
+                        mock.patch.object(ACTIVATION, "atomic_replace_json", fault)
+                    )
+                    with patcher:
+                        with self.assertRaisesRegex(RuntimeError, "interrupted Delete prefix"):
+                            ACTIVATION.advance_execution_state(root, "implementing", _fresh_observation(fixture))
+                    self.assertEqual((root / "state/status.json").read_bytes(), status_before)
+                    self.assertEqual(entry_path.read_bytes(), legacy_bytes)
+                    self.assertFalse((fixture.repository / "legacy.ts").exists())
+                    self.assertEqual(receipt_path.exists(), boundary == "status")
+                    dirty_path = fixture.repository / "unmapped-quarantine.txt"
+                    dirty_path.write_text("unmapped user work\n", encoding="utf-8")
+                    before = repository_snapshot(fixture.repository)
+                    with mock.patch.object(
+                        ACTIVATION, "quarantine_bound_regular_file",
+                        wraps=ACTIVATION.quarantine_bound_regular_file,
+                    ) as move, mock.patch.object(
+                        ACTIVATION, "adopt_delete_quarantine_receipt",
+                        wraps=ACTIVATION.adopt_delete_quarantine_receipt,
+                    ) as adopt:
+                        with self.assertRaisesRegex(ValueError, "unmapped dirty paths"):
+                            ACTIVATION.advance_execution_state(root, "implementing", _fresh_observation(fixture))
+                        move.assert_not_called()
+                        adopt.assert_not_called()
+                    self.assertEqual(repository_snapshot(fixture.repository), before)
+                    # Remove only the test-created unmapped file in this disposable fixture.
+                    dirty_path.unlink()
+                    retained_entry = entry_path.read_bytes()
+                    with mock.patch.object(
+                        ACTIVATION, "quarantine_bound_regular_file",
+                        side_effect=AssertionError("recovery must not move again"),
+                    ), mock.patch.object(
+                        Path, "unlink", side_effect=AssertionError("recovery must retain bytes"),
+                    ):
+                        receipt = ACTIVATION.advance_execution_state(root, "implementing", _fresh_observation(fixture))
+                    self.assertEqual(receipt.increment_state, "implementing")
+                    self.assertEqual(entry_path.read_bytes(), retained_entry)
+                    self.assertTrue(receipt_path.is_file())
+                    normalized = ACTIVATION._without_owned_program_paths(root, _fresh_observation(fixture))
+                    self.assertEqual(ACTIVATION.validate_state_authority(root, normalized), [])
+                    discovery = run_program_discovery(fixture.repository)
+                    self.assertEqual(discovery["disposition"], "resume")
+                    self.assertFalse(discovery["stop_required"])
+                finally:
+                    fixture.close()
+
+    def test_completed_rollover_binds_review_hashes_to_approval_and_disposition(self):
+        fixture, legacy_bytes, allocation, _receipt = _complete_delete_rollover()
+        try:
+            root = fixture.program_root
+            status_path = root / "state/status.json"
+            rows_path = root / "state/rollovers.jsonl"
+            approvals_path = root / "state/approvals.jsonl"
+            original_status = json.loads(status_path.read_text())
+            original_rows = [json.loads(line) for line in rows_path.read_text().splitlines()]
+            original_row = original_rows[-1]
+            evidence_path = root / original_row["review_evidence_binding"]["path"]
+            packet_path = root / original_row["review_packet_binding"]["path"]
+            originals = {
+                path: path.read_bytes()
+                for path in (status_path, rows_path, approvals_path, evidence_path, packet_path)
+            }
+            cases = (
+                "replace-bundle",
+                "replace-bundle-and-disposition",
+                "disposition-evidence",
+                "disposition-packet",
+                "approval-evidence",
+                "approval-packet",
+            )
+            for case in cases:
+                with self.subTest(case=case):
+                    try:
+                        status = copy.deepcopy(original_status)
+                        rows = copy.deepcopy(original_rows)
+                        row = rows[-1]
+                        accepted = row["accepted_diff_binding"]
+                        disposition = accepted["diff_disposition_binding"]
+                        if case.startswith("replace-bundle"):
+                            import review_coordination as coordination
+
+                            evidence = json.loads(originals[evidence_path])
+                            evidence["review_packet"]["changes_and_rationale"] = [
+                                "Replacement created after the retained approval."
+                            ]
+                            packet = coordination.ReviewPacket(
+                                **coordination._tuple_fields(
+                                    evidence["review_packet"], coordination.PACKET_FIELDS
+                                )
+                            )
+                            packet_text = coordination.render_review_packet(packet)
+                            self.assertEqual(
+                                coordination.validate_review_bundle(evidence, packet_text), []
+                            )
+                            evidence_path.write_bytes(ACTIVATION._canonical_json_bytes(evidence))
+                            packet_path.write_text(packet_text, encoding="utf-8")
+                            for stem, path in (("review_evidence", evidence_path),
+                                               ("review_packet", packet_path)):
+                                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                                row[stem + "_binding"]["sha256"] = digest
+                                accepted[stem + "_binding"]["sha256"] = digest
+                                if case == "replace-bundle-and-disposition":
+                                    disposition[stem + "_sha256"] = digest
+                            self.assertEqual(approvals_path.read_bytes(), originals[approvals_path])
+                        elif case.startswith("disposition-"):
+                            stem = "review_evidence" if case.endswith("evidence") else "review_packet"
+                            disposition[stem + "_sha256"] = "0" * 64
+                        else:
+                            approvals = [json.loads(line) for line in originals[approvals_path].splitlines()]
+                            approval = next(
+                                item for item in approvals
+                                if item.get("event_id") == accepted["diff_approval_binding"]["event_id"]
+                            )
+                            stem = "review_evidence" if case.endswith("evidence") else "review_packet"
+                            approval[stem + "_sha256"] = "0" * 64
+
+                            def approval_line(value):
+                                return (json.dumps(value, ensure_ascii=False,
+                                                   separators=(",", ":"), sort_keys=False)
+                                        + "\n").encode("utf-8")
+
+                            approvals_path.write_bytes(b"".join(approval_line(item) for item in approvals))
+                            accepted["diff_approval_binding"]["sha256"] = hashlib.sha256(
+                                approval_line(approval)
+                            ).hexdigest()
+                        rows_path.write_bytes(b"".join(ACTIVATION._canonical_json_line(item) for item in rows))
+                        status["rollover_binding"]["rollover_sha256"] = hashlib.sha256(
+                            ACTIVATION._canonical_json_line(row)
+                        ).hexdigest()
+                        status_path.write_bytes(ACTIVATION._canonical_json_bytes(status))
+                        observation = ACTIVATION._without_owned_program_paths(root, _fresh_observation(fixture))
+                        before = repository_snapshot(fixture.repository)
+                        with self.assertRaisesRegex(ValueError, "rollover review .* approval binding mismatch"):
+                            ROLLOVER.validated_inherited_paths(root, status, observation)
+                        self.assertTrue(ACTIVATION.validate_state_authority(root, observation))
+                        discovery = run_program_discovery(fixture.repository)
+                        self.assertTrue(discovery["stop_required"])
+                        self.assertNotEqual(discovery["disposition"], "resume")
+                        self.assertEqual(repository_snapshot(fixture.repository), before)
+                        self.assertEqual((root / allocation["entry_path"]).read_bytes(), legacy_bytes)
+                        self.assertFalse((fixture.repository / "legacy.ts").exists())
+                    finally:
+                        for path, content in originals.items():
+                            path.write_bytes(content)
+            observation = ACTIVATION._without_owned_program_paths(root, _fresh_observation(fixture))
+            self.assertEqual(ACTIVATION.validate_state_authority(root, observation), [])
+            self.assertEqual(run_program_discovery(fixture.repository)["disposition"], "resume")
+        finally:
+            fixture.close()
+
     def test_production_delete_accept_continue_preserves_tombstone_and_quarantine(
         self,
     ) -> None:

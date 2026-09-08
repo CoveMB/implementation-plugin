@@ -2198,10 +2198,15 @@ def advance_execution_state(
                     f"Delete quarantine recovery-required: {relative}"
                 )
         state_issues = validate_state_authority(root, normalized)
+        # Status is still authorized after an exact interrupted move. Only its
+        # path-specific source warning can be explained by the classified prefix.
+        recoverable_source_issues = {
+            f"authorized Delete source does not match baseline: {relative}"
+            for relative, recovery in delete_recoveries.items()
+            if recovery.disposition in {"receipt-adoption-ready", "resume"}
+        }
         blocking_issues = [
-            issue
-            for issue in state_issues
-            if "Delete" not in issue and "quarantine" not in issue
+            issue for issue in state_issues if issue not in recoverable_source_issues
         ]
         if blocking_issues:
             raise ValueError("; ".join(blocking_issues))

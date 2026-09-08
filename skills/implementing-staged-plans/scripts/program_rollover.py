@@ -1823,6 +1823,19 @@ def _validated_completed_rollover_records(
                 or "accepted_product_delta_sha256" in approval
             ):
                 raise ValueError("rollover diff approval binding is invalid")
+            for stem, path in (
+                ("review_evidence", evidence_path),
+                ("review_packet", packet_path),
+            ):
+                current_sha256 = sha256_file(path)
+                if (
+                    record[stem + "_binding"].get("sha256") != current_sha256
+                    or accepted_diff[stem + "_binding"].get("sha256") != current_sha256
+                    or disposition.get(stem + "_sha256") != current_sha256
+                    or approval.get(stem + "_sha256") != current_sha256
+                ):
+                    label = stem.replace("_", " ")
+                    raise ValueError(f"rollover {label} approval binding mismatch")
             if disposition.get("decision") == "accept-continue":
                 projection = disposition.get("successor_authority_projection")
                 if (
