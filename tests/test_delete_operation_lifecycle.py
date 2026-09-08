@@ -999,19 +999,57 @@ class DeleteReceiptReinspectionTests(unittest.TestCase):
         namespace = self.validate.__globals__
         classify = namespace["classify_delete_quarantine_recovery"]
         inspect = namespace["inspect_workspace_path"]
+        serialize = classify.__globals__["_delete_receipt_bytes"]
+        read_receipt = classify.__globals__["_read_delete_receipt"]
         events = []
+        replacement_digest = None
         with tempfile.TemporaryDirectory() as directory:
             saved = Path(directory) / "receipt.json"
-            displaced = Path(directory) / "receipt-link"
+            displaced = Path(directory) / "receipt-replacement"
+
+            def restore_receipt():
+                if saved.exists():
+                    if self.receipt_path.exists() or self.receipt_path.is_symlink():
+                        self.receipt_path.rename(displaced)
+                    saved.rename(self.receipt_path)
 
             def classify_then_race(*args, **kwargs):
+                nonlocal replacement_digest
                 recovery = classify(*args, **kwargs)
                 if not events and recovery.disposition == "resume":
+                    self.assertIsNotNone(recovery.receipt)
+                    original_bytes = self.receipt_path.read_bytes()
+                    self.assertEqual(serialize(recovery.receipt), original_bytes)
                     events.append("classified-resume")
-                    if kind in {"missing", "symlink"}:
+                    if kind == "missing-recovery-receipt":
+                        return replace(recovery, receipt=None)
+                    if kind in {
+                        "missing", "symlink", "malformed-content", "wrong-metadata",
+                    }:
                         self.receipt_path.rename(saved)
                         if kind == "symlink":
                             self.receipt_path.symlink_to(saved)
+                        elif kind in {"malformed-content", "wrong-metadata"}:
+                            replacement_receipt = replace(
+                                recovery.receipt, increment_id="UNAUTHORIZED-INCREMENT"
+                            )
+                            payload = (
+                                b"not an authorized Delete receipt\n"
+                                if kind == "malformed-content"
+                                else serialize(replacement_receipt)
+                            )
+                            self.receipt_path.write_bytes(payload)
+                            replacement_digest = hashlib.sha256(payload).hexdigest()
+                            self.assertNotEqual(
+                                replacement_digest,
+                                hashlib.sha256(original_bytes).hexdigest(),
+                            )
+                            if kind == "wrong-metadata":
+                                self.assertNotEqual(replacement_receipt, recovery.receipt)
+                                self.assertEqual(
+                                    read_receipt(self.root, self.binding["receipt_path"]),
+                                    replacement_receipt,
+                                )
                 return recovery
 
             def inspect_receipt(root, relative, **kwargs):
@@ -1026,30 +1064,42 @@ class DeleteReceiptReinspectionTests(unittest.TestCase):
                     if kind == "oserror":
                         raise OSError("injected receipt descriptor failure")
                     snapshot = inspect(root, relative, **kwargs)
+                    if replacement_digest is not None:
+                        self.assertTrue(snapshot.exists)
+                        self.assertEqual(snapshot.sha256, replacement_digest)
                     if kind == "null-sha":
                         return replace(snapshot, sha256=None)
                     if kind == "invalid-sha":
                         return replace(snapshot, sha256="invalid")
                     return snapshot
                 finally:
-                    if saved.exists():
-                        if self.receipt_path.is_symlink():
-                            self.receipt_path.rename(displaced)
-                        saved.rename(self.receipt_path)
+                    restore_receipt()
 
-            with mock.patch.dict(
-                namespace,
-                {
-                    "classify_delete_quarantine_recovery": classify_then_race,
-                    "inspect_workspace_path": inspect_receipt,
-                },
-            ):
-                yield events
+            try:
+                with mock.patch.dict(
+                    namespace,
+                    {
+                        "classify_delete_quarantine_recovery": classify_then_race,
+                        "inspect_workspace_path": inspect_receipt,
+                    },
+                ):
+                    yield events
+            finally:
+                restore_receipt()
 
     def test_receipt_reinspection_failure_returns_invalid_assessment(self):
-        for kind in ("missing", "symlink", "oserror", "null-sha", "invalid-sha"):
+        valid = self.assess()
+        self.assertTrue(valid.valid, valid.issues)
+        expected_states = valid.product_states.ordered_path_states
+        self.assertEqual(len(expected_states), 5)
+        self.assertEqual(expected_states[-1].operation, "Delete")
+        for kind in (
+            "missing", "symlink", "oserror", "null-sha", "invalid-sha",
+            "malformed-content", "wrong-metadata", "missing-recovery-receipt",
+        ):
             with self.subTest(kind=kind):
                 before = repository_snapshot(self.fixture.repository)
+                before_receipt = self.receipt_path.read_bytes()
                 with self.receipt_race(kind) as events:
                     assessment = self.assess()
                 self.assertEqual(events, ["classified-resume", "reinspected"])
@@ -1059,12 +1109,31 @@ class DeleteReceiptReinspectionTests(unittest.TestCase):
                     for issue in assessment.issues
                 ), assessment.issues)
                 self.assertEqual(assessment.product_states.delete_quarantine_bindings, ())
+                self.assertEqual(
+                    assessment.product_states.ordered_path_states, expected_states
+                )
+                self.assertEqual(self.receipt_path.read_bytes(), before_receipt)
                 self.assertEqual(repository_snapshot(self.fixture.repository), before)
+                self.assertFalse((self.fixture.repository / "legacy.ts").exists())
+                self.assertEqual(
+                    (self.root / self.binding["entry_path"]).read_bytes(),
+                    self.legacy_bytes,
+                )
+
+    def test_malformed_receipt_content_blocks_reviewing_before_status_write(self):
+        self.assert_reviewing_rejected("malformed-content")
+
+    def test_wrong_receipt_metadata_blocks_reviewing_before_status_write(self):
+        self.assert_reviewing_rejected("wrong-metadata")
+
+    def test_missing_recovery_receipt_blocks_reviewing_before_status_write(self):
+        self.assert_reviewing_rejected("missing-recovery-receipt")
 
     def assert_reviewing_rejected(self, kind):
         status_path = self.root / "state/status.json"
         before_status = status_path.read_bytes()
         before = repository_snapshot(self.fixture.repository)
+        before_receipt = self.receipt_path.read_bytes()
         with self.receipt_race(kind) as events:
             with mock.patch.object(
                 ACTIVATION, "atomic_replace_json",
@@ -1078,6 +1147,7 @@ class DeleteReceiptReinspectionTests(unittest.TestCase):
         self.assertIn("Delete quarantine receipt ", str(raised.exception))
         self.assertEqual(events, ["classified-resume", "reinspected"])
         self.assertEqual(status_path.read_bytes(), before_status)
+        self.assertEqual(self.receipt_path.read_bytes(), before_receipt)
         self.assertEqual(repository_snapshot(self.fixture.repository), before)
         self.assertFalse((self.fixture.repository / "legacy.ts").exists())
         self.assertEqual(

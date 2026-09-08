@@ -28,6 +28,7 @@ from state_authority import (
     ExactFileMapV2,
     RepositoryObservation,
     WorkspacePathSnapshot,
+    _delete_receipt_bytes,
     decide_action_authorization,
     classify_delete_quarantine_recovery,
     delete_quarantine_allocation,
@@ -1865,6 +1866,16 @@ def validate_execution_workspace_v2(
                         ):
                             issues.append(
                                 f"Delete quarantine receipt is missing or invalid: {relative}"
+                            )
+                        elif (
+                            recovery.receipt is None
+                            or receipt_snapshot.sha256
+                            != hashlib.sha256(
+                                _delete_receipt_bytes(recovery.receipt)
+                            ).hexdigest()
+                        ):
+                            issues.append(
+                                f"Delete quarantine receipt does not match validated recovery: {relative}"
                             )
                         else:
                             bindings.append({
