@@ -840,42 +840,51 @@ def build_continuation_extension(
     observation: RepositoryObservation,
 ) -> ContinuationExtension | None:
     """Derive a continuation extension only for one satisfied successor."""
+    unbound_history_reason = "unbound rollover history is not lifecycle authority"
     try:
-        return _build_continuation_extension(
+        extension = _build_continuation_extension(
             program_root,
             acceptance,
             observation,
             allow_unbound_rollover_suffix=False,
         )
     except ValueError as error:
-        if str(error) != "unbound rollover history is not lifecycle authority":
+        if str(error) != unbound_history_reason:
             raise
-        from program_rollover import inspect_increment_rollover
+    else:
+        if extension is not None:
+            return extension
+        if continuation_unavailability_reason(
+            program_root, acceptance
+        ) != unbound_history_reason:
+            return None
 
-        inspection = inspect_increment_rollover(program_root, observation)
-        if (
-            inspection.issues
-            or inspection.disposition
-            not in {
-                "increment-rollover-retry-ready",
-                "accepted-state-rollover-retry-ready",
-            }
-            or inspection.completed_steps
-            != (
-                "action-authorization",
-                "successor-grant",
-                "handoff",
-                "successor-brief",
-                "rollover-record",
-            )
-        ):
-            raise error
-        return _build_continuation_extension(
-            program_root,
-            acceptance,
-            observation,
-            allow_unbound_rollover_suffix=True,
+    from program_rollover import inspect_increment_rollover
+
+    inspection = inspect_increment_rollover(program_root, observation)
+    if (
+        inspection.issues
+        or inspection.disposition
+        not in {
+            "increment-rollover-retry-ready",
+            "accepted-state-rollover-retry-ready",
+        }
+        or inspection.completed_steps
+        != (
+            "action-authorization",
+            "successor-grant",
+            "handoff",
+            "successor-brief",
+            "rollover-record",
         )
+    ):
+        return None
+    return _build_continuation_extension(
+        program_root,
+        acceptance,
+        observation,
+        allow_unbound_rollover_suffix=True,
+    )
 
 
 def successor_projection_sha256(projection: Mapping[str, object]) -> str:

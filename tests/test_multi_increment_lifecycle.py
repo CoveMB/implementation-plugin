@@ -311,6 +311,90 @@ class MultiIncrementLifecycleTests(unittest.TestCase):
                 self.run_phase(phase, exact_plan=plan, prompt=prompt)
                 self.assertEqual(repository_snapshot(self.fixture.repository), before)
 
+    def test_fresh_diff_prompt_preserves_exact_rollover_record_choice(self):
+        from tests.test_program_rollover import DIFF, ROLLOVER
+
+        immutable_before = repository_snapshot(REPOSITORY_ROOT / "tests/fixtures")
+        self.start_sparse_program()
+        self.advance_current_to_diff()
+        root = self.fixture.program_root
+        manifest_before = (root / "manifest.json").read_bytes()
+        original_public = DIFF.render_diff_disposition_prompt(root)
+        _, choice = self.run_phase("render-accept-continue")
+        prompt = choice["prompt"]
+        self.assertEqual(original_public.count(prompt), 1)
+
+        interrupted, _ = self.run_phase(
+            "dispose-diff", prompt=prompt,
+            fail_label="rollover-record", check=False,
+        )
+        self.assertEqual(interrupted.returncode, 1, interrupted.stderr)
+        self.assertIn("injected-after:rollover-record", interrupted.stderr)
+        self.assertEqual(self.load_status()["current_increment_state"], "accepted")
+        self.assertEqual(self.load_status()["current_increment_id"], "ARCHIVE-INDEX")
+
+        before = repository_snapshot(self.fixture.repository)
+        discovered = self.discover()
+        self.assertEqual(discovered["disposition"], "increment-rollover-retry-ready")
+        self.assertEqual(discovered["issues"], [])
+        observation = DIFF.inspect_repository(self.fixture.repository, self.fixture.head).observation
+        inspection = ROLLOVER.inspect_increment_rollover(root, observation)
+        self.assertEqual(inspection.disposition, "increment-rollover-retry-ready")
+        self.assertEqual(inspection.issues, ())
+        self.assertEqual(inspection.completed_steps, (
+            "action-authorization", "successor-grant", "handoff",
+            "successor-brief", "rollover-record",
+        ))
+        fresh_public = DIFF.render_diff_disposition_prompt(root)
+        self.assertEqual(repository_snapshot(self.fixture.repository), before)
+        self.assertEqual((root / "manifest.json").read_bytes(), manifest_before)
+        self.assertEqual(repository_snapshot(REPOSITORY_ROOT / "tests/fixtures"), immutable_before)
+        self.assertEqual(fresh_public, original_public)
+        self.assertEqual(fresh_public.count(prompt), 1)
+        self.assertEqual(fresh_public.count("Accept and continue to `ARCHIVE-VERIFY`."), 1)
+        self.assertEqual(fresh_public.count("$implementing-staged-plans"), 2)
+
+    def test_fresh_diff_prompt_rejects_mismatched_rollover_suffix_without_writes(self):
+        from tests.test_program_rollover import DIFF, ROLLOVER
+
+        immutable_before = repository_snapshot(REPOSITORY_ROOT / "tests/fixtures")
+        self.start_sparse_program()
+        self.advance_current_to_diff()
+        root = self.fixture.program_root
+        manifest_before = (root / "manifest.json").read_bytes()
+        _, choice = self.run_phase("render-accept-continue")
+        interrupted, _ = self.run_phase(
+            "dispose-diff", prompt=choice["prompt"],
+            fail_label="rollover-record", check=False,
+        )
+        self.assertEqual(interrupted.returncode, 1, interrupted.stderr)
+        self.assertIn("injected-after:rollover-record", interrupted.stderr)
+        rollover_path = root / "state/rollovers.jsonl"
+        records = [json.loads(line) for line in rollover_path.read_text().splitlines()]
+        self.assertEqual(len(records), 1)
+        records[0]["successor_increment_id"] = "ARCHIVE-CATALOG"
+        rollover_path.write_bytes(ROLLOVER._canonical_json_line(records[0]))
+
+        before = repository_snapshot(self.fixture.repository)
+        observation = DIFF.inspect_repository(self.fixture.repository, self.fixture.head).observation
+        inspection = ROLLOVER.inspect_increment_rollover(root, observation)
+        self.assertEqual(inspection.disposition, "continuation-recovery-required")
+        self.assertIn("divergent rollover-record", inspection.issues)
+        self.assertNotIn("rollover-record", inspection.completed_steps)
+        acceptance = DIFF.build_diff_acceptance_candidate(root, observation)
+        self.assertIsNone(DIFF._continuation.build_continuation_extension(root, acceptance, observation))
+        rendered = DIFF.render_diff_disposition_prompt(root)
+        self.assertEqual(repository_snapshot(self.fixture.repository), before)
+        self.assertEqual((root / "manifest.json").read_bytes(), manifest_before)
+        self.assertEqual(repository_snapshot(REPOSITORY_ROOT / "tests/fixtures"), immutable_before)
+        self.assertEqual(rendered, (
+            f"Accept and stop.\n\n{acceptance.prompt}\n"
+            "Continuation unavailable: unbound rollover history is not lifecycle authority.\n"
+        ))
+        self.assertNotIn("Accept and continue", rendered)
+        self.assertNotIn(choice["prompt"], rendered)
+        self.assertEqual(rendered.count("$implementing-staged-plans"), 1)
+
     def test_sparse_acceptance_and_rollover_prefixes_replay_one_bound_transaction(self):
         labels = ("action-authorization", "successor-grant", "handoff", "successor-brief", "rollover-record", "successor-status")
         for domain in ("immediate", "accepted-state"):
