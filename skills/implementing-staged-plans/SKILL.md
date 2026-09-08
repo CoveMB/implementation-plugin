@@ -39,17 +39,21 @@ Derive the current exact-file plan and execution baseline from the manifest, sta
 
 Materialize the execution baseline and action authorization before status becomes authorized. `authorized` permits no product delta. Advance only through the typed execution transition, preserving user-owned work and every exact plan disposition.
 
+The accepted v1 operation family supports `Create`, `Modify`, and `Preserve`; exact setup/envelope v2 supports `Create`, `Modify`, and `Delete` plus `Preserve`. Route Delete only through the [repository preparation](references/repository-preparation.md) descriptor-bound quarantine contract and the [execution discipline](references/execution-discipline.md) typed absence and recovery rules. Unsupported platforms, cross-device movement, protected paths, or changed identities stop before mutation.
+
 For manifest/status v3, satisfy each immutable source-defined gate only at its declared owning boundary. The setup answer may satisfy a gate only when the manifest explicitly declares setup reuse. Every other response writes nothing; do not infer a gate from prose or move it to another transaction.
 
 ## Prepare Review and Diff Disposition
 
 At reviewing state, use typed review preparation to load the three exact-plan-allocated raw reports, validate findings and risk predicates, bind the accepted product delta, create review evidence and the review packet, and persist verified then awaiting-diff status. Status is last at each boundary, and exact partial prefixes are retryable.
 
+For setup/envelope v2, bind the ordered product-path result—including each Delete tombstone and quarantine receipt—through transition, review, diff disposition, and the uniquely ordered approval-v3 family. Never downgrade that result to a legacy product-delta record.
+
 Review preparation stops at the exact diff-disposition prompt. Questions or discussion do not accept the candidate. Acceptance grants no closure, commit, push, pull request, publication, deployment, or external action.
 
 ## Dispose the Current Diff
 
-The exact `accept-stop` choice is always available for new-model typed dispositions and preserves Plan A bytes. Already persisted legacy programs using `approval:full` or `approval:full-diff` retain automatic acceptance. When traceability identifies exactly one successor whose dependencies are satisfied, the same prompt may also offer exact `accept-continue`. Direct submission persists or adopts the diff-acceptance prefix and accepted status first. `accept-continue` then completes its bound successor rollover with no second routine checkpoint; it does not grant any later or external action.
+The exact `accept-stop` choice is always available for new-model typed dispositions and preserves Plan A bytes. Already persisted legacy programs using `approval:full` or `approval:full-diff` retain automatic acceptance. When the [successor contract](references/state-authorization.md#allocate-lifecycle-writes-before-authority) resolves the next increment, the same prompt may also offer exact `accept-continue`. Direct submission persists or adopts the diff-acceptance prefix and accepted status first. `accept-continue` then completes its bound successor rollover with no second routine checkpoint; it does not grant any later or external action.
 
 ## Continue an Accepted Program
 
@@ -57,9 +61,11 @@ Replaying `accept-stop` only recovers or reports the same accepted-stop state. A
 
 ## Authorize a Successor Increment
 
-Validate the current accepted projection, canonical rollover chain, successor dependencies, accepted product bytes, workspace, and prompt before writing. Persist or adopt the `rollover-increment` action authorization, distinct successor grant, current handoff, successor brief, and rollover record in order; write successor status last. Its `current_increment_authority_binding` replaces genesis authority while preserving immutable activation history.
+Validate the current accepted projection, canonical rollover chain and [successor contract](references/state-authorization.md#allocate-lifecycle-writes-before-authority), accepted product bytes, workspace, and prompt before writing. Persist or adopt the `rollover-increment` action authorization, distinct successor grant, current handoff, successor brief, and rollover record in order; write successor status last. Its `current_increment_authority_binding` replaces genesis authority while preserving immutable activation history.
 
-Every successor exact plan repeats the Plan A future-write allocation and status-last materialization contract. Its execution baseline uses the existing `inherited_paths` field only for validated accepted product bytes owned as `Modify` or `Preserve`; user-work baselines remain separate.
+Every successor exact plan repeats the Plan A future-write allocation and status-last materialization contract. Its execution baseline uses `inherited_paths` only for validated accepted product states with exact current-plan ownership; user-work baselines remain separate.
+
+The v2 continuation and rollover families use result-bound action-v3 authority, reuse the existing handoff, and preserve an absent tombstone plus retained quarantine bytes. Only an explicit later `Create` may recreate that path. PLUG-001 makes no secure-erasure or quarantine-disposal claim; PLUG-002 must supply requirement evidence, disposal authority, and terminal closure semantics before any such action.
 
 ## Resolve a Blocked Program
 
@@ -67,7 +73,7 @@ Only the typed blocked transaction may enter or leave blocked state. Entry is le
 
 ## Close a Final Program
 
-An accepted final increment with no traceability-allocated successor may use typed closure preparation. Resolve both paths from `implementation-closure-storage/v1`, require exact-plan `Create` allocation, reconcile every requirement, validate accepted review and fresh verification, create reconciliation then packet, and write awaiting-closure status last.
+Current acceptance and an explicit terminal result from the [successor contract](references/state-authorization.md#allocate-lifecycle-writes-before-authority) are required for typed closure preparation and approval/retry. Unavailable selection never implies finality. Resolve both paths from `implementation-closure-storage/v1`, require exact-plan `Create` allocation, reconcile every requirement, validate accepted review and fresh verification, create reconciliation then packet, and write awaiting-closure status last.
 
 Render one exact closure-only prompt. Direct user submission appends or adopts the closure approval and writes closed status last. Closure performs no later action and grants none.
 

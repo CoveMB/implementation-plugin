@@ -705,46 +705,24 @@ def select_unique_satisfied_successor(
     current_increment_id: str,
     accepted_increment_ids: set[str] | frozenset[str],
 ) -> tuple[str | None, str]:
-    """Select one directly allocated successor whose dependencies are accepted."""
-    if not _nonempty(current_increment_id):
-        raise ValueError("current increment id is required")
+    """Compatibility adapter for accepted legacy allocation boundaries."""
+    from program_authority import resolve_increment_successor
+
     if not isinstance(accepted_increment_ids, (set, frozenset)) or not all(
         _nonempty(item) for item in accepted_increment_ids
     ):
         raise ValueError("accepted increment ids must be a string set")
-    normalized: list[tuple[str, ...]] = []
-    candidates: set[str] = set()
-    for requirement in atomic_requirements:
-        if not isinstance(requirement, Mapping):
-            raise ValueError("atomic requirement must be an object")
-        assigned = requirement.get("assigned_increments")
-        if (
-            not isinstance(assigned, list)
-            or not assigned
-            or not all(_nonempty(item) for item in assigned)
-            or len(assigned) != len(set(assigned))
-        ):
-            raise ValueError(
-                "atomic requirement assigned_increments must be unique strings"
-            )
-        allocation = tuple(assigned)
-        normalized.append(allocation)
-        if current_increment_id in allocation:
-            successor_index = allocation.index(current_increment_id) + 1
-            if successor_index < len(allocation):
-                candidates.add(allocation[successor_index])
-    if not candidates:
+    if current_increment_id not in accepted_increment_ids:
+        return None, "current increment must be accepted"
+    resolution = resolve_increment_successor(
+        {"schema_version": "implementation-program-manifest/v1"},
+        atomic_requirements,
+        current_increment_id,
+        tuple(accepted_increment_ids - {current_increment_id}),
+    )
+    if resolution.kind == "terminal":
         return None, "no allocated successor"
-    if len(candidates) != 1:
-        return None, "multiple allocated successors"
-    successor = next(iter(candidates))
-    for allocation in normalized:
-        if successor not in allocation:
-            continue
-        dependencies = allocation[: allocation.index(successor)]
-        if any(item not in accepted_increment_ids for item in dependencies):
-            return None, "successor dependencies are unsatisfied"
-    return successor, ""
+    return resolution.successor_increment_id, resolution.reason
 
 
 def evaluate_continuation(candidate: ConversationAssessment) -> tuple[bool, tuple[str, ...]]:

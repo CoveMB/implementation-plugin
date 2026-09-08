@@ -53,10 +53,12 @@ to reach installed users, update the synchronized package version deliberately
 and document the release. Do not bump versions merely to make local validation
 pass.
 
-Version `0.1.2` is the current package owner for typed continuation and blocked
-recovery. The frozen `tests/fixtures/program-bootstrap/v0.1.1/` tree remains
-historical compatibility evidence and must not be rewritten during a version
-sync.
+Version `0.1.3` is the current package owner for exact regular-file Delete,
+typed continuation, and blocked recovery. Synchronize the three manifest
+versions, validator constant, current archive examples, and exact test
+expectations without changing plugin identity or manifest field sets. The
+frozen `tests/fixtures/program-bootstrap/v0.1.1/` tree remains historical
+compatibility evidence and must not be rewritten during a version sync.
 
 ## Refresh platform instructions
 
@@ -156,6 +158,12 @@ The local tests can establish that required files exist, metadata stays
 consistent, reader-document links resolve, examples retain the expected command
 and invocation forms, forbidden package surfaces remain blocked, and the
 deterministic workflow contracts pass their unit tests.
+
+For 0.1.3, keep focused application-path coverage for descriptor-bound
+same-filesystem Delete, retained quarantine receipts, v2 result-bound review and
+approval, immediate and later continuation, multi-rollover tombstones, explicit
+recreation, interrupted-prefix recovery, and legacy v1 reads. A native-Windows
+skip must remain visible rather than becoming an unqualified platform claim.
 
 They do not prove:
 

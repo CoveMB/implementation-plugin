@@ -26,6 +26,8 @@ from program_setup import source_gate_satisfaction
 from repository_preparation import inspect_repository
 from state_authority import (
     APPROVAL_SCHEMA,
+    EXECUTION_TRANSITION_SCHEMA_V2,
+    PRODUCT_PATH_STATES_SCHEMA_V2,
     RepositoryObservation,
     TransitionRequest,
     apply_state_transition,
@@ -37,6 +39,23 @@ from task_prompt import parse_exact_prompt, render_exact_prompt
 
 DIFF_DISPOSITION_BINDING_SCHEMA = "implementation-diff-disposition-binding/v1"
 DIFF_DISPOSITION_COMMAND_SCHEMA = "implementation-diff-disposition-command/v1"
+DIFF_DISPOSITION_BINDING_SCHEMA_V2 = "implementation-diff-disposition-binding/v2"
+DIFF_DISPOSITION_COMMAND_SCHEMA_V2 = "implementation-diff-disposition-command/v2"
+APPROVAL_SCHEMA_V3 = "implementation-approval/v3"
+SETUP_V2_DIFF_APPROVAL_FIELDS = (
+    "schema_version", "event_id", "type", "decision", "scope",
+    "diff_decision", "checkpoint_id", "base_seed_sha256",
+    "submitted_prompt_sha256", "program_id", "program_revision",
+    "source_id", "source_sha256", "program_sha256",
+    "semantic_requirements_sha256", "increment_id", "brief_sha256",
+    "exact_file_plan_sha256", "approval_mode", "workspace",
+    "review_evidence_sha256", "review_packet_sha256",
+    "verification_sha256", "execution_baseline_sha256",
+    "product_result_schema_version", "product_result_sha256",
+    "setup_activation_decision_id", "setup_activation_decision_sha256",
+    "increment_grant_id", "increment_grant_sha256",
+    "source_gate_satisfaction",
+)
 
 
 @dataclass(frozen=True)
@@ -171,6 +190,26 @@ def build_diff_acceptance_candidate(
     if not isinstance(verification, dict):
         raise ValueError("review evidence final verification is missing")
     verification_sha256 = _sha256_bytes(_canonical_json_bytes(verification))
+    is_v2_result = (
+        is_setup_program
+        and execution_transition.get("schema_version") == EXECUTION_TRANSITION_SCHEMA_V2
+    )
+    product_result = None
+    if is_v2_result:
+        from repository_preparation import product_path_states_v2_from_value
+
+        try:
+            product_result = product_path_states_v2_from_value(evidence["product_result"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("v2 review evidence product_result is invalid") from error
+        if (
+            evidence.get("schema_version") != "implementation-review-evidence/v2"
+            or product_result.sha256 != execution_transition.get("product_path_states_sha256")
+            or evidence.get("product_result") != execution_transition.get("product_path_states")
+        ):
+            raise ValueError("v2 review product result does not match execution transition")
+    elif not is_setup_program and execution_transition.get("schema_version") == EXECUTION_TRANSITION_SCHEMA_V2:
+        raise ValueError("execution v2 transition requires setup v2")
     accepted_product_delta_sha256 = execution_transition.get(
         "product_delta_sha256"
     )
@@ -186,8 +225,14 @@ def build_diff_acceptance_candidate(
         "verification_sha256": verification_sha256,
         "exact_file_plan_sha256": status["approved_exact_file_plan_sha256"],
         "execution_baseline_sha256": baseline_binding["sha256"],
-        "accepted_product_delta_sha256": accepted_product_delta_sha256,
     }
+    if is_v2_result:
+        base_seed.update(
+            product_result_schema_version=PRODUCT_PATH_STATES_SCHEMA_V2,
+            product_result_sha256=product_result.sha256,
+        )
+    else:
+        base_seed["accepted_product_delta_sha256"] = accepted_product_delta_sha256
     base_seed_sha256 = _sha256_bytes(_canonical_json_bytes(base_seed))
     checkpoint_id = _identifier(
         "diff-checkpoint", {"base_seed_sha256": base_seed_sha256}
@@ -200,7 +245,10 @@ def build_diff_acceptance_candidate(
         },
     )
     disposition_binding = {
-        "schema_version": DIFF_DISPOSITION_BINDING_SCHEMA,
+        "schema_version": (
+            DIFF_DISPOSITION_BINDING_SCHEMA_V2
+            if is_v2_result else DIFF_DISPOSITION_BINDING_SCHEMA
+        ),
         **base_seed,
         "base_seed_sha256": base_seed_sha256,
         "checkpoint_id": checkpoint_id,
@@ -232,7 +280,10 @@ def build_diff_acceptance_candidate(
         accepted_status["source_gate_satisfaction"] = gate_satisfaction
     accepted_status_bytes = _canonical_json_bytes(accepted_status)
     command = {
-        "schema_version": DIFF_DISPOSITION_COMMAND_SCHEMA,
+        "schema_version": (
+            DIFF_DISPOSITION_COMMAND_SCHEMA_V2
+            if is_v2_result else DIFF_DISPOSITION_COMMAND_SCHEMA
+        ),
         "decision": "accept-stop",
         "base_seed_sha256": base_seed_sha256,
         "checkpoint_id": checkpoint_id,
@@ -246,7 +297,8 @@ def build_diff_acceptance_candidate(
     brief = status["brief_binding"]
     approval_record = {
         "schema_version": (
-            "implementation-approval/v2" if is_setup_program else APPROVAL_SCHEMA
+            APPROVAL_SCHEMA_V3 if is_v2_result else
+            ("implementation-approval/v2" if is_setup_program else APPROVAL_SCHEMA)
         ),
         "event_id": approval_event_id,
         "type": "increment-diff-approval",
@@ -276,8 +328,14 @@ def build_diff_acceptance_candidate(
         "review_packet_sha256": packet_binding["sha256"],
         "verification_sha256": verification_sha256,
         "execution_baseline_sha256": baseline_binding["sha256"],
-        "accepted_product_delta_sha256": accepted_product_delta_sha256,
     }
+    if is_v2_result:
+        approval_record.update(
+            product_result_schema_version=PRODUCT_PATH_STATES_SCHEMA_V2,
+            product_result_sha256=product_result.sha256,
+        )
+    else:
+        approval_record["accepted_product_delta_sha256"] = accepted_product_delta_sha256
     if is_setup_program:
         setup_binding = status.get("setup_activation_binding")
         increment_authority = status.get("current_increment_authority_binding")
@@ -296,7 +354,19 @@ def build_diff_acceptance_candidate(
             increment_grant_sha256=increment_authority["grant_sha256"],
             source_gate_satisfaction=gate_satisfaction,
         )
-    approval_bytes = _canonical_json_line(approval_record)
+    approval_bytes = (
+        (
+            json.dumps(
+                approval_record,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=False,
+            )
+            + "\n"
+        ).encode("utf-8")
+        if is_v2_result
+        else _canonical_json_line(approval_record)
+    )
     return DiffAcceptanceCandidate(
         base_seed_sha256=base_seed_sha256,
         checkpoint_id=checkpoint_id,
@@ -349,7 +419,12 @@ def render_diff_disposition_prompt(program_root: Path) -> str:
 def _persist_diff_acceptance_candidate(
     root: Path, candidate: DiffAcceptanceCandidate
 ) -> DiffDispositionReceipt:
-    parse_exact_prompt(candidate.prompt, DIFF_DISPOSITION_COMMAND_SCHEMA)
+    command_schema = (
+        DIFF_DISPOSITION_COMMAND_SCHEMA_V2
+        if candidate.approval_record.get("schema_version") == APPROVAL_SCHEMA_V3
+        else DIFF_DISPOSITION_COMMAND_SCHEMA
+    )
+    parse_exact_prompt(candidate.prompt, command_schema)
     manifest, manifest_issues = load_json_object(root / "manifest.json")
     if manifest is None:
         raise ValueError("; ".join(manifest_issues))
@@ -404,10 +479,21 @@ def _append_or_adopt_approval(
         if record.get("event_id") == candidate.approval_event_id
     ]
     if matches:
+        expected_line = candidate.approval_bytes
+        if candidate.approval_record.get("schema_version") == APPROVAL_SCHEMA_V3:
+            expected_line = (
+                json.dumps(
+                    candidate.approval_record,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=False,
+                )
+                + "\n"
+            ).encode("utf-8")
         if (
             len(matches) != 1
             or matches[0] != candidate.approval_record
-            or not path.read_bytes().endswith(candidate.approval_bytes)
+            or not path.read_bytes().endswith(expected_line)
         ):
             raise ValueError("increment-acceptance-recovery-required: conflicting approval")
         return True
@@ -421,7 +507,13 @@ def _append_or_adopt_approval(
         for record in records
     ):
         raise ValueError("increment-acceptance-recovery-required: conflicting approval")
-    atomic_append_json_line(path, candidate.approval_record, sha256_file(path))
+    atomic_append_json_line(
+        path,
+        candidate.approval_record,
+        sha256_file(path),
+        preserve_field_order=candidate.approval_record.get("schema_version")
+        == APPROVAL_SCHEMA_V3,
+    )
     return False
 
 
@@ -504,6 +596,10 @@ def persist_diff_disposition(
     if (
         status.get("current_increment_state") == "preparing"
         and isinstance(status.get("rollover_binding"), dict)
+    ) or (
+        status.get("current_increment_state") == "accepted"
+        and isinstance(status.get("diff_disposition_binding"), dict)
+        and status["diff_disposition_binding"].get("decision") == "accept-continue"
     ):
         from program_rollover import persist_increment_rollover
 

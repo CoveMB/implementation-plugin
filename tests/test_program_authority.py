@@ -6,13 +6,19 @@ import json
 import os
 import re
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
-from tests.program_bootstrap_support import BootstrapFixture
+from tests.program_bootstrap_support import (
+    BootstrapFixture,
+    canonical_compact_sha256,
+    successor_allocation_fixture,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -1062,6 +1068,154 @@ class CurrentProgramTraceabilityTests(unittest.TestCase):
                 )
 
 
+class SuccessorResolutionTests(unittest.TestCase):
+    @staticmethod
+    def manifest(increments, family=1):
+        return {
+            "schema_version": "implementation-program-manifest/v3",
+            "setup_semantics": {
+                "schema_version": f"implementation-program-setup-semantics/v{family}",
+                "operation_envelope": {"schema_version": f"implementation-operation-envelope/v{family}"},
+                "first_increment_id": increments[0]["increment_id"],
+                "increments": increments,
+            },
+        }
+
+    @staticmethod
+    def small_case(allocations=(("A", "B", "C"),), schedule=("A", "B", "C")):
+        requirements = [{"id": f"REQ-{index}", "assigned_increments": list(ids)} for index, ids in enumerate(allocations)]
+        increments = [
+            {"increment_id": current, "depends_on": [], "requirement_ids": [item["id"] for item in requirements if current in item["assigned_increments"]]}
+            for current in schedule
+        ]
+        return SuccessorResolutionTests.manifest(increments), requirements
+
+    def test_portable_schedule_boundaries(self) -> None:
+        increments, requirements = successor_allocation_fixture()
+        self.assertEqual(len(requirements), 570)
+        schedule = tuple(item["increment_id"] for item in increments)
+        for family in (1, 2):
+            for index, current in enumerate(schedule):
+                with self.subTest(family=family, current=current):
+                    result = AUTHORITY.resolve_increment_successor(self.manifest(increments, family), requirements, current, schedule[:index])
+                    expected = schedule[index + 1] if index < 8 else None
+                    self.assertEqual(result.kind, "successor" if expected else "terminal")
+                    self.assertEqual(result.successor_increment_id, expected)
+                    self.assertEqual(result.reason, "")
+
+    def test_sparse_disjoint_and_ready_branches_follow_serial_order(self) -> None:
+        cases = (
+            ((("A", "B", "C"),), ("A", "B", "C")),
+            ((("A", "C"), ("B",)), ("A", "B", "C")),
+            ((("A",), ("B",), ("C",)), ("A", "B", "C")),
+            ((("A", "B", "D"), ("A", "C", "D")), ("A", "B", "C", "D")),
+        )
+        for allocations, schedule in cases:
+            manifest, requirements = self.small_case(allocations, schedule)
+            if len(schedule) == 4:
+                for increment, dependencies in zip(manifest["setup_semantics"]["increments"], ([], ["A"], ["A"], ["B", "C"])):
+                    increment["depends_on"] = dependencies
+            for index, current in enumerate(schedule):
+                with self.subTest(allocations=allocations, current=current):
+                    result = AUTHORITY.resolve_increment_successor(manifest, requirements, current, schedule[:index])
+                    self.assertEqual(result.successor_increment_id, schedule[index + 1] if index + 1 < len(schedule) else None)
+                    self.assertEqual(result.kind, "successor" if index + 1 < len(schedule) else "terminal")
+
+    def test_invalid_schedules_allocations_and_families_are_unavailable(self) -> None:
+        mutations = [
+            lambda m, r: m.update(schema_version="unknown"),
+            lambda m, r: m.update(schema_version=[]),
+            lambda m, r: m.update(schema_version=None),
+            lambda m, r: m["setup_semantics"].update(schema_version="unknown"),
+            lambda m, r: m["setup_semantics"]["operation_envelope"].update(schema_version="implementation-operation-envelope/v2"),
+            lambda m, r: m["setup_semantics"].pop("operation_envelope"),
+            lambda m, r: m["setup_semantics"].update(increments=[]),
+            lambda m, r: m["setup_semantics"].update(increments=None),
+            lambda m, r: m["setup_semantics"].update(increments=["A"]),
+            lambda m, r: m["setup_semantics"].update(first_increment_id="B"),
+            lambda m, r: r.clear(),
+            lambda m, r: r.append(None),
+            lambda m, r: r[0].pop("id"),
+            lambda m, r: r[0].update(id=""),
+            lambda m, r: r.append(copy.deepcopy(r[0])),
+            lambda m, r: r[0].update(assigned_increments=[]),
+            lambda m, r: r[0].update(assigned_increments=None),
+            lambda m, r: r[0].update(assigned_increments="A"),
+            lambda m, r: r[0].update(assigned_increments=["A", "B/C"]),
+            lambda m, r: r[0].update(assigned_increments=["A", "B", "B", "C"]),
+            lambda m, r: r[0].update(assigned_increments=["A", "C", "B"]),
+            lambda m, r: r[0].update(assigned_increments=["A", "B", "UNKNOWN"]),
+            lambda m, r: r[0].update(assigned_increments=["A", "B"]),
+            lambda m, r: m["setup_semantics"]["increments"][1].update(requirement_ids=[]),
+            lambda m, r: m["setup_semantics"]["increments"][1].update(requirement_ids=["REQ-0", "REQ-0"]),
+            lambda m, r: m["setup_semantics"]["increments"][1].pop("depends_on"),
+        ]
+        for dependencies in (None, "A", ["A", "A"], ["UNKNOWN"], ["B"], ["C"]):
+            mutations.append(lambda m, r, d=dependencies: m["setup_semantics"]["increments"][1].update(depends_on=d))
+        for increment_id in (None, "", "../B", "B/C", "B\\C", ".", "..", "A"):
+            mutations.append(lambda m, r, i=increment_id: m["setup_semantics"]["increments"][1].update(increment_id=i))
+        for index, mutation in enumerate(mutations):
+            with self.subTest(mutation=index):
+                manifest, requirements = self.small_case()
+                mutation(manifest, requirements)
+                result = AUTHORITY.resolve_increment_successor(manifest, requirements, "C", ("A", "B"))
+                self.assertEqual(result.kind, "unavailable")
+                self.assertIsNone(result.successor_increment_id)
+                self.assertTrue(result.reason)
+
+    def test_v3_requires_exact_accepted_prefix(self) -> None:
+        manifest, requirements = self.small_case()
+        for prefix in ((), ("A",), ("B",), ("B", "A"), ("A", "A"), ("A", "B", "C"), ("A", "UNKNOWN")):
+            with self.subTest(prefix=prefix):
+                result = AUTHORITY.resolve_increment_successor(manifest, requirements, "C", prefix)
+                self.assertEqual(result.kind, "unavailable")
+        self.assertEqual(AUTHORITY.resolve_increment_successor(manifest, requirements, "UNKNOWN", ()).kind, "unavailable")
+
+    def test_legacy_ambiguity_and_outstanding_work_are_not_terminal(self) -> None:
+        cases = (
+            ((("A", "B", "C"),), "A", (), "successor", "B"),
+            ((("A", "B", "C"),), "C", ("A", "B"), "terminal", None),
+            ((("A", "B", "C"), ("A", "C")), "A", (), "unavailable", None),
+            ((("A", "B"), ("A", "C")), "A", (), "unavailable", None),
+            ((("A", "B"), ("C",)), "B", ("A",), "unavailable", None),
+            ((("A", "B"), ("C", "B")), "A", (), "unavailable", None),
+            ((("A", "B"),), "A", ("B",), "unavailable", None),
+            ((("A", "B"),), "B", ("A", "A"), "unavailable", None),
+            ((("A", "B"),), "B", ("UNKNOWN",), "unavailable", None),
+            ((("A", "B"),), "C", (), "unavailable", None),
+        )
+        for family in (1, 2):
+            for allocations, current, prefix, kind, successor in cases:
+                with self.subTest(family=family, allocations=allocations, current=current, prefix=prefix):
+                    _, requirements = self.small_case(allocations)
+                    result = AUTHORITY.resolve_increment_successor({"schema_version": f"implementation-program-manifest/v{family}"}, requirements, current, prefix)
+                    self.assertEqual((result.kind, result.successor_increment_id), (kind, successor))
+
+    def test_resolution_is_frozen_and_rejects_malformed_results(self) -> None:
+        from dataclasses import FrozenInstanceError
+        result = AUTHORITY.SuccessorResolution("terminal", None, "")
+        with self.assertRaises(FrozenInstanceError):
+            result.kind = "successor"
+        for values in (("unknown", None, ""), ("successor", None, ""), ("terminal", "A", ""), ("unavailable", None, ""), ("successor", "A", "error")):
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                AUTHORITY.SuccessorResolution(*values)
+
+    def test_fresh_import_orders_resolve_without_history_or_allocation_recursion(self) -> None:
+        manifest, requirements = self.small_case()
+        for first, second in (("program_authority", "program_setup"), ("program_setup", "program_authority")):
+            with self.subTest(first=first):
+                script = (
+                    "import sys, json; sys.path.insert(0, sys.argv[1]); "
+                    f"import {first}; import {second}; "
+                    "m,r=json.loads(sys.argv[2]); "
+                    "result=program_authority.resolve_increment_successor(m,r,'A',()); "
+                    "print(json.dumps([result.kind,result.successor_increment_id,result.reason]))"
+                )
+                completed = subprocess.run([sys.executable, "-B", "-c", script, str(MODULE_PATH.parent), json.dumps([manifest, requirements])], capture_output=True, text=True)
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertEqual(json.loads(completed.stdout), ["successor", "B", ""])
+
+
 class SetupV3AuthorityTests(unittest.TestCase):
     def setUp(self) -> None:
         self.fixture = BootstrapFixture()
@@ -1075,6 +1229,36 @@ class SetupV3AuthorityTests(unittest.TestCase):
             self.fixture.candidate,
             validation_mode=mode,
         )
+
+    def test_first_increment_must_head_the_approved_schedule(self) -> None:
+        self.fixture.configure_successor_chain(("ARCHIVE-INDEX", "ARCHIVE-VERIFY"))
+        self.fixture.configure_setup_v3()
+        manifest = self.fixture.load_json("manifest.json")
+        manifest["setup_semantics"]["first_increment_id"] = "ARCHIVE-VERIFY"
+        manifest["setup_semantics_sha256"] = canonical_compact_sha256(manifest["setup_semantics"])
+        self.fixture.write_json("manifest.json", manifest)
+        self.assertTrue(any("first increment" in issue for issue in self.validate(AUTHORITY.PROPOSAL_VALIDATION_MODE)))
+
+    def test_rehashed_reversed_allocation_is_rejected_by_setup_authority(self) -> None:
+        self.fixture.configure_successor_chain(("ARCHIVE-INDEX", "ARCHIVE-VERIFY"))
+        self.fixture.configure_setup_v3()
+        manifest = self.fixture.load_json("manifest.json")
+        increments = copy.deepcopy(manifest["setup_semantics"]["increments"])
+        traceability = self.fixture.load_json("program/traceability.json")
+        traceability["atomic_requirements"][-1]["assigned_increments"].reverse()
+        semantic_digest = canonical_compact_sha256([
+            {field: item[field] for field in AUTHORITY.SEMANTIC_FIELDS}
+            for item in traceability["atomic_requirements"]
+        ])
+        traceability["coverage_assertion"]["semantic_requirements_sha256"] = semantic_digest
+        self.fixture.write_json("program/traceability.json", traceability)
+        manifest["program_binding"]["traceability_sha256"] = AUTHORITY.sha256_file(self.fixture.candidate / "program/traceability.json")
+        self.fixture.write_json("manifest.json", manifest)
+        status = self.fixture.load_json("state/status.json")
+        status["program_binding"]["semantic_requirements_sha256"] = semantic_digest
+        self.fixture.write_json("state/status.json", status)
+        self.fixture.configure_setup_v3(increments=increments)
+        self.assertEqual(self.validate(AUTHORITY.PROPOSAL_VALIDATION_MODE), ["requirement allocation must follow the approved schedule"])
 
     def test_v3_proposal_allocates_absent_setup_record_and_empty_gate_ledger(self) -> None:
         self.assertFalse(
@@ -1095,6 +1279,39 @@ class SetupV3AuthorityTests(unittest.TestCase):
         self.fixture.write_json("manifest.json", manifest)
         issues = self.validate(AUTHORITY.PROPOSAL_VALIDATION_MODE)
         self.assertIn("setup_semantics digest mismatch", issues)
+
+    def test_setup_and_envelope_schema_families_cannot_be_mixed(self) -> None:
+        cases = (
+            (
+                "implementation-program-setup-semantics/v1",
+                "implementation-operation-envelope/v2",
+            ),
+            (
+                "implementation-program-setup-semantics/v2",
+                "implementation-operation-envelope/v1",
+            ),
+        )
+        for setup_schema, envelope_schema in cases:
+            with self.subTest(
+                setup_schema=setup_schema, envelope_schema=envelope_schema
+            ):
+                self.tearDown()
+                self.setUp()
+                manifest = self.fixture.load_json("manifest.json")
+                semantics = manifest["setup_semantics"]
+                semantics["schema_version"] = setup_schema
+                semantics["operation_envelope"]["schema_version"] = envelope_schema
+                manifest["setup_semantics_sha256"] = canonical_compact_sha256(
+                    semantics
+                )
+                self.fixture.write_json("manifest.json", manifest)
+
+                issues = self.validate(AUTHORITY.PROPOSAL_VALIDATION_MODE)
+
+                self.assertIn(
+                    "setup semantics and operation envelope schemas must be an exact supported pair",
+                    issues,
+                )
 
     def test_v3_cross_family_ledger_artifact_is_rejected(self) -> None:
         cases = (
@@ -1126,6 +1343,17 @@ class SetupV3AuthorityTests(unittest.TestCase):
                 issues = self.validate(AUTHORITY.PROPOSAL_VALIDATION_MODE)
 
                 self.assertIn(expected_issue, issues)
+
+    def test_setup_v1_rejects_setup_v2_only_diff_approval(self) -> None:
+        approval_path = self.fixture.candidate / "state/approvals.jsonl"
+        approval_path.write_text(
+            '{"schema_version":"implementation-approval/v3"}\n',
+            encoding="utf-8",
+        )
+
+        issues = self.validate(AUTHORITY.PROPOSAL_VALIDATION_MODE)
+
+        self.assertIn("setup-v1 rejects v3 approval records", issues)
 
 
 if __name__ == "__main__":

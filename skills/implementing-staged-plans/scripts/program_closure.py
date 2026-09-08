@@ -27,6 +27,7 @@ from program_activation import (
 )
 from program_authority import (
     SETUP_PROGRAM_MANIFEST_SCHEMA,
+    SuccessorResolution,
     load_json_lines,
     load_json_object,
     resolve_managed_path,
@@ -45,7 +46,7 @@ from state_authority import (
     APPROVAL_SCHEMA,
     RepositoryObservation,
     TransitionRequest,
-    _traceability_successor,
+    resolve_program_successor,
     apply_state_transition,
     atomic_append_json_line,
     validate_state_authority,
@@ -179,10 +180,27 @@ def _closure_preconditions(
     }
 
 
-def _validate_preconditions(value: dict[str, object]) -> None:
+def _require_terminal_successor(resolution: SuccessorResolution) -> None:
+    if not isinstance(resolution, SuccessorResolution):
+        raise ValueError("closure requires an explicit terminal successor resolution")
+    if (
+        resolution.kind != "terminal"
+        or resolution.successor_increment_id is not None
+        or resolution.reason
+    ):
+        raise ValueError(
+            "closure requires terminal successor resolution: "
+            f"{resolution.reason or resolution.successor_increment_id}"
+        )
+
+
+def _validate_preconditions(
+    value: dict[str, object], *, successor_resolution: SuccessorResolution
+) -> None:
+    _require_terminal_successor(successor_resolution)
     issues: list[str] = []
     if value.get("successor_id") is not None:
-        issues.append("accepted increment is nonfinal because traceability allocates a successor")
+        issues.append("accepted increment is nonfinal because a successor remains")
     if value.get("paths_allocated", True) is not True:
         issues.append("manifest-owned closure paths lack exact-plan Create allocation")
     for field, label in (
@@ -347,6 +365,8 @@ def build_closure_preparation(
     ) not in {"active", "awaiting-closure-approval"}:
         raise ValueError("closure preparation requires an accepted active final increment")
     increment_id = str(status["current_increment_id"])
+    successor_resolution = resolve_program_successor(root, manifest, status)
+    _require_terminal_successor(successor_resolution)
     paths = _increment_paths(root, manifest, increment_id)
     closure_paths = resolve_program_closure_paths(root)
     file_map = parse_exact_file_map(paths["plan"].read_text(encoding="utf-8"))
@@ -358,7 +378,7 @@ def build_closure_preparation(
     paths_allocated = all(path in file_map.create for path in closure_relatives)
 
     traceability, _traceability_path = _load_role(root, manifest, "traceability")
-    successor_id = _traceability_successor(traceability, increment_id)
+    successor_id = successor_resolution.successor_increment_id
     (
         requirement_ids,
         bare_dispositions,
@@ -416,7 +436,7 @@ def build_closure_preparation(
         unowned_deferrals=unowned_deferrals,
         verification_is_fresh=verification_is_fresh,
     )
-    _validate_preconditions(preconditions)
+    _validate_preconditions(preconditions, successor_resolution=successor_resolution)
 
     evidence_paths = tuple(
         dict.fromkeys(
@@ -665,6 +685,7 @@ def build_closure_command_candidate(
     )
     status, status_path = _load_role(root, manifest, "status")
     state = status.get("program_state")
+    _require_terminal_successor(resolve_program_successor(root, manifest, status))
     if state not in {"awaiting-closure-approval", "closed"}:
         raise ValueError("closure approval requires awaiting-closure-approval status")
     closure = status.get("closure_binding")
