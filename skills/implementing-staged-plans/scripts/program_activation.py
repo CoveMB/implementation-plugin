@@ -2210,6 +2210,12 @@ def advance_execution_state(
         ]
         if blocking_issues:
             raise ValueError("; ".join(blocking_issues))
+        # Delete moves and receipt adoption require the execution gate first.
+        source_gate_satisfaction(
+            root,
+            "before-product-execution",
+            f"increment:{status['current_increment_id']}",
+        )
         for relative in baseline.file_map.delete:
             recovery = delete_recoveries[relative]
             quarantine_baseline = delete_baselines[relative]

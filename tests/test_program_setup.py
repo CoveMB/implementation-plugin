@@ -846,6 +846,78 @@ class SetupActivationTests(unittest.TestCase):
         finally:
             fixture.close()
 
+    def test_delete_execution_gate_blocks_quarantine_until_satisfied(self) -> None:
+        for interrupted_receipt in (False, True):
+            with self.subTest(interrupted_receipt=interrupted_receipt):
+                self.tearDown()
+                self.fixture = BootstrapFixture()
+                gate = gate_definition(trigger="before-product-execution")
+                gate["source_sha256"] = self.fixture.source_sha256
+                gate["protected_subject"] = "increment:ARCHIVE-INDEX"
+                self.fixture.configure_delete_setup_v2(source_gate_definitions=(gate,))
+                BOOTSTRAP.publish_program_proposal(
+                    self.fixture.repository,
+                    self.fixture.source_plan,
+                    self.fixture.candidate,
+                    self.fixture.source_sha256,
+                )
+                self.authorize_current_plan()
+                root = self.fixture.program_root
+                status_path = root / "state/status.json"
+                gate_path = root / "state/source-gate-decisions.jsonl"
+                source_path = self.fixture.repository / "catalog.txt"
+                source_bytes = source_path.read_bytes()
+                status = json.loads(status_path.read_text(encoding="utf-8"))
+                if interrupted_receipt:
+                    self.persist_gate(gate, status["execution_authorization"])
+                    gate_bytes = gate_path.read_bytes()
+                    with mock.patch.object(
+                        STATE,
+                        "_write_delete_receipt",
+                        side_effect=RuntimeError("receipt interruption"),
+                    ):
+                        with self.assertRaisesRegex(RuntimeError, "receipt interruption"):
+                            ACTIVATION.advance_execution_state(
+                                root, "implementing", self.observation()
+                            )
+                    self.assertFalse(source_path.exists())
+                    gate_path.write_bytes(b"")
+                before = repository_snapshot(self.fixture.repository)
+
+                with self.assertRaisesRegex(ValueError, "not durably satisfied"):
+                    ACTIVATION.advance_execution_state(
+                        root, "implementing", self.observation()
+                    )
+
+                self.assertEqual(repository_snapshot(self.fixture.repository), before)
+                self.assertEqual(
+                    json.loads(status_path.read_text(encoding="utf-8")), status
+                )
+                if interrupted_receipt:
+                    gate_path.write_bytes(gate_bytes)
+                else:
+                    self.assertEqual(source_path.read_bytes(), source_bytes)
+                    self.persist_gate(gate, status["execution_authorization"])
+
+                receipt = ACTIVATION.advance_execution_state(
+                    root, "implementing", self.observation()
+                )
+
+                self.assertEqual(receipt.increment_state, "implementing")
+                self.assertFalse(source_path.exists())
+                baseline = json.loads(
+                    (root / "increments/ARCHIVE-INDEX/execution-baseline.json")
+                    .read_text(encoding="utf-8")
+                )
+                binding = baseline["delete_quarantine_bindings"][0]
+                self.assertEqual((root / binding["entry_path"]).read_bytes(), source_bytes)
+                self.assertTrue((root / binding["receipt_path"]).is_file())
+                current = json.loads(status_path.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    current["source_gate_satisfaction"]["trigger"],
+                    "before-product-execution",
+                )
+
     def test_setup_v2_multi_delete_retry_adopts_interrupted_prefix(self):
         fixture = BootstrapFixture()
         try:
