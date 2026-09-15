@@ -92,7 +92,7 @@ PLAN_B_SCRIPTS = tuple(
 
 VALID_MANIFEST = {
     "name": "implementation-plugin",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "description": "Run approved implementation programs one reviewable increment at a time.",
     "skills": "./skills/",
 }
@@ -512,7 +512,7 @@ class CompletePackageTests(PackageValidationTestCase):
         value["version"] = "0.1.0"
         self.fixture.write_json(".claude-plugin/plugin.json", value)
         self.assert_issue_contains(
-            VALIDATOR.validate_package(self.fixture.root), "version must equal '0.1.2'"
+            VALIDATOR.validate_package(self.fixture.root), "version must equal '0.1.3'"
         )
 
     def test_package_digest_inventory_is_sorted_and_excludes_repository_surfaces(self) -> None:

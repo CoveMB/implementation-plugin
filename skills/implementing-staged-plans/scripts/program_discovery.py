@@ -34,7 +34,11 @@ from program_launch import (
     render_program_launch_prompt,
     validate_submitted_program_launch_prompt,
 )
-from program_setup import inspect_sequence_zero_activation_prefix
+from program_setup import (
+    SETUP_ACTIVATION_SCHEMA_V2,
+    inspect_sequence_zero_activation_prefix,
+    setup_family_contract,
+)
 from program_review import build_review_preparation
 from diff_disposition import build_diff_acceptance_candidate
 from program_closure import (
@@ -1196,6 +1200,11 @@ def _load_new_candidate(
             for issue in state_issue_set
         ):
             recovery_route = "plan-materialization-recovery-required"
+        elif (
+            (program_state, increment_state) == ("active", "authorized")
+            and any("Delete" in issue or "quarantine" in issue for issue in state_issue_set)
+        ):
+            recovery_route = "execution-transition-recovery-required"
         elif (program_state, increment_state) in {
             ("active", "implementing"),
             ("active", "reviewing"),
@@ -1342,7 +1351,7 @@ def _load_setup_candidate(
         status_sha256=sha256_file(status_path),
         status_sequence=sequence,
     )
-    _, setup_path_issues = resolve_managed_path(
+    setup_path, setup_path_issues = resolve_managed_path(
         root,
         roles.get("setup_activation_decision"),
         role="logical role setup_activation_decision",
@@ -1363,6 +1372,10 @@ def _load_setup_candidate(
         role="logical role action_authorizations",
     )
     issues.extend(action_path_issues)
+    rollovers_path, rollover_path_issues = resolve_managed_path(
+        root, roles.get("rollovers"), role="logical role rollovers"
+    )
+    issues.extend(rollover_path_issues)
     if issues:
         return candidate, None, tuple(
             f"{display_path}: {issue}" for issue in sorted(set(issues))
@@ -1370,17 +1383,36 @@ def _load_setup_candidate(
     approvals, approval_issues = load_json_lines(approvals_path)
     grants, grant_issues = load_json_lines(grants_path)
     actions, action_issues = load_json_lines(actions_path)
-    issues.extend([*approval_issues, *grant_issues, *action_issues])
-    if approvals is None or grants is None or actions is None:
+    rollovers, rollover_issues = load_json_lines(rollovers_path)
+    issues.extend(
+        [*approval_issues, *grant_issues, *action_issues, *rollover_issues]
+    )
+    if (
+        approvals is None
+        or grants is None
+        or actions is None
+        or rollovers is None
+    ):
         return candidate, None, tuple(
             f"{display_path}: {issue}" for issue in sorted(set(issues))
         )
     program_state = status.get("program_state")
     increment_state = status.get("current_increment_state")
+    setup_exists = bool(setup_path and (setup_path.exists() or setup_path.is_symlink()))
     if sequence == 0:
         prefix = inspect_sequence_zero_activation_prefix(root)
-        issues.extend(str(issue) for issue in prefix.get("issues", []))
+        prefix_issues = [str(issue) for issue in prefix.get("issues", [])]
         prefix_state = prefix.get("state")
+        try:
+            setup_v2 = (
+                setup_family_contract(manifest).get("activation_schema")
+                == SETUP_ACTIVATION_SCHEMA_V2
+            )
+        except ValueError:
+            setup_v2 = False
+        if prefix_state == "invalid" and setup_v2 and setup_exists:
+            return candidate, "program-activation-recovery-required", ()
+        issues.extend(prefix_issues)
         if prefix_state == "pristine":
             issues.extend(
                 validate_program_authority(
@@ -1416,10 +1448,115 @@ def _load_setup_candidate(
                     Path(selected["path"]), selected["base_commit"]
                 ).observation,
             )
-            issues.extend(validate_state_authority(root, observation))
+            setup_semantics = manifest.get("setup_semantics")
+            setup_envelope = (
+                setup_semantics.get("operation_envelope")
+                if isinstance(setup_semantics, dict)
+                else None
+            )
+            setup_v2 = (
+                isinstance(setup_semantics, dict)
+                and setup_semantics.get("schema_version")
+                == "implementation-program-setup-semantics/v2"
+                and isinstance(setup_envelope, dict)
+                and setup_envelope.get("schema_version")
+                == "implementation-operation-envelope/v2"
+            )
+            authority_root = root.resolve()
+            has_rollover_prefix = (
+                bool(rollovers)
+                or isinstance(status.get("rollover_binding"), dict)
+                or any(action.get("actions") == ["rollover-increment"] for action in actions)
+                or (increment_state == "accepted" and isinstance(status.get("diff_disposition_binding"), dict))
+            )
+            if has_rollover_prefix:
+                from program_rollover import inspect_increment_rollover
+
+                rollover = inspect_increment_rollover(
+                    authority_root, observation
+                )
+                if rollover.disposition is not None and (
+                    rollover.disposition != "resume" or rollover.issues
+                ):
+                    return candidate, rollover.disposition, ()
+            authority_issues = validate_state_authority(
+                authority_root, observation
+            )
+            if setup_v2 and any(
+                "Delete" in issue or "quarantine" in issue
+                for issue in authority_issues
+            ):
+                return candidate, "execution-transition-recovery-required", ()
+            ledgers = {
+                "approvals": approvals,
+                "increment_grants": grants,
+                "action_authorizations": actions,
+            }
+            transaction_files, transaction_issues = _inspect_transaction_files(
+                authority_root, manifest, status
+            )
+            for prefix_disposition in (
+                _exact_plan_prefix_disposition(
+                    authority_root,
+                    manifest,
+                    status,
+                    ledgers,
+                    transaction_files,
+                ),
+                _exact_closure_prefix_disposition(
+                    authority_root,
+                    manifest,
+                    status,
+                    ledgers,
+                    transaction_files,
+                ),
+                _exact_acceptance_prefix_disposition(
+                    authority_root, manifest, status, ledgers
+                ),
+            ):
+                if prefix_disposition is not None:
+                    return candidate, prefix_disposition, ()
+            review_prefix_disposition = _exact_review_prefix_disposition(
+                authority_root, manifest, status, transaction_files
+            )
+            if review_prefix_disposition not in {None, "resume"}:
+                return candidate, review_prefix_disposition, ()
+            issues.extend(
+                f"{display_path}: {issue}" for issue in transaction_issues
+            )
+            issues.extend(authority_issues)
         except (KeyError, OSError, TypeError, ValueError) as error:
             issues.append(str(error))
         if issues:
+            setup_semantics = manifest.get("setup_semantics")
+            setup_envelope = (
+                setup_semantics.get("operation_envelope")
+                if isinstance(setup_semantics, dict)
+                else None
+            )
+            setup_v2 = (
+                isinstance(setup_semantics, dict)
+                and setup_semantics.get("schema_version")
+                == "implementation-program-setup-semantics/v2"
+                and isinstance(setup_envelope, dict)
+                and setup_envelope.get("schema_version")
+                == "implementation-operation-envelope/v2"
+            )
+            if (
+                setup_v2
+                and increment_state in {
+                    "authorized",
+                    "implementing",
+                    "reviewing",
+                    "remediating",
+                    "verified",
+                    "awaiting-diff-approval",
+                    "change-requested",
+                    "accepted",
+                }
+                and any("Delete" in issue or "quarantine" in issue for issue in issues)
+            ):
+                return candidate, "execution-transition-recovery-required", ()
             return candidate, None, tuple(
                 f"{display_path}: {issue}" for issue in sorted(set(issues))
             )
@@ -1774,13 +1911,36 @@ def _single_bootstrap_prefix_disposition(
                     and status.get("program_state") == "awaiting-program-approval"
                     and status.get("current_increment_state") == "not-started"
                 ):
+                    setup_path, setup_path_issues = resolve_managed_path(
+                        target,
+                        logical_roles.get("setup_activation_decision"),
+                        role="logical role setup_activation_decision",
+                        require_file=False,
+                    )
+                    if setup_path is None:
+                        return (
+                            "proposal-publication-recovery-required",
+                            tuple(setup_path_issues),
+                        )
+                    try:
+                        setup_v2 = (
+                            setup_family_contract(committed_manifest).get(
+                                "activation_schema"
+                            )
+                            == SETUP_ACTIVATION_SCHEMA_V2
+                        )
+                    except ValueError:
+                        setup_v2 = False
                     prefix = inspect_sequence_zero_activation_prefix(target)
                     prefix_issues = tuple(
                         str(issue) for issue in prefix.get("issues", [])
                     )
                     if prefix.get("state") == "invalid" or prefix_issues:
                         return (
-                            "proposal-publication-recovery-required",
+                            "program-activation-recovery-required"
+                            if setup_v2
+                            and (setup_path.exists() or setup_path.is_symlink())
+                            else "proposal-publication-recovery-required",
                             prefix_issues or ("v3 activation prefix is invalid",),
                         )
                     activation_started = prefix.get("state") != "pristine"
@@ -2040,6 +2200,36 @@ def _load_candidate(
         return None, None, (f"{display_path}: repository observation failed: {error}",)
     state_issues = validate_state_authority(program_root, observation)
     if state_issues:
+        setup_semantics = manifest.get("setup_semantics")
+        setup_envelope = (
+            setup_semantics.get("operation_envelope")
+            if isinstance(setup_semantics, dict)
+            else None
+        )
+        setup_v2 = (
+            isinstance(setup_semantics, dict)
+            and setup_semantics.get("schema_version")
+            == "implementation-program-setup-semantics/v2"
+            and isinstance(setup_envelope, dict)
+            and setup_envelope.get("schema_version")
+            == "implementation-operation-envelope/v2"
+        )
+        if (
+            setup_v2
+            and status.get("current_increment_state")
+            in {
+                "authorized",
+                "implementing",
+                "reviewing",
+                "remediating",
+                "verified",
+                "awaiting-diff-approval",
+                "change-requested",
+                "accepted",
+            }
+            and any("Delete" in issue or "quarantine" in issue for issue in state_issues)
+        ):
+            return candidate, "execution-transition-recovery-required", ()
         return None, None, tuple(f"{display_path}: {issue}" for issue in state_issues)
 
     source_binding = manifest["source_binding"]

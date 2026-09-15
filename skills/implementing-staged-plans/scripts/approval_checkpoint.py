@@ -23,7 +23,7 @@ from state_authority import (
     apply_state_transition,
     atomic_append_json_line,
     required_future_lifecycle_writes,
-    validate_required_managed_file_map,
+    validate_program_lifecycle_file_map,
     validate_state_authority,
 )
 
@@ -464,7 +464,7 @@ def validate_plan_managed_writes(
         )
     except (OSError, UnicodeError, ValueError) as error:
         return [str(error)]
-    return validate_required_managed_file_map(file_map, required)
+    return validate_program_lifecycle_file_map(program_root, workspace_root, increment_id, file_map, required)
 
 
 def _preflight_live_plan_approval(

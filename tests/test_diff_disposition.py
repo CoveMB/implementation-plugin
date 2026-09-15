@@ -1,4 +1,5 @@
 import json
+from contextlib import nullcontext
 import sys
 import unittest
 from pathlib import Path
@@ -6,6 +7,7 @@ from unittest import mock
 
 from tests.program_bootstrap_support import (
     BootstrapFixture,
+    _exact_plan_bytes,
     canonical_json,
     repository_snapshot,
     run_program_discovery,
@@ -15,6 +17,7 @@ from tests.script_module_support import load_script_module
 from tests.test_program_activation import ACTIVATION, activated_program, exact_plan_bytes
 from tests.test_program_review import REVIEW as PROGRAM_REVIEW
 from tests.test_program_review import reviewing_program
+from tests.test_program_setup import BOOTSTRAP, SETUP
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -58,9 +61,254 @@ def awaiting_diff_program(successors: dict[str, tuple[str, ...]] | None = None):
     return fixture, program_root, observation
 
 
+def _setup_awaiting_diff_program(*, delete: bool):
+    fixture = BootstrapFixture()
+    if delete:
+        fixture.configure_delete_setup_v2(path="catalog.txt")
+    else:
+        fixture.configure_setup_v3()
+    BOOTSTRAP.publish_program_proposal(
+        fixture.repository,
+        fixture.source_plan,
+        fixture.candidate,
+        fixture.source_sha256,
+    )
+    observation = ACTIVATION.inspect_repository(
+        fixture.repository, fixture.head
+    ).observation
+    activation = ACTIVATION.activate_program(
+        fixture.program_root,
+        SETUP.adapt_setup_decision(
+            fixture.program_root, "Yes", role="user", provenance="direct-user-message"
+        ),
+        observation,
+    )
+    intent = SETUP.adapt_increment_start_intent(
+        fixture.program_root, activation.handoff,
+        role="user", provenance="direct-user-message",
+    )
+    ACTIVATION.start_first_increment(fixture.program_root, intent, observation)
+    observation = ACTIVATION.inspect_repository(
+        fixture.repository, fixture.head
+    ).observation
+    prepared = ACTIVATION.prepare_exact_plan(
+        fixture.program_root,
+        _exact_plan_bytes(fixture.program_root, observation),
+        observation,
+    )
+    ACTIVATION.materialize_exact_plan(
+        fixture.program_root, prepared.plan_prompt, observation
+    )
+    ACTIVATION.advance_execution_state(
+        fixture.program_root, "implementing", observation
+    )
+    (fixture.repository / "archive-output.txt").write_text(
+        "archive output\n", encoding="utf-8"
+    )
+    write_raw_review_reports(fixture.repository)
+    observation = ACTIVATION.inspect_repository(
+        fixture.repository, fixture.head
+    ).observation
+    ACTIVATION.advance_execution_state(
+        fixture.program_root, "reviewing", observation
+    )
+    PROGRAM_REVIEW.persist_review_preparation(fixture.program_root, observation)
+    return fixture, fixture.program_root, observation
+
+
+def delete_setup_v2_awaiting_diff_program():
+    return _setup_awaiting_diff_program(delete=True)
+
+
+def setup_v1_awaiting_diff_program():
+    return _setup_awaiting_diff_program(delete=False)
+
+
 class DiffDispositionTests(unittest.TestCase):
     def discover(self, fixture) -> dict[str, object]:
         return run_program_discovery(fixture.repository)
+
+    def test_v2_acceptance_rejects_legacy_disposition_and_approval_family(self) -> None:
+        fixture, program_root, observation = delete_setup_v2_awaiting_diff_program()
+        try:
+            candidate = DIFF.build_diff_acceptance_candidate(program_root, observation)
+            DIFF.persist_accept_stop(
+                program_root,
+                f"Accept and stop.\n\n{candidate.prompt}",
+                observation,
+            )
+            status_path = program_root / "state/status.json"
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            disposition = status["diff_disposition_binding"]
+            disposition["schema_version"] = "implementation-diff-disposition-binding/v1"
+            disposition.pop("product_result_schema_version", None)
+            disposition.pop("product_result_sha256", None)
+            status_path.write_bytes(canonical_json(status))
+            approvals_path = program_root / "state/approvals.jsonl"
+            records = [json.loads(line) for line in approvals_path.read_text().splitlines()]
+            approval = next(record for record in records if record.get("type") == "increment-diff-approval")
+            approval["schema_version"] = "implementation-approval/v2"
+            approval.pop("product_result_schema_version", None)
+            approval.pop("product_result_sha256", None)
+            approvals_path.write_text(
+                "\n".join(json.dumps(record, separators=(",", ":"), sort_keys=False) for record in records) + "\n",
+                encoding="utf-8",
+            )
+            before_status = status_path.read_bytes()
+            before_approvals = approvals_path.read_bytes()
+            issues = DIFF.validate_state_authority(program_root, observation)
+            self.assertTrue(issues, issues)
+            self.assertTrue(any("family" in issue or "product" in issue or "approval" in issue for issue in issues))
+            with self.assertRaises(ValueError):
+                DIFF.persist_accept_stop(
+                    program_root,
+                    f"Accept and stop.\n\n{candidate.prompt}",
+                    observation,
+                )
+            self.assertEqual(status_path.read_bytes(), before_status)
+            self.assertEqual(approvals_path.read_bytes(), before_approvals)
+        finally:
+            fixture.close()
+
+    def test_v1_acceptance_rejects_coordinated_v2_disposition_and_approval(self) -> None:
+        fixture, program_root, observation = setup_v1_awaiting_diff_program()
+        try:
+            candidate = DIFF.build_diff_acceptance_candidate(program_root, observation)
+            DIFF.persist_accept_stop(
+                program_root,
+                f"Accept and stop.\n\n{candidate.prompt}",
+                observation,
+            )
+            status_path = program_root / "state/status.json"
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            disposition = status["diff_disposition_binding"]
+            disposition["schema_version"] = "implementation-diff-disposition-binding/v2"
+            disposition["product_result_schema_version"] = "implementation-product-path-states/v2"
+            disposition["product_result_sha256"] = "0" * 64
+            status["execution_transition_binding"]["schema_version"] = "implementation-execution-transition/v2"
+            status["review_preparation_binding"]["schema_version"] = "implementation-review-preparation/v2"
+            status["review_evidence_binding"]["product_result_schema_version"] = "implementation-product-path-states/v2"
+            status_path.write_bytes(canonical_json(status))
+            approvals_path = program_root / "state/approvals.jsonl"
+            records = [json.loads(line) for line in approvals_path.read_text().splitlines()]
+            approval = next(record for record in records if record.get("type") == "increment-diff-approval")
+            approval["schema_version"] = "implementation-approval/v3"
+            approval["product_result_schema_version"] = "implementation-product-path-states/v2"
+            approval["product_result_sha256"] = "0" * 64
+            approvals_path.write_text(
+                "\n".join(json.dumps(record, separators=(",", ":"), sort_keys=False) for record in records) + "\n",
+                encoding="utf-8",
+            )
+            before_status = status_path.read_bytes()
+            before_approvals = approvals_path.read_bytes()
+            issues = DIFF.validate_state_authority(program_root, observation)
+            self.assertTrue(issues, issues)
+            self.assertTrue(any("family" in issue for issue in issues), issues)
+            with self.assertRaises(ValueError):
+                DIFF.persist_accept_stop(
+                    program_root,
+                    f"Accept and stop.\n\n{candidate.prompt}",
+                    observation,
+                )
+            self.assertEqual(status_path.read_bytes(), before_status)
+            self.assertEqual(approvals_path.read_bytes(), before_approvals)
+        finally:
+            fixture.close()
+
+    def test_v2_product_result_propagates_exactly_through_acceptance_sinks(self) -> None:
+        fixture, program_root, observation = delete_setup_v2_awaiting_diff_program()
+        try:
+            review_candidate = PROGRAM_REVIEW.build_review_preparation(
+                program_root, observation
+            )
+            evidence = json.loads(review_candidate.evidence_bytes)
+            product_result = evidence["product_result"]
+            self.assertEqual(
+                product_result["schema_version"],
+                "implementation-product-path-states/v2",
+            )
+            PROGRAM_REVIEW.persist_review_preparation(program_root, observation)
+            acceptance = DIFF.build_diff_acceptance_candidate(program_root, observation)
+            self.assertEqual(
+                acceptance.approval_record["product_result_schema_version"],
+                product_result["schema_version"],
+            )
+            self.assertEqual(
+                acceptance.approval_record["product_result_sha256"],
+                product_result["sha256"],
+            )
+            self.assertIn(product_result["sha256"], acceptance.prompt)
+            self.assertIn(product_result["sha256"], review_candidate.packet_bytes.decode("utf-8"))
+            DIFF.persist_accept_stop(
+                program_root,
+                f"Accept and stop.\n\n{acceptance.prompt}",
+                observation,
+            )
+            status = json.loads((program_root / "state/status.json").read_text())
+            preparation = status["review_preparation_binding"]
+            self.assertEqual(preparation["product_result_schema_version"], product_result["schema_version"])
+            self.assertEqual(preparation["product_result_sha256"], product_result["sha256"])
+            binding = status["diff_disposition_binding"]
+            self.assertEqual(binding["product_result_schema_version"], product_result["schema_version"])
+            self.assertEqual(binding["product_result_sha256"], product_result["sha256"])
+        finally:
+            fixture.close()
+
+    def test_v2_acceptance_revalidates_persisted_review_artifacts(self) -> None:
+        for case in ("failed verification", "stripped packet binding"):
+            with self.subTest(case=case):
+                fixture, program_root, observation = (
+                    delete_setup_v2_awaiting_diff_program()
+                )
+                try:
+                    status_path = program_root / "state/status.json"
+                    status = json.loads(status_path.read_text(encoding="utf-8"))
+                    preparation = status["review_preparation_binding"]
+                    if case == "failed verification":
+                        evidence_path = (
+                            program_root
+                            / status["review_evidence_binding"]["path"]
+                        )
+                        evidence = json.loads(
+                            evidence_path.read_text(encoding="utf-8")
+                        )
+                        evidence["final_verification"]["commands"][0][
+                            "exit_code"
+                        ] = 1
+                        evidence_path.write_bytes(canonical_json(evidence))
+                        evidence_sha256 = DIFF.sha256_file(evidence_path)
+                        status["review_evidence_binding"]["sha256"] = (
+                            evidence_sha256
+                        )
+                        preparation["evidence_sha256"] = evidence_sha256
+                    else:
+                        packet_path = (
+                            program_root / status["review_packet_binding"]["path"]
+                        )
+                        packet_text = packet_path.read_text(encoding="utf-8")
+                        metadata = (
+                            "Packet schema: implementation-review-packet/v2\n"
+                            "Product result schema: "
+                            "implementation-product-path-states/v2\n"
+                            f"Product result SHA-256: "
+                            f"{preparation['product_result_sha256']}\n\n"
+                        )
+                        self.assertIn(metadata, packet_text)
+                        packet_path.write_text(
+                            packet_text.replace(metadata, "", 1),
+                            encoding="utf-8",
+                        )
+                        packet_sha256 = DIFF.sha256_file(packet_path)
+                        status["review_packet_binding"]["sha256"] = packet_sha256
+                        preparation["packet_sha256"] = packet_sha256
+                    status_path.write_bytes(canonical_json(status))
+
+                    with self.assertRaisesRegex(ValueError, "review"):
+                        DIFF.build_diff_acceptance_candidate(
+                            program_root, observation
+                        )
+                finally:
+                    fixture.close()
 
     def test_prompt_always_offers_only_accept_and_stop_without_successor_input(self) -> None:
         fixture, program_root, _observation = awaiting_diff_program()
@@ -141,41 +389,49 @@ class DiffDispositionTests(unittest.TestCase):
         )
         for successors, reason in cases:
             with self.subTest(reason=reason):
-                fixture, program_root, _observation = awaiting_diff_program(successors)
+                # Unsafe allocations now stop before a new exact plan. Inject the
+                # unavailable boundary here to exercise stop-choice policy for
+                # an independently valid acceptance, including historical callers.
+                fixture, program_root, _observation = awaiting_diff_program()
                 try:
-                    prompt = DIFF.render_diff_disposition_prompt(program_root)
-                    candidate = DIFF.build_diff_acceptance_candidate(
-                        program_root, _observation
+                    selection = (
+                        mock.patch.object(DIFF._continuation, "_successor_selection", return_value=(None, reason))
+                        if successors is not None else nullcontext()
                     )
-                    expected = f"Accept and stop.\n\n{candidate.prompt}"
-                    if reason != "no allocated successor":
-                        expected += f"\nContinuation unavailable: {reason}.\n"
-                    self.assertEqual(prompt, expected)
-                    self.assertEqual(prompt.count("Accept and stop."), 1)
-                    self.assertNotIn("Accept and continue", prompt)
-                    if successors is None:
-                        from program_continuation import (
-                            build_continuation_extension,
-                            continuation_unavailability_reason,
-                        )
-
+                    with selection:
+                        prompt = DIFF.render_diff_disposition_prompt(program_root)
                         candidate = DIFF.build_diff_acceptance_candidate(
                             program_root, _observation
                         )
-                        self.assertIsNone(
-                            build_continuation_extension(
-                                program_root, candidate, _observation
+                        expected = f"Accept and stop.\n\n{candidate.prompt}"
+                        if reason != "no allocated successor":
+                            expected += f"\nContinuation unavailable: {reason}.\n"
+                        self.assertEqual(prompt, expected)
+                        self.assertEqual(prompt.count("Accept and stop."), 1)
+                        self.assertNotIn("Accept and continue", prompt)
+                        if successors is None:
+                            from program_continuation import (
+                                build_continuation_extension,
+                                continuation_unavailability_reason,
                             )
-                        )
-                        self.assertEqual(
-                            continuation_unavailability_reason(
-                                program_root, candidate
-                            ),
-                            reason,
-                        )
-                    else:
-                        self.assertIn(reason, prompt)
-                    self.assertEqual(prompt.count("$implementing-staged-plans"), 1)
+
+                            candidate = DIFF.build_diff_acceptance_candidate(
+                                program_root, _observation
+                            )
+                            self.assertIsNone(
+                                build_continuation_extension(
+                                    program_root, candidate, _observation
+                                )
+                            )
+                            self.assertEqual(
+                                continuation_unavailability_reason(
+                                    program_root, candidate
+                                ),
+                                reason,
+                            )
+                        else:
+                            self.assertIn(reason, prompt)
+                        self.assertEqual(prompt.count("$implementing-staged-plans"), 1)
                 finally:
                     fixture.close()
 

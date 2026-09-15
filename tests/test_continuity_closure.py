@@ -321,8 +321,12 @@ class BoundedContinuationResultTests(unittest.TestCase):
             ("ARCHIVE-VERIFY", ""),
         )
         self.assertEqual(
+            CONTINUITY.select_unique_satisfied_successor([direct], current, set()),
+            (None, "current increment must be accepted"),
+        )
+        self.assertEqual(
             CONTINUITY.select_unique_satisfied_successor([], current, {current}),
-            (None, "no allocated successor"),
+            (None, "atomic requirements must be non-empty"),
         )
         self.assertEqual(
             CONTINUITY.select_unique_satisfied_successor(

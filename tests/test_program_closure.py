@@ -27,6 +27,51 @@ def accepted_program():
 
 
 class ProgramClosureTests(unittest.TestCase):
+    def test_unavailable_selection_cannot_satisfy_closure_preconditions(self):
+        from program_authority import resolve_increment_successor
+
+        for allocations in ((["A", "B", "C"], ["A", "C"]), (["A", "B"], ["A", "C"]), (["A"], ["B"])):
+            requirements = [{"id": f"REQ-{index}", "assigned_increments": assigned} for index, assigned in enumerate(allocations)]
+            resolution = resolve_increment_successor({"schema_version": "implementation-program-manifest/v2"}, requirements, "A", ())
+            self.assertEqual(resolution.kind, "unavailable")
+            with self.subTest(allocations=allocations), self.assertRaisesRegex(ValueError, "terminal|successor|allocated"):
+                CLOSURE._validate_preconditions({"successor_id": resolution.successor_increment_id}, successor_resolution=resolution)
+
+    def test_direct_closure_command_rechecks_successor_for_awaiting_and_approval_prefix(self):
+        for prefix in (False, True):
+            with self.subTest(approval_prefix=prefix):
+                fixture, root, observation = accepted_program()
+                self.addCleanup(fixture.close)
+                CLOSURE.prepare_program_closure(root, observation)
+                prompt = CLOSURE.render_program_closure_prompt(root)
+                if prefix:
+                    def interrupt(label):
+                        if label == "closure-approval":
+                            raise RuntimeError("injected")
+                    with mock.patch.object(CLOSURE, "_after_persist", side_effect=interrupt), self.assertRaisesRegex(RuntimeError, "injected"):
+                        CLOSURE.persist_program_closure(root, prompt, observation)
+                traceability_path = root / "program/traceability.json"
+                traceability = json.loads(traceability_path.read_text())
+                traceability["atomic_requirements"][0]["assigned_increments"] = ["ARCHIVE-INDEX", "ARCHIVE-VERIFY"]
+                traceability_path.write_bytes(canonical_json(traceability))
+                before = repository_snapshot(root)
+                # Isolate terminal eligibility from unrelated immutable-binding
+                # failures; the actual command path must enforce both boundaries.
+                with mock.patch.object(CLOSURE, "validate_state_authority", return_value=[]):
+                    with self.assertRaisesRegex(ValueError, "terminal|successor|nonfinal"):
+                        CLOSURE.build_closure_command_candidate(root, observation)
+                self.assertEqual(repository_snapshot(root), before)
+                alternate = dict(traceability["atomic_requirements"][0])
+                alternate.update(id="ALTERNATE-OUTCOME", assigned_increments=["ARCHIVE-INDEX", "ARCHIVE-EXPORT"])
+                traceability["atomic_requirements"].append(alternate)
+                traceability_path.write_bytes(canonical_json(traceability))
+                before = repository_snapshot(root)
+                with mock.patch.object(CLOSURE, "validate_state_authority", return_value=[]):
+                    for builder in (CLOSURE.build_closure_preparation, CLOSURE.build_closure_command_candidate):
+                        with self.assertRaisesRegex(ValueError, "multiple allocated successors"):
+                            builder(root, observation)
+                self.assertEqual(repository_snapshot(root), before)
+
     def discover(self, fixture) -> dict[str, object]:
         return run_program_discovery(fixture.repository)
 
@@ -77,6 +122,9 @@ class ProgramClosureTests(unittest.TestCase):
             status = json.loads(status_path.read_text(encoding="utf-8"))
             evidence_sha256 = CLOSURE.sha256_file(evidence_path)
             status["review_evidence_binding"]["sha256"] = evidence_sha256
+            status["review_preparation_binding"]["evidence_sha256"] = (
+                evidence_sha256
+            )
             status["diff_disposition_binding"]["review_evidence_sha256"] = (
                 evidence_sha256
             )
@@ -134,6 +182,9 @@ class ProgramClosureTests(unittest.TestCase):
                     status = json.loads(status_path.read_text(encoding="utf-8"))
                     evidence_sha256 = CLOSURE.sha256_file(evidence_path)
                     status["review_evidence_binding"]["sha256"] = evidence_sha256
+                    status["review_preparation_binding"]["evidence_sha256"] = (
+                        evidence_sha256
+                    )
                     status["diff_disposition_binding"]["review_evidence_sha256"] = (
                         evidence_sha256
                     )

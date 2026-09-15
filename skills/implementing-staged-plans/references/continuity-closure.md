@@ -48,13 +48,13 @@ Version `0.1.2` keeps the Plan A accept-stop bytes unchanged and adds two explic
 
 The legacy caller-authored rollover writer remains quarantined at `legacy-rollover-upgrade-required`; accepted legacy automatic modes never grant successor authority. Only the typed prompt-bound routes below can persist new rollover bytes.
 
-Validate the complete prompt, status-current projection, canonical successor, dependencies, workspace, and accepted product bytes before writing. Persist or adopt the `rollover-increment` authorization, distinct successor grant, current handoff, successor brief, and rollover record in that order; replace successor status last. Every durable prefix is discoverable and retryable with the same prompt. Divergent bytes are preserved and require the matching continuation recovery route.
+Validate the complete prompt, status-current projection, [canonical successor](state-authorization.md#allocate-lifecycle-writes-before-authority), workspace, and accepted product bytes before writing. Persist or adopt the `rollover-increment` authorization, distinct successor grant, current handoff, successor brief, and rollover record in that order; replace successor status last. Every durable prefix is discoverable and retryable with the same prompt. Divergent bytes are preserved and require the matching continuation recovery route.
 
 Successor execution baselines use the existing `inherited_paths` field. Each inherited path must come from the canonical rollover chain, match the accepted product bytes, have exactly one baseline, be owned as `Modify` or `Preserve`, and remain separate from user-work baselines. First-increment baselines remain byte-compatible with `inherited_paths: []`.
 
 ## Reconcile a Program
 
-Only after the final increment is accepted, account for every atomic requirement exactly once with an allowed disposition and evidence. Validate every accepted increment, review packet, addendum, approved amendment, decision, owned deferral, later-invalidation check, and material-finding disposition. Require fresh successful program-level commands completed after all contributing evidence and reassess architecture, documentation, operations, and recovery.
+Only after current acceptance and explicit terminal resolution under the [successor contract](state-authorization.md#allocate-lifecycle-writes-before-authority), account for every atomic requirement exactly once with an allowed disposition and evidence. Validate every accepted increment, review packet, addendum, approved amendment, decision, owned deferral, later-invalidation check, and material-finding disposition. Require fresh successful program-level commands completed after all contributing evidence and reassess architecture, documentation, operations, and recovery.
 
 For a new-model final first increment, use `program_closure.py`. It resolves both closure paths from the immutable manifest descriptor and requires both paths under the accepted exact plan's `Create` disposition. It does not create a handoff, successor brief, rollover, or later-action authority. A first-increment closure binds the accepted review packet; addendum coverage becomes mandatory only when accepted rollover history exists.
 
@@ -66,7 +66,7 @@ Render a deterministic packet bound to the exact reconciliation digest. Include 
 
 Final-increment acceptance leaves the program active. Moving to `awaiting-closure-approval` requires exact manifest-owned reconciliation and packet paths, matching digests, validated readiness, and zero blocking counts. Moving to `closed` requires one explicit `program-closure-approval` record bound to both exact digests.
 
-New-model preparation creates or adopts the canonical reconciliation, then the packet, and replaces status last. Exact partial prefixes are retryable. Changed files, unsafe paths, nonfinal allocation, stale accepted product bytes, or divergent prefixes are preserved and require typed recovery. The exact closure prompt appends or adopts the closure approval and replaces status with `closed` last. Replaying that prompt can only recover or report the same closure; it cannot authorize a commit or any consequential action.
+New-model preparation creates or adopts the canonical reconciliation, then the packet, and replaces status last. Exact partial prefixes are retryable. Changed files, unsafe paths, nonterminal or unavailable resolution, stale accepted product bytes, or divergent prefixes are preserved and require typed recovery. The exact closure prompt appends or adopts the closure approval and replaces status with `closed` last. Replaying that prompt can only recover or report the same closure; it cannot authorize a commit or any consequential action.
 
 ## Decide a Later Action
 

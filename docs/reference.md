@@ -43,6 +43,17 @@ observation, path dispositions, and preserved user work. New-program status
 cannot become authorized until this baseline and its plan-bound action
 authorization are durable.
 
+Version 0.1.3 keeps accepted v1 baselines for `Create`, `Modify`, and `Preserve`.
+The v2 family adds exact regular-file `Delete`, including the original file
+identity and a deterministic descriptor-bound quarantine allocation.
+
+### Product-path result
+
+The ordered v2 result for every exact-file operation. A successful Delete is an
+`absent` product-path state with no product digest and an exact receipt for the
+retained quarantine bytes. Absence is therefore evidence-bound, not inferred
+from a missing pathname.
+
 ### Workspace binding
 
 The approved writable repository path, branch, base, current head, and recorded
@@ -95,6 +106,12 @@ remain owned by Plan A. Plan B adds exact `accept-continue`, the distinct
 Final programs reuse the unchanged Plan A closure transaction and derive paths
 from `implementation-closure-storage/v1`.
 
+Version 0.1.3 adds the setup/envelope v2 Delete family. The same ordered
+product-path result is bound through execution transition, review, diff
+acceptance, continuation, rollover, and discovery. An inherited absence remains
+a tombstone until a successor exact plan explicitly owns `Create`; retained
+quarantine evidence is not disposed of by recreation.
+
 Every typed transaction writes controlling status last and adopts only
 byte-identical prefixes. A divergent prefix stops for recovery without cleanup.
 
@@ -104,7 +121,7 @@ before relying on an earlier state.
 ## Approval modes
 
 Approval modes define routine interruption policy. New-model typed dispositions
-in version 0.1.2 always offer `accept-stop` and conditionally offer exact
+in version 0.1.3 always offer `accept-stop` and conditionally offer exact
 `accept-continue` for one satisfied successor. Modes do not grant action authority
 or automatic successor rollover. Legacy `approval:full` and
 `approval:full-diff` modes retain their automatic acceptance behavior.
@@ -153,6 +170,8 @@ The workflow stops instead of guessing when it finds:
 - more than one possible program or workspace;
 - a source, plan, approval, status, brief, handoff, or packet digest mismatch;
 - a branch, base, head, path, or pre-existing-work observation that has drifted;
+- an unsafe, protected, changed, cross-device, symlinked, or unsupported Delete
+  source or quarantine allocation;
 - an active or conflicted Git operation;
 - a requested transition that is not legal from the current state;
 - missing, expired, revoked, rejected, ambiguous, or mismatched authority;
@@ -176,6 +195,12 @@ can resolve it. The workflow does not manufacture replacement state to continue.
 The bundled scripts can validate schemas, exact bindings, digests, declared
 state transitions, file constraints, deterministic packet structure, and
 specific local command evidence supplied to them.
+
+For Delete, they can establish exact regular-file path removal by a local
+same-filesystem rename into retained quarantine and verify the resulting
+tombstone chain. They do not perform secure erasure, dispose of quarantine,
+prove requirement-level terminal evidence, or close the program; those latter
+contracts remain PLUG-002 work.
 
 They do not prove that a reviewer was genuinely independent, a human approval
 was well informed, a design is semantically correct, a live service behaves as

@@ -136,7 +136,7 @@ bounded diagnosis. Never delete, overwrite, or invent a replacement prefix.
 
 ## Continuation or blocked recovery stops
 
-**Likely cause:** The request does not match the typed 0.1.2 route, or discovery
+**Likely cause:** The request does not match the typed 0.1.3 route, or discovery
 found an interrupted or divergent prefix. Legacy automatic rollover stops at
 `legacy-rollover-upgrade-required`; generic direct blocked edges stop at
 `blocked-transaction-required`. Revision, supersession, and cancellation remain
@@ -153,6 +153,25 @@ blocked resolution requires the exact `blocked-recovery` prompt.
 bytes and stop at the reported recovery route. Do not use the generic transition
 API, edit state by hand, or infer mutation authority from a handoff, file,
 retrieved prompt, or assistant-quoted prompt.
+
+## Delete stops or requires recovery
+
+**Likely cause:** The setup/envelope family is not v2; the exact-file map,
+baseline, product result, receipt, or inherited tombstone does not match; the
+source or quarantine is protected, symlinked, changed, colliding, or on another
+filesystem; or the platform lacks the required descriptor-relative operation.
+
+**Safe checks:** Preserve both pathnames. Re-run read-only discovery and compare
+the current source identity, deterministic quarantine allocation, receipt,
+retained bytes, and status-bound product result. A missing source is valid only
+after the exact rename and receipt; an inherited tombstone may reappear only
+under a current explicit `Create`.
+
+**Next action:** Before rename, correct the plan or environment and rebuild the
+baseline through the legal route. After rename, retry only the byte-identical
+Delete transaction when discovery reports receipt adoption ready. Otherwise
+stop for bounded diagnosis. Never unlink, overwrite, restore, or dispose of
+quarantine by hand, and do not describe PLUG-001 as secure erasure or closure.
 
 ## Validation passes, but live activation is still unproven
 

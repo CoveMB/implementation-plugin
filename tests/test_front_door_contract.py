@@ -22,7 +22,7 @@ SPEC.loader.exec_module(VALIDATOR)
 
 EXPECTED_MANIFEST = {
     "name": "implementation-plugin",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "description": "Run approved implementation programs one reviewable increment at a time.",
     "skills": "./skills/",
 }
@@ -184,12 +184,25 @@ class FrontDoorContractTests(unittest.TestCase):
             metadata,
             'interface:\n'
             '  display_name: "Implementing Staged Plans"\n'
-            '  short_description: "Create, continue, or recover implementation programs."\n'
-            '  default_prompt: "Use $implementing-staged-plans to create, activate, continue, or recover a repository-backed implementation program."\n'
+            '  short_description: "Create, continue, recover, or delete through staged programs."\n'
+            '  default_prompt: "Use $implementing-staged-plans to create, activate, continue, recover, or execute an exact-file Delete in a repository-backed implementation program."\n'
             '\n'
             'policy:\n'
             '  allow_implicit_invocation: false\n',
         )
+
+    def test_front_door_routes_delete_to_the_typed_v2_contract(self) -> None:
+        skill_markdown = SKILL_PATH.read_text(encoding="utf-8")
+        for required in (
+            "Create`, `Modify`, and `Delete",
+            "setup/envelope v2",
+            "descriptor-bound quarantine",
+            "approval-v3",
+            "action-v3",
+            "explicit later `Create`",
+            "PLUG-002",
+        ):
+            self.assertIn(required, skill_markdown)
 
     def test_plan_a_lifecycle_routes_are_ordered_and_bounded(self) -> None:
         skill_markdown = SKILL_PATH.read_text(encoding="utf-8")

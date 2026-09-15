@@ -8,7 +8,13 @@ Load the manifest-owned current status, brief, preparation, exact-file plan, exe
 
 Before the execution baseline exists, repository dirt must equal the normalized launch observation. After it exists, validate product paths by disposition and lifecycle state: `authorized` permits no product delta; `implementing` permits any subset of declared Create and Modify work; `reviewing` and later require every declared Create path to exist and every declared Modify path to differ from its baseline while Preserve remains byte-identical. Reject new staged, conflicted, unmapped, deleted, unsafe, or changed user-owned paths.
 
-For successor increments, validate every nonempty `inherited_paths` entry against the canonical rollover chain, matching accepted product bytes, and exact `Modify` or `Preserve` ownership. Inherited accepted history is not user-owned dirt and must not be merged into `user_work_baselines`. First-increment and frozen legacy baselines remain byte-compatible with `inherited_paths: []`.
+For successor increments, validate every nonempty `inherited_paths` entry against the canonical rollover chain, matching accepted product states, and exact current-plan ownership. Inherited accepted history is not user-owned dirt and must not be merged into `user_work_baselines`. First-increment and frozen legacy baselines remain byte-compatible with `inherited_paths: []`.
+
+## Delete execution and recovery
+
+Execute v2 `Delete` only for the exact regular-file source and descriptor-bound quarantine slot recorded in the live baseline. Hold and recheck both identities, require the same-filesystem device binding, and atomically rename source to quarantine. The operation does not unlink, overwrite, or restore either name. Success is a typed `absent` product result with a null product digest, an exact quarantine receipt, and retained quarantine bytes; it carries no secure-erasure claim.
+
+Recovery is deterministic and non-destructive. Before rename, changed or unsupported state stops with the product file intact. After a matching rename, exact receipt adoption may complete the result; a source replacement, quarantine change, or conflicting receipt stops recovery and preserves both names. A later exact `Create` may explicitly recreate the inherited tombstone, but it does not dispose of the retained quarantine or its historical receipt.
 
 ## Meaningful test-first evidence
 
@@ -24,7 +30,7 @@ Reuse accepted preparation validators instead of copying their ownership or over
 
 ## Semantic-surface coverage
 
-Inventory every created or renamed symbol, command, test or fixture, heading, schema or identifier, and every created or generated path exactly once. Delegate contextual naming and compatibility decisions to repository preparation. A physical path rename is unsupported because Create/Modify/Preserve has no deletion or typed old/new migration disposition; it requires a future approved migration contract. Reject coordinate-shaped planning names unless a specific implementation-governance artifact or durable domain concept owns them. Existing public, persisted, generated, or external names require an explicit compatibility or migration disposition.
+Inventory every created or renamed symbol, command, test or fixture, heading, schema or identifier, and every created or generated path exactly once. Delegate contextual naming and compatibility decisions to repository preparation. A physical Move, Rename, or Replace remains unsupported: `Delete` removes one exact regular-file product path into retained quarantine and is not an old/new migration disposition. Reject coordinate-shaped planning names unless a specific implementation-governance artifact or durable domain concept owns them. Existing public, persisted, generated, or external names require an explicit compatibility or migration disposition.
 
 ## Bounded approach autonomy
 

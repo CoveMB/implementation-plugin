@@ -658,6 +658,59 @@ class ExactFileMapTests(unittest.TestCase):
             ),
         )
 
+    def test_parser_rejects_delete_sections_without_v2_context(self) -> None:
+        markdown = """# Plan
+
+## File map
+
+### Create
+
+- `review/evidence.json`
+
+### Modify
+
+- `state/status.json`
+
+### Delete
+### Preserve
+
+- `catalog.txt`
+"""
+        with self.assertRaisesRegex(
+            ValueError, "Delete section requires setup-v2 exact-file map"
+        ):
+            PREPARATION.parse_exact_file_map(markdown)
+
+    def test_v2_parser_accepts_delete_sections_and_empty_delete(self) -> None:
+        markdown = """# Plan
+
+## File map
+
+### Create
+
+- `review/evidence.json`
+
+### Modify
+
+- `state/status.json`
+
+### Delete
+
+### Preserve
+
+- `catalog.txt`
+"""
+        parsed = PREPARATION.parse_exact_file_map_v2(markdown)
+        self.assertEqual(
+            parsed,
+            PREPARATION.ExactFileMapV2(
+                create=("review/evidence.json",),
+                modify=("state/status.json",),
+                delete=(),
+                preserve=("catalog.txt",),
+            ),
+        )
+
     def test_parser_rejects_duplicates_escapes_and_repeated_sections(self) -> None:
         valid = """# Plan
 ## File map
@@ -975,6 +1028,96 @@ class ExecutionWorkspaceValidationTests(unittest.TestCase):
             increment_state="authorized",
         )
         self.assertIn("pre-existing user work changed: notes.txt", changed.issues)
+
+
+class ExecutionV2ContractTests(unittest.TestCase):
+    def baseline_value(self) -> dict[str, object]:
+        snapshot = {
+            "path": "legacy.ts",
+            "exists": True,
+            "sha256": "a" * 64,
+            "mode": "100644",
+            "device": 10,
+            "inode": 20,
+            "link_count": 1,
+        }
+        digest = __import__("hashlib").sha256(
+            (json.dumps({"program_id": "P", "program_revision": 1, "increment_id": "I", "path": "legacy.ts", "baseline_sha256": "a" * 64, "device": 10, "inode": 20, "mode": "100644", "link_count": 1}, ensure_ascii=False, separators=(",", ":"), sort_keys=True) + "\n").encode()
+        ).hexdigest()
+        return {
+            "schema_version": "implementation-execution-baseline/v2",
+            "program_id": "P",
+            "program_revision": 1,
+            "increment_id": "I",
+            "exact_file_plan_sha256": "b" * 64,
+            "current_increment_authority_binding": {"grant_id": "G"},
+            "workspace_observation": {},
+            "file_map": {
+                "create": ["new.txt"],
+                "modify": ["changed.txt"],
+                "delete": ["legacy.ts"],
+                "preserve": ["keep.txt"],
+            },
+            "path_baselines": [
+                {"path": "new.txt", "disposition": "Create", "snapshot": {"path": "new.txt", "exists": False, "sha256": None, "mode": None, "device": None, "inode": None, "link_count": None}},
+                {"path": "changed.txt", "disposition": "Modify", "snapshot": snapshot | {"path": "changed.txt"}},
+                {"path": "legacy.ts", "disposition": "Delete", "snapshot": snapshot},
+                {"path": "keep.txt", "disposition": "Preserve", "snapshot": snapshot | {"path": "keep.txt"}},
+            ],
+            "delete_quarantine_bindings": [
+                {
+                    "path": "legacy.ts",
+                    "root_path": "increments/I/delete-quarantine",
+                    "root_owner": 100,
+                    "root_mode": "700",
+                    "root_device": 30,
+                    "root_inode": 40,
+                    "entry_path": f"increments/I/delete-quarantine/delete-{digest}.bin",
+                    "receipt_path": f"increments/I/delete-quarantine/delete-{digest}.receipt.json",
+                }
+            ],
+            "protected_control_allocations": [
+                "increments/I/delete-quarantine",
+                f"increments/I/delete-quarantine/delete-{digest}.bin",
+                f"increments/I/delete-quarantine/delete-{digest}.receipt.json",
+            ],
+            "user_work_baselines": [],
+            "inherited_paths": [],
+        }
+
+    def test_v2_baseline_and_product_state_contracts_are_typed(self) -> None:
+        baseline = PREPARATION.execution_baseline_v2_from_value(self.baseline_value())
+        self.assertIsInstance(baseline.file_map, PREPARATION.ExactFileMapV2)
+        self.assertEqual(baseline.file_map.delete, ("legacy.ts",))
+        self.assertEqual(baseline.delete_quarantine_bindings[0]["path"], "legacy.ts")
+
+        states_value = {
+                "schema_version": "implementation-product-path-states/v2",
+                "ordered_path_states": [
+                    {"path": "new.txt", "exists": True, "sha256": "e" * 64, "mode": "100644", "device": 11, "inode": 21, "link_count": 1},
+                    {"path": "changed.txt", "exists": True, "sha256": "a" * 64, "mode": "100644", "device": 10, "inode": 20, "link_count": 1},
+                    {"path": "legacy.ts", "exists": False, "sha256": None, "mode": None, "device": None, "inode": None, "link_count": None},
+                    {"path": "keep.txt", "exists": True, "sha256": "a" * 64, "mode": "100644", "device": 10, "inode": 20, "link_count": 1},
+                ],
+                "delete_quarantine_bindings": [{"path": "legacy.ts", "receipt_path": "q.receipt.json", "receipt_sha256": "c" * 64}],
+                "sha256": "d" * 64,
+            }
+        canonical = {
+            "ordered_path_states": states_value["ordered_path_states"],
+            "delete_quarantine_bindings": states_value["delete_quarantine_bindings"],
+        }
+        states_value["sha256"] = __import__("hashlib").sha256(
+            json.dumps(canonical, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
+        ).hexdigest()
+        states = PREPARATION.product_path_states_v2_from_value(states_value)
+        self.assertEqual(states.ordered_path_states[2].operation, "Delete")
+        self.assertEqual(states.delete_quarantine_bindings[0]["receipt_sha256"], "c" * 64)
+        wire = PREPARATION.product_path_states_v2_value(states)
+        reparsed = PREPARATION.product_path_states_v2_from_value(wire)
+        self.assertEqual(reparsed.sha256, wire["sha256"])
+
+        with self.assertRaisesRegex(ValueError, "product path states structure is invalid"):
+            PREPARATION.product_path_states_v2_from_value({**wire, "program_id": "P"})
 
 
 if __name__ == "__main__":

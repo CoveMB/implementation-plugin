@@ -23,14 +23,21 @@ from repository_preparation import (
     RepositoryInspection,
     _section_body,
     execution_baseline_from_value,
+    execution_baseline_v2_from_value,
     inspect_repository,
     parse_exact_file_map,
+    parse_exact_file_map_v2,
+    product_path_states_v2_from_value,
+    product_path_states_v2_value,
     validate_execution_workspace,
+    validate_execution_workspace_v2,
 )
 from review_coordination import (
     RAW_REVIEW_REPORT_SCHEMA,
     REVIEW_EVIDENCE_SCHEMA,
+    REVIEW_EVIDENCE_SCHEMA_V2,
     REVIEW_PACKET_SCHEMA,
+    REVIEW_PACKET_SCHEMA_V2,
     CommandResult,
     FinalVerification,
     ReviewFinding,
@@ -48,12 +55,15 @@ from state_authority import (
     TransitionRequest,
     apply_state_transition,
     atomic_replace_json,
+    descriptor_protection_context,
     validate_state_authority,
 )
 
 
 REVIEW_PREPARATION_SCHEMA = "implementation-review-preparation/v1"
 REVIEW_REMEDIATION_SCHEMA = "implementation-review-remediation/v1"
+REVIEW_PREPARATION_SCHEMA_V2 = "implementation-review-preparation/v2"
+REVIEW_REMEDIATION_SCHEMA_V2 = "implementation-review-remediation/v2"
 
 
 @dataclass(frozen=True)
@@ -252,14 +262,43 @@ def _reconciled_review_history(
     remediation_binding: dict[str, object] | None,
     current_reports: tuple[ReviewReport, ...],
     current_findings: tuple[ReviewFinding, ...],
+    *,
+    expected_schema: str,
 ) -> tuple[tuple[ReviewReport, ...], tuple[ReviewFinding, ...]]:
     if remediation_binding is None:
         return current_reports, current_findings
-    if remediation_binding.get("schema_version") != REVIEW_REMEDIATION_SCHEMA:
+    remediation_schema = remediation_binding.get("schema_version")
+    if remediation_schema not in {
+        REVIEW_REMEDIATION_SCHEMA,
+        REVIEW_REMEDIATION_SCHEMA_V2,
+    }:
         raise ValueError("review remediation binding has unsupported schema")
+    if remediation_schema != expected_schema:
+        raise ValueError("review remediation family does not match product result")
+    if remediation_schema == REVIEW_REMEDIATION_SCHEMA_V2:
+        try:
+            product_result = product_path_states_v2_from_value(
+                remediation_binding["initial_product_result"]
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("review remediation initial product result is invalid") from error
+        if product_result.sha256 != remediation_binding.get(
+            "initial_product_result_sha256"
+        ):
+            raise ValueError("review remediation initial product result digest mismatch")
     initial_reports = _stored_review_reports(
         remediation_binding.get("initial_reports")
     )
+    if (
+        remediation_schema == REVIEW_REMEDIATION_SCHEMA_V2
+        and any(
+            report.reviewed_candidate_sha256 != product_result.sha256
+            for report in initial_reports
+        )
+    ):
+        raise ValueError(
+            "review remediation initial reports do not match initial product result"
+        )
     initial_findings = _stored_review_findings(
         remediation_binding.get("initial_findings")
     )
@@ -331,6 +370,7 @@ def _build_report_bundle(
     program_revision: int,
     increment_id: str,
     remediation_binding: dict[str, object] | None = None,
+    product_result: dict[str, object] | None = None,
 ) -> tuple[dict[str, object], ReviewPacket]:
     raw_values, current_reports, current_findings = _load_current_report_inputs(
         workspace,
@@ -341,7 +381,14 @@ def _build_report_bundle(
         increment_id,
     )
     reports, findings = _reconciled_review_history(
-        remediation_binding, current_reports, current_findings
+        remediation_binding,
+        current_reports,
+        current_findings,
+        expected_schema=(
+            REVIEW_REMEDIATION_SCHEMA_V2
+            if product_result is not None
+            else REVIEW_REMEDIATION_SCHEMA
+        ),
     )
 
     architecture = raw_values["architecture"]
@@ -394,7 +441,11 @@ def _build_report_bundle(
         for item in reports
     )
     packet = ReviewPacket(
-        schema_version=REVIEW_PACKET_SCHEMA,
+        schema_version=(
+            REVIEW_PACKET_SCHEMA_V2
+            if product_result is not None
+            else REVIEW_PACKET_SCHEMA
+        ),
         candidate_sha256=candidate_sha256,
         identity_and_outcome=(f"reviewed candidate {candidate_sha256}",),
         changes_and_rationale=tuple(f"reviewed {path}" for path in product_paths),
@@ -428,7 +479,11 @@ def _build_report_bundle(
         ),
     )
     bundle = {
-        "schema_version": REVIEW_EVIDENCE_SCHEMA,
+        "schema_version": (
+            REVIEW_EVIDENCE_SCHEMA_V2
+            if product_result is not None
+            else REVIEW_EVIDENCE_SCHEMA
+        ),
         "risk_predicates": [asdict(item) for item in predicates],
         "reports": [asdict(item) for item in reports],
         "findings": [asdict(item) for item in findings],
@@ -443,6 +498,8 @@ def _build_report_bundle(
         "final_verification": asdict(verification),
         "review_packet": asdict(packet),
     }
+    if product_result is not None:
+        bundle["product_result"] = product_result
     return bundle, packet
 
 
@@ -457,7 +514,10 @@ def _review_workspace_context(
         root, manifest, str(status["current_increment_id"])
     )
     plan_markdown = paths["plan"].read_text(encoding="utf-8")
-    file_map = parse_exact_file_map(plan_markdown)
+    try:
+        file_map = parse_exact_file_map(plan_markdown)
+    except ValueError:
+        file_map = parse_exact_file_map_v2(plan_markdown)
     workspace = Path(inspection.observation.path).resolve()
     review_outputs = tuple(
         paths[key].resolve(strict=False).relative_to(workspace).as_posix()
@@ -472,12 +532,34 @@ def _review_workspace_context(
     baseline_value, baseline_issues = load_json_object(paths["baseline"])
     if baseline_value is None:
         raise ValueError("; ".join(baseline_issues))
-    baseline = execution_baseline_from_value(baseline_value)
-    increment_state = assessment_state or str(status["current_increment_state"])
-    assessment = validate_execution_workspace(
-        root, baseline, inspection,
-        increment_state=increment_state,
+    is_v2 = (
+        isinstance(baseline_value, dict)
+        and baseline_value.get("schema_version")
+        == "implementation-execution-baseline/v2"
     )
+    baseline = (
+        execution_baseline_v2_from_value(baseline_value)
+        if is_v2
+        else execution_baseline_from_value(baseline_value)
+    )
+    increment_state = assessment_state or str(status["current_increment_state"])
+    if is_v2:
+        protected_paths, protected_identities = descriptor_protection_context(
+            Path(inspection.observation.path), program_root=root, inspection=inspection
+        )
+        assessment = validate_execution_workspace_v2(
+            root,
+            baseline,
+            inspection,
+            increment_state=increment_state,
+            protected_paths=protected_paths,
+            protected_identities=protected_identities,
+        )
+    else:
+        assessment = validate_execution_workspace(
+            root, baseline, inspection,
+            increment_state=increment_state,
+        )
     if not assessment.valid:
         raise ValueError("; ".join(assessment.issues))
     return paths, raw_paths, assessment
@@ -553,20 +635,26 @@ def build_review_remediation(
         observation,
         assessment_state=None,
     )
+    is_v2 = hasattr(assessment, "product_states")
+    product_result = (
+        product_path_states_v2_value(assessment.product_states) if is_v2 else None
+    )
+    candidate_sha256 = assessment.product_states.sha256 if is_v2 else assessment.product_delta_sha256
     state = status.get("current_increment_state")
     if state == "remediating":
         binding = status.get("review_remediation_binding")
-        initial_product_delta_sha256 = (
-            binding.get("initial_product_delta_sha256")
+        initial_product_sha256 = (
+            binding.get("initial_product_result_sha256" if is_v2 else "initial_product_delta_sha256")
             if isinstance(binding, dict)
             else None
         )
         if (
             not isinstance(binding, dict)
-            or binding.get("schema_version") != REVIEW_REMEDIATION_SCHEMA
+            or binding.get("schema_version")
+            != (REVIEW_REMEDIATION_SCHEMA_V2 if is_v2 else REVIEW_REMEDIATION_SCHEMA)
             or not isinstance(binding.get("unresolved_finding_ids"), list)
-            or not isinstance(initial_product_delta_sha256, str)
-            or re.fullmatch(r"[0-9a-f]{64}", initial_product_delta_sha256)
+            or not isinstance(initial_product_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", initial_product_sha256)
             is None
         ):
             raise ValueError("review-remediation-recovery-required: status binding differs")
@@ -576,7 +664,7 @@ def build_review_remediation(
         return ReviewRemediationCandidate(
             remediating_status=status,
             remediating_status_bytes=_canonical_json_bytes(status),
-            product_delta_sha256=initial_product_delta_sha256,
+            product_delta_sha256=initial_product_sha256,
             unresolved_finding_ids=tuple(binding["unresolved_finding_ids"]),
         )
     if state != "reviewing":
@@ -585,18 +673,25 @@ def build_review_remediation(
     if state_issues:
         raise ValueError("; ".join(state_issues))
     transition = status.get("execution_transition_binding")
-    if (
+    if is_v2:
+        if (
+            not isinstance(transition, dict)
+            or transition.get("target_increment_state") != "reviewing"
+            or transition.get("product_path_states_sha256") != candidate_sha256
+            or transition.get("product_path_states") != product_result
+        ):
+            raise ValueError("review product path states do not match reviewing status")
+    elif (
         not isinstance(transition, dict)
         or transition.get("target_increment_state") != "reviewing"
-        or transition.get("product_delta_sha256")
-        != assessment.product_delta_sha256
+        or transition.get("product_delta_sha256") != candidate_sha256
     ):
         raise ValueError("review product delta does not match reviewing status")
     workspace = Path(normalized.path)
     raw_values, reports, findings = _load_current_report_inputs(
         workspace,
         raw_paths,
-        assessment.product_delta_sha256,
+        candidate_sha256,
         str(status["program_id"]),
         int(status["program_revision"]),
         str(status["current_increment_id"]),
@@ -635,15 +730,17 @@ def build_review_remediation(
         for report in reports
     ]
     binding = {
-        "schema_version": REVIEW_REMEDIATION_SCHEMA,
+        "schema_version": REVIEW_REMEDIATION_SCHEMA_V2 if is_v2 else REVIEW_REMEDIATION_SCHEMA,
         "prior_status_sha256": prior_sha256,
         "prior_status_sequence": prior_sequence,
-        "initial_product_delta_sha256": assessment.product_delta_sha256,
+        ("initial_product_result_sha256" if is_v2 else "initial_product_delta_sha256"): candidate_sha256,
         "initial_reports": [asdict(report) for report in reports],
         "initial_findings": [asdict(finding) for finding in findings],
         "raw_report_bindings": raw_bindings,
         "unresolved_finding_ids": list(unresolved),
     }
+    if is_v2:
+        binding["initial_product_result"] = product_result
     authorization_id = status["execution_authorization"]["authorization_id"]
     event_id = _identifier("review-remediation", binding)
     remediating = dict(status)
@@ -661,8 +758,8 @@ def build_review_remediation(
             "authorization_id": authorization_id,
         },
         review_binding={
-            "schema_version": REVIEW_REMEDIATION_SCHEMA,
-            "candidate_sha256": assessment.product_delta_sha256,
+            "schema_version": REVIEW_REMEDIATION_SCHEMA_V2 if is_v2 else REVIEW_REMEDIATION_SCHEMA,
+            "candidate_sha256": candidate_sha256,
             "unresolved_material_findings": len(unresolved),
             "finding_ids": list(unresolved),
         },
@@ -671,7 +768,7 @@ def build_review_remediation(
     return ReviewRemediationCandidate(
         remediating_status=remediating,
         remediating_status_bytes=_canonical_json_bytes(remediating),
-        product_delta_sha256=assessment.product_delta_sha256,
+        product_delta_sha256=candidate_sha256,
         unresolved_finding_ids=unresolved,
     )
 
@@ -727,28 +824,42 @@ def return_review_to_reviewing(
     ) = _review_transaction_context(
         root, observation, assessment_state="reviewing"
     )
+    is_v2 = hasattr(assessment, "product_states")
+    product_result = (
+        product_path_states_v2_value(assessment.product_states) if is_v2 else None
+    )
+    candidate_sha256 = assessment.product_states.sha256 if is_v2 else assessment.product_delta_sha256
     binding = status.get("review_remediation_binding")
     if not isinstance(binding, dict) or binding.get(
         "schema_version"
-    ) != REVIEW_REMEDIATION_SCHEMA:
+    ) != (REVIEW_REMEDIATION_SCHEMA_V2 if is_v2 else REVIEW_REMEDIATION_SCHEMA):
         raise ValueError("review remediation binding is required")
     unresolved = tuple(str(item) for item in binding["unresolved_finding_ids"])
     state = status.get("current_increment_state")
     transition = status.get("execution_transition_binding")
-    if (
-        state == "reviewing"
-        and isinstance(transition, dict)
+    transition_matches = (
+        isinstance(transition, dict)
         and transition.get("prior_increment_state") == "remediating"
-        and transition.get("product_delta_sha256")
-        == assessment.product_delta_sha256
-    ):
+        and (
+            (
+                is_v2
+                and transition.get("product_path_states_sha256") == candidate_sha256
+                and transition.get("product_path_states") == product_result
+            )
+            or (
+                not is_v2
+                and transition.get("product_delta_sha256") == candidate_sha256
+            )
+        )
+    )
+    if state == "reviewing" and transition_matches:
         state_issues = validate_state_authority(root, normalized)
         if state_issues:
             raise ValueError("; ".join(state_issues))
         return ReviewRemediationReceipt(
             increment_state="reviewing",
             status_sha256=sha256_file(status_path),
-            product_delta_sha256=assessment.product_delta_sha256,
+            product_delta_sha256=candidate_sha256,
             unresolved_finding_ids=unresolved,
             recovered=True,
         )
@@ -757,16 +868,24 @@ def return_review_to_reviewing(
     state_issues = validate_state_authority(root, normalized)
     if state_issues:
         raise ValueError("; ".join(state_issues))
-    product_paths = tuple(str(item["path"]) for item in assessment.product_delta)
+    product_paths = tuple(
+        str(item["path"])
+        for item in (
+            product_result["ordered_path_states"]
+            if is_v2
+            else assessment.product_delta
+        )
+    )
     bundle, packet = _build_report_bundle(
         Path(normalized.path),
         raw_paths,
-        assessment.product_delta_sha256,
+        candidate_sha256,
         product_paths,
         str(status["program_id"]),
         int(status["program_revision"]),
         str(status["current_increment_id"]),
         binding,
+        product_result,
     )
     packet_text = render_review_packet(packet)
     review_issues = validate_review_bundle(bundle, packet_text)
@@ -783,7 +902,7 @@ def return_review_to_reviewing(
         "prior_status_sha256": prior_sha256,
         "prior_increment_state": "remediating",
         "target_increment_state": "reviewing",
-        "product_delta_sha256": assessment.product_delta_sha256,
+        ("product_path_states_sha256" if is_v2 else "product_delta_sha256"): candidate_sha256,
         "authorization_id": authorization_id,
         "review_remediation_sha256": remediation_sha256,
     }
@@ -803,18 +922,28 @@ def return_review_to_reviewing(
             "authorization_id": authorization_id,
         },
         execution_transition_binding={
-            "schema_version": "implementation-execution-transition/v1",
+            "schema_version": (
+                "implementation-execution-transition/v2" if is_v2
+                else "implementation-execution-transition/v1"
+            ),
             "event_id": event_id,
             "authorization_id": authorization_id,
             "prior_increment_state": "remediating",
             "target_increment_state": "reviewing",
             "prior_status_sha256": prior_sha256,
-            "product_delta_sha256": assessment.product_delta_sha256,
+            **(
+                {
+                    "product_path_states_sha256": candidate_sha256,
+                    "product_path_states": product_result,
+                }
+                if is_v2
+                else {"product_delta_sha256": candidate_sha256}
+            ),
             "review_remediation_sha256": remediation_sha256,
         },
         review_binding={
-            "schema_version": REVIEW_REMEDIATION_SCHEMA,
-            "candidate_sha256": assessment.product_delta_sha256,
+            "schema_version": REVIEW_REMEDIATION_SCHEMA_V2 if is_v2 else REVIEW_REMEDIATION_SCHEMA,
+            "candidate_sha256": candidate_sha256,
             "unresolved_material_findings": 0,
             "finding_ids": list(unresolved),
         },
@@ -827,7 +956,7 @@ def return_review_to_reviewing(
     return ReviewRemediationReceipt(
         increment_state="reviewing",
         status_sha256=sha256_file(status_path),
-        product_delta_sha256=assessment.product_delta_sha256,
+        product_delta_sha256=candidate_sha256,
         unresolved_finding_ids=unresolved,
         recovered=False,
     )
@@ -870,17 +999,35 @@ def build_review_preparation(
     )
     workspace = Path(normalized.path)
     transition = status.get("execution_transition_binding")
-    if (
-        not isinstance(transition, dict)
-        or transition.get("target_increment_state") != "reviewing"
-        or transition.get("product_delta_sha256") != assessment.product_delta_sha256
-    ):
-        raise ValueError("review product delta does not match reviewing status")
-    product_paths = tuple(str(item["path"]) for item in assessment.product_delta)
+    is_v2_assessment = hasattr(assessment, "product_states")
+    if is_v2_assessment:
+        product_result = product_path_states_v2_value(assessment.product_states)
+        product_candidate_sha256 = assessment.product_states.sha256
+        if (
+            not isinstance(transition, dict)
+            or transition.get("target_increment_state") != "reviewing"
+            or transition.get("product_path_states_sha256")
+            != product_candidate_sha256
+            or transition.get("product_path_states") != product_result
+        ):
+            raise ValueError("review product path states do not match reviewing status")
+        product_paths = tuple(
+            str(item["path"]) for item in product_result["ordered_path_states"]
+        )
+    else:
+        if (
+            not isinstance(transition, dict)
+            or transition.get("target_increment_state") != "reviewing"
+            or transition.get("product_delta_sha256") != assessment.product_delta_sha256
+        ):
+            raise ValueError("review product delta does not match reviewing status")
+        product_result = None
+        product_candidate_sha256 = assessment.product_delta_sha256
+        product_paths = tuple(str(item["path"]) for item in assessment.product_delta)
     bundle, packet = _build_report_bundle(
         workspace,
         raw_paths,
-        assessment.product_delta_sha256,
+        product_candidate_sha256,
         product_paths,
         str(status["program_id"]),
         int(status["program_revision"]),
@@ -890,6 +1037,7 @@ def build_review_preparation(
             if isinstance(status.get("review_remediation_binding"), dict)
             else None
         ),
+        product_result,
     )
     packet_text = render_review_packet(packet)
     review_issues = validate_review_bundle(bundle, packet_text)
@@ -899,17 +1047,26 @@ def build_review_preparation(
     packet_bytes = packet_text.encode("utf-8")
     evidence_sha256 = _sha256_bytes(evidence_bytes)
     packet_sha256 = _sha256_bytes(packet_bytes)
+    preparation_schema = (
+        REVIEW_PREPARATION_SCHEMA_V2 if is_v2_assessment else REVIEW_PREPARATION_SCHEMA
+    )
     seed = {
-        "schema_version": REVIEW_PREPARATION_SCHEMA,
+        "schema_version": preparation_schema,
         "program_id": status["program_id"],
         "program_revision": status["program_revision"],
         "increment_id": increment_id,
         "prior_status_sha256": prior_sha256,
         "prior_status_sequence": prior_sequence,
-        "product_delta_sha256": assessment.product_delta_sha256,
         "evidence_sha256": evidence_sha256,
         "packet_sha256": packet_sha256,
     }
+    if is_v2_assessment:
+        seed.update(
+            product_result_schema_version=product_result["schema_version"],
+            product_result_sha256=product_candidate_sha256,
+        )
+    else:
+        seed["product_delta_sha256"] = product_candidate_sha256
     binding = {
         **seed,
         "evidence_path": paths["evidence"].relative_to(root).as_posix(),
@@ -935,12 +1092,28 @@ def build_review_preparation(
         review_evidence_binding={
             "path": binding["evidence_path"],
             "sha256": evidence_sha256,
-            "candidate_sha256": assessment.product_delta_sha256,
+            "candidate_sha256": product_candidate_sha256,
+            **(
+                {
+                    "product_result_schema_version": product_result["schema_version"],
+                    "product_result_sha256": product_candidate_sha256,
+                }
+                if is_v2_assessment
+                else {}
+            ),
         },
         review_packet_binding={
             "path": binding["packet_path"],
             "sha256": packet_sha256,
-            "candidate_sha256": assessment.product_delta_sha256,
+            "candidate_sha256": product_candidate_sha256,
+            **(
+                {
+                    "product_result_schema_version": product_result["schema_version"],
+                    "product_result_sha256": product_candidate_sha256,
+                }
+                if is_v2_assessment
+                else {}
+            ),
         },
     )
     verified_bytes = _canonical_json_bytes(verified)

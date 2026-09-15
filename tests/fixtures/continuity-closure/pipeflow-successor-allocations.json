@@ -1,0 +1,41 @@
+{
+  "increments": [
+    {"increment_id": "PRESERVED-BEHAVIOR", "depends_on": []},
+    {"increment_id": "ESM-TOOLCHAIN", "depends_on": ["PRESERVED-BEHAVIOR"]},
+    {"increment_id": "OPAQUE-FLOW-CORE", "depends_on": ["ESM-TOOLCHAIN"]},
+    {"increment_id": "LAWFUL-COMPOSITION", "depends_on": ["OPAQUE-FLOW-CORE"]},
+    {"increment_id": "TYPED-CONTROL", "depends_on": ["LAWFUL-COMPOSITION"]},
+    {"increment_id": "SERVICE-REQUIREMENTS", "depends_on": ["TYPED-CONTROL"]},
+    {"increment_id": "STRUCTURED-BOUNDARIES", "depends_on": ["SERVICE-REQUIREMENTS"]},
+    {"increment_id": "LEGACY-CUTOVER", "depends_on": ["STRUCTURED-BOUNDARIES"]},
+    {"increment_id": "RELEASE-ARTIFACT", "depends_on": ["LEGACY-CUTOVER"]}
+  ],
+  "allocation_groups": [
+    {"positions": [1], "count": 9},
+    {"positions": [1,2,3,4,5,6,7,8,9], "count": 33},
+    {"positions": [1,8,9], "count": 2},
+    {"positions": [2], "count": 16},
+    {"positions": [2,3], "count": 2},
+    {"positions": [2,3,4,5,6,7], "count": 1},
+    {"positions": [2,3,4,5,6,7,8], "count": 1},
+    {"positions": [2,3,4,5,6,7,8,9], "count": 1},
+    {"positions": [2,7,9], "count": 1},
+    {"positions": [2,8,9], "count": 1},
+    {"positions": [3], "count": 33},
+    {"positions": [3,4,5,6,7,8,9], "count": 7},
+    {"positions": [3,5,7], "count": 4},
+    {"positions": [4], "count": 79},
+    {"positions": [5], "count": 54},
+    {"positions": [5,7], "count": 17},
+    {"positions": [6], "count": 32},
+    {"positions": [7], "count": 57},
+    {"positions": [8], "count": 108},
+    {"positions": [8,9], "count": 31},
+    {"positions": [9], "count": 81}
+  ],
+  "named_sparse_requirements": [
+    "LEGACY-INVENTORY-PRESERVES-NAMESPACES",
+    "LEGACY-INVENTORY-IS-SINGLE-AUTHORITY"
+  ],
+  "expected_old_ambiguous_boundaries": [1,2,3,5,7]
+}

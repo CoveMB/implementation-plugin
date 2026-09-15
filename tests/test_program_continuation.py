@@ -210,15 +210,15 @@ class ProgramContinuationTests(unittest.TestCase):
         finally:
             fixture.close()
 
-    def test_unbound_rollover_row_cannot_satisfy_successor_dependency(self) -> None:
+    def test_unbound_rollover_row_cannot_grant_continuation(self) -> None:
         fixture, program_root, observation = awaiting_diff_program(
-            {"ARCHIVE-VERIFY": ("ARCHIVE-BLOCKER",)}
+            {"ARCHIVE-VERIFY": ("ARCHIVE-INDEX",)}
         )
         try:
             acceptance = DIFF.build_diff_acceptance_candidate(
                 program_root, observation
             )
-            self.assertIsNone(
+            self.assertIsNotNone(
                 CONTINUATION.build_continuation_extension(
                     program_root, acceptance, observation
                 )
@@ -234,10 +234,12 @@ class ProgramContinuationTests(unittest.TestCase):
                 encoding="utf-8",
             )
             before = repository_snapshot(program_root)
-            with self.assertRaisesRegex(ValueError, "unbound rollover history"):
+            self.assertIsNone(
                 CONTINUATION.build_continuation_extension(
                     program_root, acceptance, observation
                 )
+            )
+            self.assertIn("unbound rollover history", CONTINUATION.continuation_unavailability_reason(program_root, acceptance))
             self.assertEqual(repository_snapshot(program_root), before)
         finally:
             fixture.close()

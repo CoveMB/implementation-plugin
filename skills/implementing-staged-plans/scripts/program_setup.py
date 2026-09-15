@@ -22,12 +22,28 @@ from state_authority import atomic_append_json_line
 
 MANIFEST_SCHEMA_V3 = "implementation-program-manifest/v3"
 STATUS_SCHEMA_V3 = "implementation-program-status/v3"
-SETUP_SEMANTICS_SCHEMA = "implementation-program-setup-semantics/v1"
-OPERATION_ENVELOPE_SCHEMA = "implementation-operation-envelope/v1"
-SETUP_RECAP_SCHEMA = "implementation-program-setup-recap/v1"
-SETUP_RECAP_CHECKPOINT_SCHEMA = "implementation-program-setup-recap-checkpoint/v1"
-SETUP_DECISION_ADAPTER_SCHEMA = "setup-approval-decision/v1"
-SETUP_ACTIVATION_SCHEMA = "setup-activation-decision/v1"
+SETUP_SEMANTICS_SCHEMA_V1 = "implementation-program-setup-semantics/v1"
+SETUP_SEMANTICS_SCHEMA_V2 = "implementation-program-setup-semantics/v2"
+OPERATION_ENVELOPE_SCHEMA_V1 = "implementation-operation-envelope/v1"
+OPERATION_ENVELOPE_SCHEMA_V2 = "implementation-operation-envelope/v2"
+SETUP_RECAP_SCHEMA_V1 = "implementation-program-setup-recap/v1"
+SETUP_RECAP_SCHEMA_V2 = "implementation-program-setup-recap/v2"
+SETUP_RECAP_CHECKPOINT_SCHEMA_V1 = (
+    "implementation-program-setup-recap-checkpoint/v1"
+)
+SETUP_RECAP_CHECKPOINT_SCHEMA_V2 = (
+    "implementation-program-setup-recap-checkpoint/v2"
+)
+SETUP_DECISION_ADAPTER_SCHEMA_V1 = "setup-approval-decision/v1"
+SETUP_DECISION_ADAPTER_SCHEMA_V2 = "setup-approval-decision/v2"
+SETUP_ACTIVATION_SCHEMA_V1 = "setup-activation-decision/v1"
+SETUP_ACTIVATION_SCHEMA_V2 = "setup-activation-decision/v2"
+SETUP_SEMANTICS_SCHEMA = SETUP_SEMANTICS_SCHEMA_V1
+OPERATION_ENVELOPE_SCHEMA = OPERATION_ENVELOPE_SCHEMA_V1
+SETUP_RECAP_SCHEMA = SETUP_RECAP_SCHEMA_V1
+SETUP_RECAP_CHECKPOINT_SCHEMA = SETUP_RECAP_CHECKPOINT_SCHEMA_V1
+SETUP_DECISION_ADAPTER_SCHEMA = SETUP_DECISION_ADAPTER_SCHEMA_V1
+SETUP_ACTIVATION_SCHEMA = SETUP_ACTIVATION_SCHEMA_V1
 INCREMENT_START_INTENT_SCHEMA = "increment-start-intent/v1"
 SOURCE_GATE_DEFINITION_SCHEMA = "source-gate-definition/v1"
 SOURCE_GATE_RECAP_SCHEMA = "source-gate-recap/v1"
@@ -35,7 +51,30 @@ SOURCE_GATE_DECISION_ADAPTER_SCHEMA = "source-gate-decision-adapter/v1"
 SOURCE_GATE_DECISION_SCHEMA = "source-gate-decision/v1"
 SOURCE_GATE_SATISFACTION_SCHEMA = "source-gate-satisfaction/v1"
 DIRECT_USER_PROVENANCE = "direct-user-message"
-SUPPORTED_OPERATIONS = ("Create", "Modify", "Preserve")
+SUPPORTED_OPERATIONS_V1 = ("Create", "Modify", "Preserve")
+SUPPORTED_OPERATIONS_V2 = ("Create", "Modify", "Delete", "Preserve")
+SUPPORTED_OPERATIONS = SUPPORTED_OPERATIONS_V1
+DELETE_CONTENT_DISPOSITIONS = frozenset(
+    {"migrated", "obsolete", "intentional-discard"}
+)
+_SETUP_FAMILY_CONTRACTS = {
+    (SETUP_SEMANTICS_SCHEMA_V1, OPERATION_ENVELOPE_SCHEMA_V1): {
+        "recap_schema": SETUP_RECAP_SCHEMA_V1,
+        "checkpoint_schema": SETUP_RECAP_CHECKPOINT_SCHEMA_V1,
+        "adapter_schema": SETUP_DECISION_ADAPTER_SCHEMA_V1,
+        "activation_schema": SETUP_ACTIVATION_SCHEMA_V1,
+        "renderer_version": 1,
+        "supported_operations": SUPPORTED_OPERATIONS_V1,
+    },
+    (SETUP_SEMANTICS_SCHEMA_V2, OPERATION_ENVELOPE_SCHEMA_V2): {
+        "recap_schema": SETUP_RECAP_SCHEMA_V2,
+        "checkpoint_schema": SETUP_RECAP_CHECKPOINT_SCHEMA_V2,
+        "adapter_schema": SETUP_DECISION_ADAPTER_SCHEMA_V2,
+        "activation_schema": SETUP_ACTIVATION_SCHEMA_V2,
+        "renderer_version": 2,
+        "supported_operations": SUPPORTED_OPERATIONS_V2,
+    },
+}
 SUPPORTED_GATE_TRIGGERS = (
     "before-program-activation",
     "before-increment-start",
@@ -163,6 +202,34 @@ def _exact_fields(value: object, expected: Sequence[str], label: str) -> list[st
         f"{label} contains unsupported field {field}" for field in sorted(actual - wanted)
     )
     return issues
+
+
+def setup_family_contract(
+    manifest: Mapping[str, object],
+) -> Mapping[str, object]:
+    """Select one setup family solely from its exact semantics/envelope pair."""
+    semantics = manifest.get("setup_semantics")
+    envelope = (
+        semantics.get("operation_envelope")
+        if isinstance(semantics, Mapping)
+        else None
+    )
+    setup_schema = (
+        semantics.get("schema_version") if isinstance(semantics, Mapping) else None
+    )
+    envelope_schema = (
+        envelope.get("schema_version") if isinstance(envelope, Mapping) else None
+    )
+    contract = (
+        _SETUP_FAMILY_CONTRACTS.get((setup_schema, envelope_schema))
+        if isinstance(setup_schema, str) and isinstance(envelope_schema, str)
+        else None
+    )
+    if contract is None:
+        raise ValueError(
+            "setup semantics and operation envelope schemas must be an exact supported pair"
+        )
+    return contract
 
 
 def _safe_relative_path(value: object) -> bool:
@@ -358,8 +425,11 @@ def validate_setup_semantics(program_root: Path) -> list[str]:
     issues.extend(_exact_fields(semantics, expected_semantic_fields, "setup_semantics"))
     if not isinstance(semantics, dict):
         return sorted(set(issues))
-    if semantics.get("schema_version") != SETUP_SEMANTICS_SCHEMA:
-        issues.append("setup_semantics schema_version mismatch")
+    try:
+        family = setup_family_contract(manifest)
+    except ValueError as error:
+        family = None
+        issues.append(str(error))
     semantic_identity = value_sha256(semantics)
     if manifest.get("setup_semantics_sha256") != semantic_identity:
         issues.append("setup_semantics digest mismatch")
@@ -535,57 +605,13 @@ def validate_setup_semantics(program_root: Path) -> list[str]:
                     issues.append(f"{label} {field} must be a suitable string list")
             if not _is_text(increment.get("intended_outcome")):
                 issues.append(f"{label} intended_outcome is required")
-        if len(increment_ids) != len(set(increment_ids)):
-            issues.append("setup increment IDs must be unique")
-        positions = {
-            increment_id: index for index, increment_id in enumerate(increment_ids)
-        }
-        dependency_graph_invalid = False
-        for index, increment in enumerate(increments):
-            dependencies = (
-                increment.get("depends_on") if isinstance(increment, dict) else None
-            )
-            if not _text_list(dependencies):
-                dependency_graph_invalid = True
-                continue
-            if len(dependencies) != len(set(dependencies)) or any(
-                dependency not in positions or positions[dependency] >= index
-                for dependency in dependencies
-            ):
-                dependency_graph_invalid = True
-        if dependency_graph_invalid:
-            issues.append("setup increment dependency graph is invalid")
-    if semantics.get("first_increment_id") not in increment_ids:
-        issues.append("setup first increment must be allocated")
-    atomic_requirements = (
-        traceability.get("atomic_requirements")
-        if isinstance(traceability, dict)
-        else None
-    )
-    if isinstance(atomic_requirements, list):
-        traceability_increment_ids = {
-            increment_id
-            for requirement in atomic_requirements
-            if isinstance(requirement, dict)
-            for increment_id in requirement.get("assigned_increments", [])
-            if isinstance(increment_id, str)
-        }
-        if set(increment_ids) != traceability_increment_ids:
-            issues.append("setup increments do not cover exact traceability allocation")
-        for increment in increments if isinstance(increments, list) else []:
-            if not isinstance(increment, dict):
-                continue
-            expected_requirement_ids = [
-                str(requirement.get("id"))
-                for requirement in atomic_requirements
-                if isinstance(requirement, dict)
-                and increment.get("increment_id")
-                in requirement.get("assigned_increments", [])
-            ]
-            if increment.get("requirement_ids") != expected_requirement_ids:
-                issues.append(
-                    f"setup increment {increment.get('increment_id')} requirement allocation mismatch"
-                )
+    from program_authority import validated_increment_schedule
+
+    try:
+        validated_increment_schedule(manifest, traceability.get("atomic_requirements"))
+    except ValueError as error:
+        issues.append(str(error))
+
     for index, definition in enumerate(
         manifest.get("source_gate_definitions", [])
         if isinstance(manifest.get("source_gate_definitions"), list)
@@ -628,40 +654,56 @@ def validate_setup_semantics(program_root: Path) -> list[str]:
         )
     )
     if isinstance(envelope, dict):
-        if envelope.get("schema_version") != OPERATION_ENVELOPE_SCHEMA:
-            issues.append("operation envelope schema mismatch")
-        if envelope.get("supported_operations") != list(SUPPORTED_OPERATIONS):
-            issues.append("operation envelope must support exactly Create/Modify/Preserve")
+        supported_operations = (
+            family.get("supported_operations") if family is not None else ()
+        )
+        if envelope.get("supported_operations") != list(supported_operations):
+            expected_operations = "/".join(str(item) for item in supported_operations)
+            issues.append(
+                "operation envelope must support exactly " + expected_operations
+            )
         allocations = envelope.get("allocations")
         if not isinstance(allocations, list) or not allocations:
             issues.append("operation envelope allocations must be non-empty")
         else:
             seen_allocations: set[tuple[str, str, str]] = set()
+            allocation_values: list[dict[str, object]] = []
+            base_allocation_fields = (
+                "kind",
+                "path",
+                "operation",
+                "increment_ids",
+                "inclusions",
+                "exclusions",
+                "ownership",
+                "protected",
+                "user_work",
+                "file_kind",
+                "link_kind",
+                "mode",
+                "collision",
+            )
             for index, allocation in enumerate(allocations):
                 label = f"operation allocation {index}"
+                is_delete = (
+                    allocation.get("operation") == "Delete"
+                    if isinstance(allocation, dict)
+                    else False
+                )
                 expected = (
-                    "kind",
-                    "path",
-                    "operation",
-                    "increment_ids",
-                    "inclusions",
-                    "exclusions",
-                    "ownership",
-                    "protected",
-                    "user_work",
-                    "file_kind",
-                    "link_kind",
-                    "mode",
-                    "collision",
+                    (*base_allocation_fields, "accepted_state", "content_disposition", "rationale")
+                    if is_delete and supported_operations == SUPPORTED_OPERATIONS_V2
+                    else base_allocation_fields
                 )
                 issues.extend(_exact_fields(allocation, expected, label))
                 if not isinstance(allocation, dict):
                     continue
+                allocation_values.append(allocation)
                 if allocation.get("kind") not in {"exact-path", "bounded-path-class"}:
                     issues.append(f"{label} kind is unsupported")
                 if not _safe_relative_path(allocation.get("path")):
                     issues.append(f"{label} path is unsafe")
-                if allocation.get("operation") not in SUPPORTED_OPERATIONS:
+                if allocation.get("operation") not in supported_operations:
                     issues.append(f"{label} operation is unsupported")
                 allocated = allocation.get("increment_ids")
                 if not _text_list(allocated, nonempty=True) or any(
@@ -685,6 +727,78 @@ def validate_setup_semantics(program_root: Path) -> list[str]:
                 if key in seen_allocations:
                     issues.append("operation envelope contains duplicate allocation")
                 seen_allocations.add(key)
+                if is_delete and supported_operations == SUPPORTED_OPERATIONS_V2:
+                    if allocation.get("kind") != "exact-path":
+                        issues.append("Delete allocation kind must be exact-path")
+                    if allocation.get("accepted_state") != "absent":
+                        issues.append(
+                            "Delete allocation accepted_state must be absent"
+                        )
+                    if (
+                        allocation.get("content_disposition")
+                        not in DELETE_CONTENT_DISPOSITIONS
+                    ):
+                        issues.append(
+                            "Delete allocation content_disposition is unsupported"
+                        )
+                    if not _is_text(allocation.get("rationale")):
+                        issues.append("Delete allocation rationale is required")
+                    if allocation.get("ownership") != "program":
+                        issues.append("Delete allocation ownership must be program")
+                    if allocation.get("collision") not in {
+                        "existing",
+                        "accepted-predecessor",
+                    }:
+                        issues.append("Delete allocation collision is unsupported")
+
+            strict_predecessors: dict[str, set[str]] = {}
+            for increment in increments if isinstance(increments, list) else []:
+                if not isinstance(increment, dict):
+                    continue
+                increment_id = increment.get("increment_id")
+                dependencies = increment.get("depends_on")
+                if not isinstance(increment_id, str) or not isinstance(
+                    dependencies, list
+                ):
+                    continue
+                inherited: set[str] = set()
+                for dependency in dependencies:
+                    if isinstance(dependency, str):
+                        inherited.add(dependency)
+                        inherited.update(strict_predecessors.get(dependency, set()))
+                strict_predecessors[increment_id] = inherited
+            create_allocations = [
+                allocation
+                for allocation in allocation_values
+                if allocation.get("operation") == "Create"
+                and allocation.get("kind") == "exact-path"
+                and _text_list(allocation.get("increment_ids"), nonempty=True)
+            ]
+            for allocation in allocation_values:
+                if not (
+                    allocation.get("operation") == "Delete"
+                    and allocation.get("collision") == "accepted-predecessor"
+                    and supported_operations == SUPPORTED_OPERATIONS_V2
+                ):
+                    continue
+                delete_increment_ids = allocation.get("increment_ids")
+                has_create_predecessor = isinstance(delete_increment_ids, list) and all(
+                    any(
+                        create.get("path") == allocation.get("path")
+                        and any(
+                            create_increment_id
+                            in strict_predecessors.get(str(delete_increment_id), set())
+                            for create_increment_id in create.get("increment_ids", [])
+                            if isinstance(create_increment_id, str)
+                        )
+                        for create in create_allocations
+                    )
+                    for delete_increment_id in delete_increment_ids
+                )
+                if not has_create_predecessor:
+                    issues.append(
+                        "Delete allocation accepted-predecessor lacks a same-path Create in a strict predecessor"
+                    )
 
     for field in ("protections", "exclusions", "external_boundaries", "material_risks"):
         if not _text_list(semantics.get(field)):
@@ -815,6 +929,13 @@ def render_setup_recap(program_root: Path) -> str:
             if allocation["mode"] is not None
             else "not applicable"
         )
+        delete_disposition = (
+            f"; accepted state: {allocation['accepted_state']}; "
+            f"content disposition: {allocation['content_disposition']}; "
+            f"rationale: {allocation['rationale']}"
+            if allocation["operation"] == "Delete"
+            else ""
+        )
         lines.append(
             f"- {allocation['operation']} {scope_label} for "
             + ", ".join(allocation["increment_ids"])
@@ -823,6 +944,7 @@ def render_setup_recap(program_root: Path) -> str:
             + f"mode: {mode}; inclusions: {inclusions}; exclusions: {exclusions}; "
             + f"protected: {'yes' if allocation['protected'] else 'no'}; "
             + f"user work: {'yes' if allocation['user_work'] else 'no'}"
+            + delete_disposition
         )
     lines.extend(["", "Source-defined gates:"])
     definitions = manifest["source_gate_definitions"]
@@ -866,11 +988,12 @@ def setup_recap_checkpoint(
 ) -> dict[str, object]:
     root = Path(program_root)
     manifest = _load_manifest(root)
+    family = setup_family_contract(manifest)
     rendered = render_setup_recap(root) if recap is None else recap
     value: dict[str, object] = {
-        "schema_version": SETUP_RECAP_CHECKPOINT_SCHEMA,
-        "renderer_schema": SETUP_RECAP_SCHEMA,
-        "renderer_version": 1,
+        "schema_version": family["checkpoint_schema"],
+        "renderer_schema": family["recap_schema"],
+        "renderer_version": family["renderer_version"],
         "semantic_decision_identity": setup_semantic_identity(manifest),
         "presented_integrity_identity": _presented_integrity(root, manifest),
         "recap_sha256": _bytes_sha256(rendered.encode("utf-8")),
@@ -901,12 +1024,14 @@ def adapt_setup_decision(
     checkpoint: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     root = Path(program_root)
+    manifest = _load_manifest(root)
+    family = setup_family_contract(manifest)
     expected_checkpoint = setup_recap_checkpoint(root)
     if checkpoint is not None and dict(checkpoint) != expected_checkpoint:
         raise ValueError("stale setup recap checkpoint")
     decision = _classify_direct_answer(response, role, provenance)
     base: dict[str, object] = {
-        "schema_version": SETUP_DECISION_ADAPTER_SCHEMA,
+        "schema_version": family["adapter_schema"],
         "semantic_decision_identity": expected_checkpoint[
             "semantic_decision_identity"
         ],
@@ -941,9 +1066,17 @@ def validate_setup_decision(
         ),
         "setup decision adapter",
     )
-    if decision.get("schema_version") != SETUP_DECISION_ADAPTER_SCHEMA:
+    root = Path(program_root)
+    try:
+        family = setup_family_contract(_load_manifest(root))
+    except ValueError as error:
+        family = None
+        issues.append(str(error))
+    if family is None or decision.get("schema_version") != family.get(
+        "adapter_schema"
+    ):
         issues.append("setup decision adapter schema mismatch")
-    expected_checkpoint = setup_recap_checkpoint(Path(program_root))
+    expected_checkpoint = setup_recap_checkpoint(root)
     if decision.get("recap_checkpoint") != expected_checkpoint:
         issues.append("setup decision recap binding mismatch")
     if decision.get("semantic_decision_identity") != expected_checkpoint.get(
@@ -1259,7 +1392,8 @@ def _setup_activation_record(
     program_root: Path, manifest: Mapping[str, object]
 ) -> tuple[dict[str, object], Path]:
     record, path = _load_role(program_root, manifest, "setup_activation_decision")
-    if record.get("schema_version") != SETUP_ACTIVATION_SCHEMA or not _is_text(
+    expected_schema = setup_family_contract(manifest)["activation_schema"]
+    if record.get("schema_version") != expected_schema or not _is_text(
         record.get("decision_id")
     ):
         raise ValueError("setup-activation decision record is invalid")
@@ -1492,12 +1626,16 @@ def _setup_activation_record_issues(
     decision_id = setup_base.pop("decision_id", None)
     semantics = manifest.get("setup_semantics")
     try:
+        expected_activation_schema = setup_family_contract(manifest)[
+            "activation_schema"
+        ]
         expected_checkpoint = setup_recap_checkpoint(root)
     except ValueError as error:
+        expected_activation_schema = None
         expected_checkpoint = None
         issues.append(str(error))
     if (
-        setup.get("schema_version") != SETUP_ACTIVATION_SCHEMA
+        setup.get("schema_version") != expected_activation_schema
         or setup.get("program_id") != manifest.get("program_id")
         or setup.get("program_revision") != manifest.get("program_revision")
         or setup.get("source_binding") != manifest.get("source_binding")
@@ -1647,10 +1785,13 @@ def inspect_sequence_zero_activation_prefix(
     root = Path(program_root)
     try:
         manifest = _load_manifest(root)
+        setup_family = setup_family_contract(manifest)
         status, status_path = _load_role(root, manifest, "status")
         traceability, _ = _load_role(root, manifest, "traceability")
-        approvals, _ = _load_role(root, manifest, "approvals", json_lines=True)
-        gates, _ = _load_role(
+        approvals, approvals_path = _load_role(
+            root, manifest, "approvals", json_lines=True
+        )
+        gates, gates_path = _load_role(
             root, manifest, "source_gate_decisions", json_lines=True
         )
         grants, _ = _load_role(root, manifest, "increment_grants", json_lines=True)
@@ -1691,6 +1832,19 @@ def inspect_sequence_zero_activation_prefix(
     if setup is None:
         issues.extend(setup_issues)
         return {"state": "invalid", "issues": sorted(set(issues))}
+    if setup_family.get("activation_schema") == SETUP_ACTIVATION_SCHEMA_V2:
+        if setup_path.read_bytes() != canonical_json_bytes(setup):
+            issues.append("setup-v2 activation decision bytes are not canonical")
+        for label, records, ledger_path in (
+            ("approval", approvals, approvals_path),
+            ("source-gate", gates, gates_path),
+        ):
+            expected_bytes = b"".join(
+                canonical_identity_bytes(dict(record)) + b"\n"
+                for record in records
+            )
+            if ledger_path.read_bytes() != expected_bytes:
+                issues.append(f"setup-v2 {label} prefix bytes are not canonical")
     issues.extend(_setup_activation_record_issues(root, manifest, setup))
     if setup.get("proposal_status_sha256") != sha256_file(status_path):
         issues.append("setup-activation proposal status digest mismatch")

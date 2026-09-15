@@ -11,10 +11,10 @@ import re
 import sys
 import tempfile
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Literal
 
 
 MANIFEST_NAME = "manifest.json"
@@ -74,9 +74,12 @@ SETUP_PROGRAM_ONLY_MANIFEST_FIELDS = frozenset(
 SETUP_AUTHORITY_RECORD_SCHEMAS = frozenset(
     {
         "implementation-approval/v2",
+        "implementation-approval/v3",
         "implementation-action-authorization/v2",
+        "implementation-action-authorization/v3",
         "implementation-increment-grant/v2",
         "setup-activation-decision/v1",
+        "setup-activation-decision/v2",
         "source-gate-decision/v1",
     }
 )
@@ -178,6 +181,210 @@ def _string_list(value: object, *, non_empty: bool = False) -> bool:
         and (not non_empty or bool(value))
         and all(_is_non_empty_string(item) for item in value)
     )
+
+
+def _safe_increment_id(value: object) -> bool:
+    return (
+        _is_non_empty_string(value)
+        and value not in {".", ".."}
+        and not any(character in value for character in ("/", "\\", "\0"))
+    )
+
+
+@dataclass(frozen=True)
+class SuccessorResolution:
+    kind: Literal["successor", "terminal", "unavailable"]
+    successor_increment_id: str | None
+    reason: str
+
+    def __post_init__(self) -> None:
+        valid = (
+            self.kind == "successor"
+            and _safe_increment_id(self.successor_increment_id)
+            and self.reason == ""
+        ) or (
+            self.kind == "terminal"
+            and self.successor_increment_id is None
+            and self.reason == ""
+        ) or (
+            self.kind == "unavailable"
+            and self.successor_increment_id is None
+            and _is_non_empty_string(self.reason)
+        )
+        if not valid:
+            raise ValueError("invalid successor resolution")
+
+
+def _validated_requirement_allocations(
+    atomic_requirements: Sequence[Mapping[str, object]],
+) -> dict[str, tuple[str, ...]]:
+    if not isinstance(atomic_requirements, (list, tuple)) or not atomic_requirements:
+        raise ValueError("atomic requirements must be non-empty")
+    allocations: dict[str, tuple[str, ...]] = {}
+    for requirement in atomic_requirements:
+        if not isinstance(requirement, Mapping):
+            raise ValueError("atomic requirement must be an object")
+        requirement_id = requirement.get("id")
+        if not _is_non_empty_string(requirement_id) or requirement_id in allocations:
+            raise ValueError("atomic requirement IDs must be unique non-empty strings")
+        assigned = requirement.get("assigned_increments")
+        if (
+            not isinstance(assigned, list)
+            or not assigned
+            or not all(_safe_increment_id(item) for item in assigned)
+            or len(assigned) != len(set(assigned))
+        ):
+            raise ValueError(
+                "atomic requirement assigned_increments must be unique safe strings"
+            )
+        allocations[requirement_id] = tuple(assigned)
+    return allocations
+
+
+def _program_setup_module():
+    try:
+        return importlib.import_module("program_setup")
+    except ModuleNotFoundError as error:
+        if error.name != "program_setup":
+            raise
+        script_root = str(Path(__file__).resolve().parent)
+        sys.path.insert(0, script_root)
+        try:
+            return importlib.import_module("program_setup")
+        finally:
+            sys.path.remove(script_root)
+
+
+def validated_increment_schedule(
+    manifest: Mapping[str, object],
+    atomic_requirements: Sequence[Mapping[str, object]],
+) -> tuple[str, ...]:
+    """Validate the approved v3 serial order and reciprocal allocations."""
+    if manifest.get("schema_version") != SETUP_PROGRAM_MANIFEST_SCHEMA:
+        raise ValueError("approved increment schedule requires manifest v3")
+    _program_setup_module().setup_family_contract(manifest)
+    semantics = manifest["setup_semantics"]
+    increments = semantics.get("increments")
+    if not isinstance(increments, list) or not increments:
+        raise ValueError("setup increments must be a non-empty list")
+    schedule: list[str] = []
+    for increment in increments:
+        if not isinstance(increment, Mapping) or not _safe_increment_id(
+            increment.get("increment_id")
+        ):
+            raise ValueError("setup increment ID must be one safe path segment")
+        increment_id = increment["increment_id"]
+        if increment_id in schedule:
+            raise ValueError("setup increment IDs must be unique")
+        dependencies = increment.get("depends_on")
+        if (
+            not isinstance(dependencies, list)
+            or not all(_safe_increment_id(item) for item in dependencies)
+            or len(dependencies) != len(set(dependencies))
+            or any(item not in schedule for item in dependencies)
+        ):
+            raise ValueError("setup increment dependency graph is invalid")
+        schedule.append(increment_id)
+    if semantics.get("first_increment_id") != schedule[0]:
+        raise ValueError("setup first increment must head the approved schedule")
+    allocations = _validated_requirement_allocations(atomic_requirements)
+    positions = {increment_id: index for index, increment_id in enumerate(schedule)}
+    allocated_ids = {item for assigned in allocations.values() for item in assigned}
+    if set(schedule) != allocated_ids:
+        raise ValueError("setup increments do not cover exact traceability allocation")
+    for assigned in allocations.values():
+        if any(
+            positions[left] >= positions[right]
+            for left, right in zip(assigned, assigned[1:])
+        ):
+            raise ValueError("requirement allocation must follow the approved schedule")
+    for increment in increments:
+        expected = [
+            requirement_id
+            for requirement_id, assigned in allocations.items()
+            if increment["increment_id"] in assigned
+        ]
+        if increment.get("requirement_ids") != expected:
+            raise ValueError(
+                f"setup increment {increment['increment_id']} requirement allocation mismatch"
+            )
+    return tuple(schedule)
+
+
+def resolve_increment_successor(
+    manifest: Mapping[str, object],
+    atomic_requirements: Sequence[Mapping[str, object]],
+    current_increment_id: str,
+    accepted_before_current: tuple[str, ...],
+) -> SuccessorResolution:
+    """Model the boundary after current acceptance; never grant acceptance."""
+    try:
+        if not isinstance(manifest, Mapping):
+            raise ValueError("successor manifest must be an object")
+        if not _safe_increment_id(current_increment_id):
+            raise ValueError("current increment ID must be one safe path segment")
+        if (
+            not isinstance(accepted_before_current, tuple)
+            or not all(_safe_increment_id(item) for item in accepted_before_current)
+            or len(accepted_before_current) != len(set(accepted_before_current))
+            or current_increment_id in accepted_before_current
+        ):
+            raise ValueError("accepted history must be unique and exclude current")
+        schema = manifest.get("schema_version")
+        if not isinstance(schema, str):
+            raise ValueError("unsupported successor manifest schema")
+        if schema == SETUP_PROGRAM_MANIFEST_SCHEMA:
+            schedule = validated_increment_schedule(manifest, atomic_requirements)
+            if current_increment_id not in schedule:
+                raise ValueError("current increment is absent from approved schedule")
+            index = schedule.index(current_increment_id)
+            if accepted_before_current != schedule[:index]:
+                raise ValueError(
+                    "accepted history must equal the exact approved schedule prefix"
+                )
+            # Schedule validation requires dependencies strictly earlier; the exact
+            # prefix supplies those dependencies for current and its next entry.
+            successor = schedule[index + 1] if index + 1 < len(schedule) else None
+        elif schema in {
+            "implementation-program-manifest/v1", NEW_PROGRAM_MANIFEST_SCHEMA
+        }:
+            allocations = _validated_requirement_allocations(atomic_requirements)
+            universe = {item for assigned in allocations.values() for item in assigned}
+            if current_increment_id not in universe:
+                raise ValueError("current increment is absent from traceability allocation")
+            accepted = set(accepted_before_current) | {current_increment_id}
+            if not accepted <= universe:
+                raise ValueError("accepted history contains unknown increment IDs")
+            candidates = {
+                assigned[index + 1]
+                for assigned in allocations.values()
+                for index, item in enumerate(assigned[:-1])
+                if item == current_increment_id
+            }
+            if len(candidates) > 1:
+                raise ValueError("multiple allocated successors")
+            successor = next(iter(candidates), None)
+            if successor is None:
+                if accepted != universe:
+                    raise ValueError(
+                        "outstanding allocated work has no safe legacy successor"
+                    )
+            else:
+                if successor in accepted:
+                    raise ValueError("successor is already accepted")
+                for assigned in allocations.values():
+                    if successor in assigned and any(
+                        item not in accepted
+                        for item in assigned[:assigned.index(successor)]
+                    ):
+                        raise ValueError("successor dependencies are unsatisfied")
+        else:
+            raise ValueError("unsupported successor manifest schema")
+        if successor is not None:
+            return SuccessorResolution("successor", successor, "")
+        return SuccessorResolution("terminal", None, "")
+    except ValueError as error:
+        return SuccessorResolution("unavailable", None, str(error))
 
 
 def sha256_file(path: Path) -> str:
@@ -1117,21 +1324,7 @@ def _validate_new_manifest_contract(
     issues.extend(closure_issues)
     if manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA:
         try:
-            setup_module = importlib.import_module("program_setup")
-        except ModuleNotFoundError as error:
-            if error.name != "program_setup":
-                issues.append(str(error))
-                setup_module = None
-            else:
-                script_root = str(Path(__file__).resolve().parent)
-                sys.path.insert(0, script_root)
-                try:
-                    setup_module = importlib.import_module("program_setup")
-                except (ImportError, OSError, TypeError, ValueError) as nested_error:
-                    issues.append(str(nested_error))
-                    setup_module = None
-                finally:
-                    sys.path.remove(script_root)
+            setup_module = _program_setup_module()
         except (ImportError, OSError, TypeError, ValueError) as error:
             issues.append(str(error))
             setup_module = None
@@ -1571,6 +1764,31 @@ def validate_program_authority(
     ):
         issues.append("setup-activation decision record is required")
     if manifest_schema == SETUP_PROGRAM_MANIFEST_SCHEMA:
+        setup_semantics = manifest.get("setup_semantics")
+        operation_envelope = (
+            setup_semantics.get("operation_envelope")
+            if isinstance(setup_semantics, dict)
+            else None
+        )
+        setup_v2_family = (
+            isinstance(setup_semantics, dict)
+            and setup_semantics.get("schema_version")
+            == "implementation-program-setup-semantics/v2"
+            and isinstance(operation_envelope, dict)
+            and operation_envelope.get("schema_version")
+            == "implementation-operation-envelope/v2"
+        )
+        if not setup_v2_family and any(
+            record.get("schema_version") == "implementation-approval/v3"
+            for record in approvals
+        ):
+            issues.append("setup-v1 rejects v3 approval records")
+        if not setup_v2_family and any(
+            record.get("schema_version")
+            == "implementation-action-authorization/v3"
+            for record in new_ledgers.get("action_authorizations", [])
+        ):
+            issues.append("setup-v1 rejects v3 action authorization records")
         if any(
             record.get("schema_version") == "implementation-approval/v1"
             for record in approvals

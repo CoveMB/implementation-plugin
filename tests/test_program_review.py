@@ -1,3 +1,4 @@
+import hashlib
 import json
 import unittest
 from pathlib import Path
@@ -5,6 +6,7 @@ from unittest import mock
 
 from tests.program_bootstrap_support import (
     BootstrapFixture,
+    _exact_plan_bytes,
     canonical_json,
     repository_snapshot,
     run_program_discovery,
@@ -12,6 +14,7 @@ from tests.program_bootstrap_support import (
 )
 from tests.script_module_support import load_script_module
 from tests.test_program_activation import ACTIVATION, activated_program, exact_plan_bytes
+from tests.test_program_setup import BOOTSTRAP, SETUP
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -58,6 +61,302 @@ def reviewing_program(
 class ProgramReviewTests(unittest.TestCase):
     def discover(self, fixture: BootstrapFixture) -> dict[str, object]:
         return run_program_discovery(fixture.repository)
+
+    def test_setup_v2_review_binds_typed_product_result(self) -> None:
+        fixture = BootstrapFixture()
+        try:
+            fixture.configure_delete_setup_v2(path="catalog.txt")
+            BOOTSTRAP.publish_program_proposal(
+                fixture.repository,
+                fixture.source_plan,
+                fixture.candidate,
+                fixture.source_sha256,
+            )
+            observation = ACTIVATION.inspect_repository(
+                fixture.repository, fixture.head
+            ).observation
+            activation = ACTIVATION.activate_program(
+                fixture.program_root,
+                SETUP.adapt_setup_decision(
+                    fixture.program_root,
+                    "Yes",
+                    role="user",
+                    provenance="direct-user-message",
+                ),
+                observation,
+            )
+            intent = SETUP.adapt_increment_start_intent(
+                fixture.program_root,
+                activation.handoff,
+                role="user",
+                provenance="direct-user-message",
+            )
+            ACTIVATION.start_first_increment(
+                fixture.program_root, intent, observation
+            )
+            observation = ACTIVATION.inspect_repository(
+                fixture.repository, fixture.head
+            ).observation
+            prepared = ACTIVATION.prepare_exact_plan(
+                fixture.program_root,
+                _exact_plan_bytes(fixture.program_root, observation),
+                observation,
+            )
+            ACTIVATION.materialize_exact_plan(
+                fixture.program_root, prepared.plan_prompt, observation
+            )
+            ACTIVATION.advance_execution_state(
+                fixture.program_root, "implementing", observation
+            )
+            (fixture.repository / "archive-output.txt").write_text(
+                "archive output\n", encoding="utf-8"
+            )
+            write_raw_review_reports(fixture.repository)
+            observation = ACTIVATION.inspect_repository(
+                fixture.repository, fixture.head
+            ).observation
+            ACTIVATION.advance_execution_state(
+                fixture.program_root, "reviewing", observation
+            )
+            candidate = REVIEW.build_review_preparation(
+                fixture.program_root, observation
+            )
+            evidence = json.loads(candidate.evidence_bytes)
+            self.assertEqual(
+                evidence["schema_version"], "implementation-review-evidence/v2"
+            )
+            self.assertIn("product_result", evidence)
+            self.assertNotIn("requirement_result", evidence)
+            REVIEW.persist_review_preparation(fixture.program_root, observation)
+            from tests.test_diff_disposition import DIFF
+
+            diff_candidate = DIFF.build_diff_acceptance_candidate(
+                fixture.program_root, observation
+            )
+            self.assertEqual(
+                diff_candidate.approval_record["schema_version"],
+                "implementation-approval/v3",
+            )
+            self.assertNotIn(
+                "accepted_product_delta_sha256", diff_candidate.approval_record
+            )
+            DIFF.persist_accept_stop(
+                fixture.program_root,
+                f"Accept and stop.\n\n{diff_candidate.prompt}",
+                observation,
+            )
+            manifest = json.loads(
+                (fixture.program_root / "manifest.json").read_text(encoding="utf-8")
+            )
+            approval_path = fixture.program_root / manifest["logical_roles"]["approvals"]
+            original_approval_bytes = approval_path.read_bytes()
+            approval_lines = original_approval_bytes.decode("utf-8").splitlines()
+            tamper_cases = {
+                "scope": lambda record: record.update(scope=[]),
+                "prompt": lambda record: record.update(submitted_prompt_sha256="0" * 64),
+                "workspace": lambda record: record["workspace"].update(path="wrong"),
+                "verification": lambda record: record.update(verification_sha256="0" * 64),
+                "product": lambda record: record.update(product_result_sha256="0" * 64),
+                "family": lambda record: record.update(schema_version="implementation-approval/v2"),
+            }
+            for label, mutate in tamper_cases.items():
+                with self.subTest(tampered_field=label):
+                    records = [json.loads(line) for line in approval_lines]
+                    index = next(
+                        index
+                        for index, value in enumerate(records)
+                        if value.get("schema_version") == "implementation-approval/v3"
+                    )
+                    record = records[index]
+                    mutate(record)
+                    approval_path.write_text(
+                        "\n".join(
+                            json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+                            for value in records
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                    self.assertTrue(
+                        REVIEW.validate_state_authority(
+                            fixture.program_root, observation
+                        )
+                    )
+                    approval_path.write_bytes(original_approval_bytes)
+        finally:
+            fixture.close()
+
+    def test_setup_v2_remediation_round_trip_preserves_typed_result(self) -> None:
+        fixture = BootstrapFixture()
+        try:
+            fixture.configure_delete_setup_v2(path="catalog.txt")
+            BOOTSTRAP.publish_program_proposal(
+                fixture.repository,
+                fixture.source_plan,
+                fixture.candidate,
+                fixture.source_sha256,
+            )
+            observation = ACTIVATION.inspect_repository(
+                fixture.repository, fixture.head
+            ).observation
+            activation = ACTIVATION.activate_program(
+                fixture.program_root,
+                SETUP.adapt_setup_decision(
+                    fixture.program_root,
+                    "Yes",
+                    role="user",
+                    provenance="direct-user-message",
+                ),
+                observation,
+            )
+            intent = SETUP.adapt_increment_start_intent(
+                fixture.program_root, activation.handoff,
+                role="user", provenance="direct-user-message",
+            )
+            ACTIVATION.start_first_increment(fixture.program_root, intent, observation)
+            observation = ACTIVATION.inspect_repository(
+                fixture.repository, fixture.head
+            ).observation
+            prepared = ACTIVATION.prepare_exact_plan(
+                fixture.program_root, _exact_plan_bytes(fixture.program_root, observation), observation
+            )
+            ACTIVATION.materialize_exact_plan(
+                fixture.program_root, prepared.plan_prompt, observation
+            )
+            ACTIVATION.advance_execution_state(
+                fixture.program_root, "implementing", observation
+            )
+            (fixture.repository / "archive-output.txt").write_text(
+                "archive output\n", encoding="utf-8"
+            )
+            write_raw_review_reports(fixture.repository)
+            self.add_open_finding(fixture)
+            observation = ACTIVATION.inspect_repository(
+                fixture.repository, fixture.head
+            ).observation
+            ACTIVATION.advance_execution_state(
+                fixture.program_root, "reviewing", observation
+            )
+            remediation = REVIEW.persist_review_remediation(
+                fixture.program_root, observation
+            )
+            self.assertEqual(remediation.increment_state, "remediating")
+            self.repair_open_finding(fixture)
+            repaired = ACTIVATION.inspect_repository(
+                fixture.repository, fixture.head
+            ).observation
+
+            status_path = fixture.program_root / "state/status.json"
+            typed_remediating_status = status_path.read_bytes()
+            mismatched_status = json.loads(typed_remediating_status)
+            remediation_binding = mismatched_status[
+                "review_remediation_binding"
+            ]
+            initial_product_result = remediation_binding[
+                "initial_product_result"
+            ]
+            present_state = next(
+                state
+                for state in initial_product_result["ordered_path_states"]
+                if state["exists"]
+            )
+            present_state["sha256"] = "f" * 64
+            canonical_result = {
+                "ordered_path_states": initial_product_result[
+                    "ordered_path_states"
+                ],
+                "delete_quarantine_bindings": initial_product_result[
+                    "delete_quarantine_bindings"
+                ],
+            }
+            mismatched_result_sha256 = hashlib.sha256(
+                json.dumps(
+                    canonical_result,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest()
+            initial_product_result["sha256"] = mismatched_result_sha256
+            remediation_binding["initial_product_result_sha256"] = (
+                mismatched_result_sha256
+            )
+            mismatched_status["review_binding"]["candidate_sha256"] = (
+                mismatched_result_sha256
+            )
+            mismatched_status["transition_authority"]["event_id"] = (
+                REVIEW._identifier("review-remediation", remediation_binding)
+            )
+            status_path.write_bytes(canonical_json(mismatched_status))
+            with self.assertRaisesRegex(ValueError, "review remediation binding"):
+                REVIEW.return_review_to_reviewing(
+                    fixture.program_root, repaired
+                )
+            status_path.write_bytes(typed_remediating_status)
+
+            returned = REVIEW.return_review_to_reviewing(
+                fixture.program_root, repaired
+            )
+            self.assertEqual(returned.increment_state, "reviewing")
+
+            typed_status_bytes = status_path.read_bytes()
+            legacy_status = json.loads(typed_status_bytes)
+            remediation_binding = legacy_status["review_remediation_binding"]
+            remediation_binding["schema_version"] = (
+                "implementation-review-remediation/v1"
+            )
+            remediation_binding["initial_product_delta_sha256"] = (
+                remediation_binding["initial_product_result_sha256"]
+            )
+            legacy_status["review_binding"]["schema_version"] = (
+                "implementation-review-remediation/v1"
+            )
+            remediation_sha256 = REVIEW._sha256_bytes(
+                REVIEW._canonical_json_bytes(remediation_binding)
+            )
+            transition = legacy_status["execution_transition_binding"]
+            transition["review_remediation_sha256"] = remediation_sha256
+            event_seed = {
+                "program_id": legacy_status["program_id"],
+                "program_revision": legacy_status["program_revision"],
+                "increment_id": legacy_status["current_increment_id"],
+                "prior_status_sha256": transition["prior_status_sha256"],
+                "prior_increment_state": "remediating",
+                "target_increment_state": "reviewing",
+                "product_path_states_sha256": transition[
+                    "product_path_states_sha256"
+                ],
+                "authorization_id": transition["authorization_id"],
+                "review_remediation_sha256": remediation_sha256,
+            }
+            event_id = REVIEW._identifier("execution-transition", event_seed)
+            transition["event_id"] = event_id
+            legacy_status["transition_authority"]["event_id"] = event_id
+            status_path.write_bytes(canonical_json(legacy_status))
+            self.assertTrue(
+                REVIEW.validate_state_authority(fixture.program_root, repaired)
+            )
+            with self.assertRaisesRegex(ValueError, "review remediation"):
+                REVIEW.build_review_preparation(fixture.program_root, repaired)
+            status_path.write_bytes(typed_status_bytes)
+
+            completed = REVIEW.persist_review_preparation(
+                fixture.program_root, repaired
+            )
+            self.assertEqual(completed.increment_state, "awaiting-diff-approval")
+            evidence = json.loads(
+                (fixture.program_root / "increments/ARCHIVE-INDEX/review-evidence.json")
+                .read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                evidence["schema_version"], "implementation-review-evidence/v2"
+            )
+            self.assertEqual(
+                evidence["product_result"]["schema_version"],
+                "implementation-product-path-states/v2",
+            )
+        finally:
+            fixture.close()
 
     def test_builder_derives_manifest_owned_valid_review_bundle(self) -> None:
         fixture, program_root, observation = reviewing_program()

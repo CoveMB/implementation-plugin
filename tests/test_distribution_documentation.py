@@ -47,7 +47,7 @@ class DistributionMetadataTests(unittest.TestCase):
         claude_marketplace = load_json(CLAUDE_MARKETPLACE)
 
         self.assertEqual(codex_manifest["name"], "implementation-plugin")
-        self.assertEqual(codex_manifest["version"], "0.1.2")
+        self.assertEqual(codex_manifest["version"], "0.1.3")
         self.assertEqual(codex_manifest["skills"], "./skills/")
         self.assertEqual(claude_manifest["name"], codex_manifest["name"])
         self.assertEqual(claude_manifest["version"], codex_manifest["version"])
@@ -162,7 +162,7 @@ class ReaderDocumentationTests(unittest.TestCase):
         for required_text in (
             "Claude Code in VS Code",
             "/plugins",
-            "claude --plugin-dir /absolute/path/to/implementation-plugin-0.1.2.zip",
+            "claude --plugin-dir /absolute/path/to/implementation-plugin-0.1.3.zip",
             "```powershell",
             "if (Test-Path $skillDestination)",
             'throw "Destination already exists: $skillDestination"',
@@ -176,6 +176,93 @@ class ReaderDocumentationTests(unittest.TestCase):
             installation.count("if (Test-Path $skillDestination)"),
             4,
         )
+
+    def test_delete_contract_is_documented_at_canonical_owners(self) -> None:
+        repository_preparation = reader_text(
+            Path("skills/implementing-staged-plans/references/repository-preparation.md")
+        )
+        execution = reader_text(
+            Path("skills/implementing-staged-plans/references/execution-discipline.md")
+        )
+        review = reader_text(
+            Path("skills/implementing-staged-plans/references/review-coordination.md")
+        )
+        state = reader_text(
+            Path("skills/implementing-staged-plans/references/state-authorization.md")
+        )
+        authority = reader_text(
+            Path("skills/implementing-staged-plans/references/program-authority.md")
+        )
+        discovery = reader_text(
+            Path("skills/implementing-staged-plans/references/program-discovery.md")
+        )
+        runbook = reader_text(
+            Path("implementing-staged-plans-bootstrap-execution-review-runbook.md")
+        )
+
+        for required in (
+            "operation-envelope/v1",
+            "operation-envelope/v2",
+            "Create",
+            "Modify",
+            "Delete",
+        ):
+            self.assertIn(required, authority)
+        for required in (
+            "descriptor-bound",
+            "same-filesystem",
+            "cross-device",
+            "quarantine",
+            "Git",
+            "program",
+            "control",
+            "source must be a single regular non-symlink file",
+            "quarantine root must be a private directory",
+            "destination and receipt slots must be absent",
+        ):
+            self.assertIn(required, repository_preparation)
+        for required in (
+            "absent",
+            "retained quarantine bytes",
+            "no secure-erasure claim",
+            "does not unlink",
+        ):
+            self.assertIn(required, execution)
+        for required in (
+            "execution-transition/v2",
+            "result",
+            "delete-quarantine-receipt/v1",
+        ):
+            self.assertIn(required, state)
+        for required in (
+            "`implementation-approval/v1` and `implementation-action-authorization/v1` are legacy-only.",
+            "Manifest-v3 setup and product-delta transactions use `implementation-approval/v2` and `implementation-action-authorization/v2`; manifest v3 rejects the v1 schemas.",
+            "Product-delta diff acceptance keeps `implementation-diff-disposition-binding/v1`; manifest-v3 pairs it with `implementation-approval/v2`, while legacy pairs it with `implementation-approval/v1`.",
+            "Setup/envelope v2 Delete diff acceptance uses `implementation-diff-disposition-binding/v2` with `implementation-approval/v3`, and its result-bound rollover uses `implementation-action-authorization/v3`.",
+        ):
+            self.assertIn(required, state)
+        for required in (
+            "review-evidence/v2",
+            "review-packet/v2",
+            "diff-disposition-binding/v2",
+            "implementation-approval/v3",
+        ):
+            self.assertIn(required, review)
+        for required in (
+            "accepted-state-continuation-binding/v2",
+            "increment-rollover/v2",
+            "action-v3",
+            "tombstone",
+            "explicit `Create`",
+        ):
+            self.assertIn(required, discovery)
+        for required in (
+            "existing handoff",
+            "PLUG-002",
+            "quarantine disposal",
+            "terminal closure",
+        ):
+            self.assertIn(required, runbook)
 
     def test_reader_routes_describe_the_complete_supported_lifecycle(self) -> None:
         documents = {

@@ -61,9 +61,17 @@ Organize atomic requirements into reviewable outcomes with explicit acceptance, 
 
 Every requirement must be allocated. A group-level allocation may guide preparation, but it cannot substitute for the source-located atomic inventory required for a machine-completeness claim.
 
+For manifest v3, approve the increment list in serial execution order and set `first_increment_id` to its first entry. Dependencies constrain that order; requirement allocations describe participation and may skip intervening increments. Validate these bindings through the canonical [successor and lifecycle allocation contract](state-authorization.md#allocate-lifecycle-writes-before-authority).
+
 ## Elaborate progressively
 
 Make the current outcome exact enough to execute and review. Preserve later outcomes semantically while deferring repository-specific file choices. When new evidence changes an approved outcome, acceptance condition, sequence, public contract, authority, or risk posture, stop for a recorded program amendment. Ordinary implementation detail may be elaborated within approved bounds.
+
+## Select one operation family
+
+The exact setup pair owns the available product operations. `implementation-program-setup-semantics/v1` with `implementation-operation-envelope/v1` supports `Create`, `Modify`, and `Preserve`. `implementation-program-setup-semantics/v2` with `implementation-operation-envelope/v2` adds `Delete`; never mix either member of the v1 and v2 pairs or reinterpret accepted v1 bytes.
+
+A v2 `Delete` allocation names one exact program-owned regular-file path, an `absent` accepted state, a supported content disposition (`migrated`, `obsolete`, or `intentional-discard`), and a rationale. It cannot collide with another allocation. When the path is created by an earlier increment, that `Create` must be its strict accepted predecessor; otherwise the live descriptor-bound baseline must establish the file before Delete authorization.
 
 ## Revise without rewriting history
 

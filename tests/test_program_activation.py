@@ -2,12 +2,14 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from tests.program_bootstrap_support import (
     BootstrapFixture,
+    _exact_plan_bytes,
     canonical_json,
     repository_snapshot,
     run_program_discovery,
@@ -20,6 +22,7 @@ SCRIPT_ROOT = REPOSITORY_ROOT / "skills" / "implementing-staged-plans" / "script
 SCRIPT_PATH = SCRIPT_ROOT / "program_activation.py"
 DISCOVERY_PATH = SCRIPT_ROOT / "program_discovery.py"
 ACTIVATION = load_script_module("program_activation", SCRIPT_PATH)
+SETUP = sys.modules["program_setup"]
 
 
 def proposal_observation(fixture: BootstrapFixture):
@@ -89,7 +92,31 @@ def exact_plan_bytes(program_root: Path, observation) -> bytes:
             *(item.path for item in required if item.disposition == "Modify"),
         }
     )
-    preserve = ["catalog.txt"]
+    setup_v2 = (
+        manifest.get("setup_semantics", {}).get("schema_version")
+        == "implementation-program-setup-semantics/v2"
+        and manifest.get("setup_semantics", {}).get("operation_envelope", {}).get("schema_version")
+        == "implementation-operation-envelope/v2"
+    )
+    delete = sorted(
+        allocation["path"]
+        for allocation in manifest.get("setup_semantics", {})
+        .get("operation_envelope", {})
+        .get("allocations", [])
+        if allocation.get("operation") == "Delete"
+        and status["current_increment_id"] in allocation.get("increment_ids", [])
+        and allocation.get("kind") == "exact-path"
+    ) if setup_v2 else []
+    preserve = (
+        [
+            item.path
+            for item in required
+            if item.disposition == "Preserve"
+        ]
+        if setup_v2
+        else ["catalog.txt"]
+    )
+    product_paths -= set(delete)
     source = status["source_binding"]
     program = status["program_binding"]
     lines = [
@@ -113,11 +140,14 @@ def exact_plan_bytes(program_root: Path, observation) -> bytes:
         "## File map",
         "",
     ]
-    for disposition, paths in (
+    plan_operations = [
         ("Create", create),
         ("Modify", modify),
-        ("Preserve", preserve),
-    ):
+    ]
+    if setup_v2:
+        plan_operations.append(("Delete", delete))
+    plan_operations.append(("Preserve", preserve))
+    for disposition, paths in plan_operations:
         lines.extend(
             [
                 f"### {disposition}",
@@ -180,6 +210,31 @@ class ProgramActivationTests(unittest.TestCase):
 
         self.assertFalse(recovered)
         self.assertGreaterEqual(fsync.call_count, 2)
+
+    def test_delete_setup_activation_writer_emits_the_v2_record_family(self) -> None:
+        self.fixture.configure_delete_setup_v2()
+        decision = SETUP.adapt_setup_decision(
+            self.fixture.candidate,
+            "Yes",
+            role="user",
+            provenance="direct-user-message",
+        )
+
+        receipt = ACTIVATION.activate_program(
+            self.fixture.candidate, decision, self.observation
+        )
+
+        record = self.fixture.load_json("state/setup-activation-decision.json")
+        self.assertEqual(
+            record["schema_version"], "setup-activation-decision/v2"
+        )
+        self.assertEqual(receipt.increment_state, "awaiting-first-increment")
+        self.assertEqual(
+            ACTIVATION.validate_state_authority(
+                self.fixture.candidate, self.observation
+            ),
+            [],
+        )
 
     def test_activation_persists_three_records_then_active_preparing_status(self) -> None:
         prompt = ACTIVATION.render_program_launch_prompt(self.fixture.candidate)
@@ -394,6 +449,205 @@ class ProgramActivationTests(unittest.TestCase):
 
 
 class ExactPlanMaterializationTests(unittest.TestCase):
+    def test_legacy_unsafe_successor_stops_at_prospective_allocation(self):
+        for successors, diagnostic in (
+            ({"ARCHIVE-VERIFY": ("ARCHIVE-INDEX",), "ARCHIVE-EXPORT": ("ARCHIVE-INDEX",)}, "multiple allocated successors"),
+            ({"ARCHIVE-VERIFY": ("ARCHIVE-BLOCKER",)}, "successor dependencies are unsatisfied"),
+        ):
+            with self.subTest(diagnostic=diagnostic):
+                fixture = BootstrapFixture()
+                self.addCleanup(fixture.close)
+                fixture.configure_successors(successors)
+                root, observation = activated_program(fixture)
+                before = repository_snapshot(fixture.repository)
+                with self.assertRaisesRegex(ValueError, diagnostic):
+                    ACTIVATION.required_future_lifecycle_writes(root, fixture.repository, "ARCHIVE-INDEX")
+                self.assertEqual(repository_snapshot(fixture.repository), before)
+
+    def test_inactive_lifecycle_alternative_is_rejected_before_plan_writes(self):
+        for successor in (False, True):
+            with self.subTest(successor=successor):
+                fixture = BootstrapFixture()
+                self.addCleanup(fixture.close)
+                if successor:
+                    fixture.configure_successor_chain(("ARCHIVE-INDEX", "ARCHIVE-VERIFY"))
+                root, observation = activated_program(fixture)
+                extra = "closure/reconciliation.json" if successor else "increments/ARCHIVE-INDEX/handoff.md"
+                plan = exact_plan_bytes(root, observation).replace(b"### Create\n", f"### Create\n\n- `implementation-programs/ARCHIVE-PROGRAM/{extra}` — exact owned path.\n".encode())
+                before = repository_snapshot(fixture.repository)
+                with self.assertRaisesRegex(ValueError, "lifecycle|allocation"):
+                    ACTIVATION.prepare_exact_plan(root, plan, observation)
+                self.assertEqual(repository_snapshot(fixture.repository), before)
+
+    def sparse_preparing_program(self, mode="approval:full-increment"):
+        bootstrap = load_script_module("program_bootstrap", SCRIPT_ROOT / "program_bootstrap.py")
+
+        fixture = BootstrapFixture()
+        self.addCleanup(fixture.close)
+        fixture.configure_approval_mode(mode)
+        fixture.configure_portable_successors()
+        bootstrap.publish_program_proposal(fixture.repository, fixture.source_plan, fixture.candidate, fixture.source_sha256)
+        observation = ACTIVATION.inspect_repository(fixture.repository, fixture.head).observation
+        decision = SETUP.adapt_setup_decision(fixture.program_root, "Yes", role="user", provenance="direct-user-message")
+        activation = ACTIVATION.activate_program(fixture.program_root, decision, observation)
+        intent = SETUP.adapt_increment_start_intent(fixture.program_root, activation.handoff, role="user", provenance="direct-user-message")
+        ACTIVATION.start_first_increment(fixture.program_root, intent, observation)
+        return fixture, observation
+
+    def test_sparse_sequence_two_allocates_only_the_immediate_navigation(self):
+        fixture, observation = self.sparse_preparing_program()
+        status = json.loads((fixture.program_root / "state/status.json").read_text())
+        self.assertEqual((status["state_sequence"], status["current_increment_state"]), (2, "preparing"))
+        required = ACTIVATION.required_future_lifecycle_writes(fixture.program_root, fixture.repository, "ARCHIVE-INDEX")
+        created = {item.path for item in required if item.disposition == "Create"}
+        prefix = "implementation-programs/ARCHIVE-PROGRAM/"
+        self.assertEqual(created, {
+            prefix + "increments/ARCHIVE-INDEX/execution-baseline.json",
+            prefix + "increments/ARCHIVE-INDEX/review-evidence.json",
+            prefix + "increments/ARCHIVE-INDEX/review-packet.md",
+            prefix + "increments/ARCHIVE-INDEX/handoff.md",
+            prefix + "increments/ARCHIVE-VERIFY/brief.md",
+        })
+
+    def test_sparse_full_increment_correct_plan_authorizes_without_plan_question(self):
+        fixture, observation = self.sparse_preparing_program()
+        plan = _exact_plan_bytes(fixture.program_root, observation)
+        # Substitute a literal navigation oracle even while the old allocator is wrong.
+        plan = plan.replace(b"closure/reconciliation.json", b"increments/ARCHIVE-INDEX/handoff.md")
+        plan = plan.replace(b"closure/closure-packet.md", b"increments/ARCHIVE-VERIFY/brief.md")
+        receipt = ACTIVATION.prepare_exact_plan(fixture.program_root, plan, observation)
+        self.assertEqual(receipt.increment_state, "authorized")
+        self.assertIsNone(receipt.plan_prompt)
+        actions = [json.loads(line) for line in (fixture.program_root / "state/action-authorizations.jsonl").read_text().splitlines()]
+        self.assertEqual(len(actions), 1)
+        status = json.loads((fixture.program_root / "state/status.json").read_text())
+        self.assertEqual(actions[0]["increment_grant_id"], status["current_increment_authority_binding"]["grant_id"])
+
+    def test_sparse_plan_rejects_each_missing_or_misclassified_lifecycle_path_without_writes(self):
+        fixture, observation = self.sparse_preparing_program()
+        plan = _exact_plan_bytes(fixture.program_root, observation).decode()
+        file_map = ACTIVATION.parse_exact_file_map(plan)
+        prefix = "implementation-programs/ARCHIVE-PROGRAM/"
+        before = repository_snapshot(fixture.repository)
+        for correct, paths in (("Create", file_map.create), ("Modify", file_map.modify), ("Preserve", file_map.preserve)):
+            for path in paths:
+                if not path.startswith(prefix):
+                    continue
+                line = next(line for line in plan.splitlines(keepends=True) if f"`{path}`" in line)
+                omitted = plan.replace(line, "")
+                for disposition in (None, "Create", "Modify", "Preserve", "Delete"):
+                    if disposition == correct:
+                        continue
+                    with self.subTest(path=path, disposition=disposition):
+                        changed = omitted
+                        if disposition is not None:
+                            heading = f"### {disposition}\n"
+                            if heading not in changed:
+                                changed = changed.replace("### Preserve\n", heading + "\n" + line + "\n### Preserve\n")
+                            else:
+                                changed = changed.replace(heading, heading + "\n" + line)
+                        with self.assertRaises(ValueError):
+                            ACTIVATION.prepare_exact_plan(fixture.program_root, changed.encode(), observation)
+                        self.assertEqual(repository_snapshot(fixture.repository), before)
+
+    def test_unavailable_history_allocates_nothing_and_preserves_bytes(self):
+        fixture, observation = self.sparse_preparing_program()
+        rollover_path = fixture.program_root / "state/rollovers.jsonl"
+        rollover_path.write_text(json.dumps({"current_increment_id": "ARCHIVE-INDEX", "successor_increment_id": "ARCHIVE-VERIFY"}) + "\n")
+        before = repository_snapshot(fixture.repository)
+        with self.assertRaisesRegex(ValueError, "unbound rollover"):
+            ACTIVATION.required_future_lifecycle_writes(fixture.program_root, fixture.repository, "ARCHIVE-INDEX")
+        self.assertEqual(repository_snapshot(fixture.repository), before)
+
+    def test_v2_path_baselines_allocate_descriptor_bound_delete_storage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            program_root = workspace / "implementation-programs/DELETE-PROGRAM"
+            program_root.mkdir(parents=True)
+            target = workspace / "legacy.ts"
+            target.write_bytes(b"legacy bytes\n")
+            (program_root / "manifest.json").write_bytes(
+                canonical_json(
+                    {
+                        "program_id": "DELETE-PROGRAM",
+                        "program_revision": 1,
+                        "logical_roles": {"status": "state/status.json"},
+                        "increment_storage": {"root": "increments"},
+                    }
+                )
+            )
+            (program_root / "state").mkdir()
+            (program_root / "state/status.json").write_bytes(
+                canonical_json({"current_increment_id": "DELETE-1"})
+            )
+            paths, bindings = ACTIVATION._v2_path_baselines(
+                program_root,
+                workspace,
+                ACTIVATION.ExactFileMapV2((), (), ("legacy.ts",), ()),
+                {},
+                "DELETE-1",
+            )
+            self.assertEqual(paths[0]["disposition"], "Delete")
+            self.assertEqual(bindings[0]["path"], "legacy.ts")
+            self.assertTrue((program_root / bindings[0]["root_path"]).is_dir())
+            self.assertTrue(target.exists())
+
+    def test_v1_exact_plan_rejects_delete_section_explicitly(self) -> None:
+        fixture = BootstrapFixture()
+        try:
+            program_root, observation = activated_program(fixture)
+            plan_text = exact_plan_bytes(program_root, observation).decode("utf-8")
+            plan_text = plan_text.replace(
+                "### Preserve\n",
+                "### Delete\n\n- `obsolete.txt`\n\n### Preserve\n",
+                1,
+            )
+
+            with self.assertRaisesRegex(
+                ValueError, "Delete section requires setup-v2"
+            ):
+                ACTIVATION.prepare_exact_plan(
+                    program_root,
+                    plan_text.encode("utf-8"),
+                    observation,
+                )
+        finally:
+            fixture.close()
+
+    def test_v2_exact_plan_accepts_empty_delete_section_in_setup_context(self) -> None:
+        manifest = {
+            "schema_version": "implementation-program-manifest/v3",
+            "setup_semantics": {
+                "schema_version": "implementation-program-setup-semantics/v2",
+                "operation_envelope": {
+                    "schema_version": "implementation-operation-envelope/v2"
+                },
+            },
+        }
+        markdown = """# Plan
+
+## File map
+
+### Create
+
+- `review/evidence.json`
+
+### Modify
+
+- `state/status.json`
+
+### Delete
+
+### Preserve
+
+- `catalog.txt`
+"""
+        parsed = ACTIVATION._parse_exact_file_map_for_manifest(manifest, markdown)
+        self.assertEqual(parsed.create, ("review/evidence.json",))
+        self.assertEqual(parsed.modify, ("state/status.json",))
+        self.assertEqual(parsed.delete, ())
+        self.assertEqual(parsed.preserve, ("catalog.txt",))
+
     def test_successor_plan_candidate_inherits_only_canonical_rollover_products(self) -> None:
         from tests.test_program_rollover import ROLLOVER, accepted_continuation_program
 
