@@ -287,7 +287,7 @@ def _rewrite_inherited_review_reports(
 
 
 class BootstrapFixture:
-    def __init__(self) -> None:
+    def __init__(self, *, baseline_files: dict[str, bytes] | None = None) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
         self.repository = self.root / "repository"
@@ -297,6 +297,11 @@ class BootstrapFixture:
         run_git(self.repository, "config", "user.email", "archive@example.invalid")
         shutil.copyfile(COMPATIBILITY_WORKSPACE_SEED, self.repository / "catalog.txt")
         run_git(self.repository, "add", "catalog.txt")
+        for relative_path, content in (baseline_files or {}).items():
+            path = self.repository / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+            run_git(self.repository, "add", "--", relative_path)
         run_git(self.repository, "commit", "-m", "seed archive")
         self.head = run_git(self.repository, "rev-parse", "HEAD")
 
@@ -811,6 +816,15 @@ class BootstrapFixture:
             for allocation in envelope["allocations"]
             if allocation["path"] not in delete_paths or allocation["operation"] == "Create"
         ]
+        # Selected v2 Preserve paths become accepted present states. Keep the
+        # initial observation separate from any later conditional permission.
+        for allocation in list(envelope["allocations"]):
+            if allocation["operation"] == "Preserve" and len(allocation["increment_ids"]) > 1:
+                later = copy.deepcopy(allocation)
+                later["increment_ids"] = allocation["increment_ids"][1:]
+                later["collision"] = "accepted-predecessor"
+                allocation["increment_ids"] = allocation["increment_ids"][:1]
+                envelope["allocations"].append(later)
         for delete_path in delete_paths:
             envelope["allocations"].append(
                 {

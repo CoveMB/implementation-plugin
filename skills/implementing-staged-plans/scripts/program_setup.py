@@ -398,6 +398,74 @@ def _validate_source_gates(
     return issues
 
 
+
+def _allocation_contains(outer: Mapping[str, object], inner: Mapping[str, object]) -> bool:
+    """Use the exact-plan matcher's normalized, segment-bounded selectors."""
+    if outer["kind"] == "exact-path":
+        return inner["kind"] == "exact-path" and outer["path"] == inner["path"]
+    return inner["path"] == outer["path"] or str(inner["path"]).startswith(
+        str(outer["path"]) + "/"
+    )
+
+
+def _validate_operation_envelope_schedule(
+    semantics: Mapping[str, object], supported_operations: Sequence[str]
+) -> list[str]:
+    """Check possible accepted outputs; declarations never establish live history."""
+    allocations = semantics["operation_envelope"]["allocations"]
+    increment_ids = [item["increment_id"] for item in semantics["increments"]]
+    issues: list[str] = []
+    for index, allocation in enumerate(allocations):
+        for other in allocations[index + 1:]:
+            shared_increments = set(allocation["increment_ids"]).intersection(other["increment_ids"])
+            if (
+                allocation["operation"] == other["operation"]
+                and shared_increments
+                and (_allocation_contains(allocation, other) or _allocation_contains(other, allocation))
+            ):
+                issues.append(
+                    f"operation envelope contains ambiguous {allocation['operation']} selectors "
+                    f"{allocation['path']} and {other['path']} for {', '.join(sorted(shared_increments))}"
+                )
+
+    is_v2 = "Delete" in supported_operations
+    producing_operations = {"Create", "Modify", "Preserve"} if is_v2 else {"Create", "Modify"}
+    consuming_operations = {"Modify", "Preserve", "Delete"} if is_v2 else {"Modify", "Preserve"}
+    for producer in allocations:
+        if producer["operation"] not in producing_operations:
+            continue
+        for producing_increment in producer["increment_ids"]:
+            for consuming_increment in increment_ids[increment_ids.index(producing_increment) + 1:]:
+                consumers = [
+                    allocation
+                    for allocation in allocations
+                    if consuming_increment in allocation["increment_ids"]
+                    and allocation["operation"] in consuming_operations
+                    and (_allocation_contains(allocation, producer) or _allocation_contains(producer, allocation))
+                ]
+                compatible = [
+                    allocation
+                    for allocation in consumers
+                    if allocation["collision"] == "accepted-predecessor"
+                    and allocation["file_kind"] == "regular-file"
+                    and allocation["link_kind"] == "none"
+                    and allocation["mode"] in ("100644", "100755")
+                ]
+                context = (
+                    f"operation envelope possible output {producer['path']} from {producing_increment} "
+                    f"to {consuming_increment}"
+                )
+                if not is_v2 and not any(_allocation_contains(allocation, producer) for allocation in compatible):
+                    issues.append(context + " lacks Modify/Preserve coverage with accepted-predecessor regular-file facts")
+                for consumer in consumers:
+                    if consumer not in compatible:
+                        issues.append(
+                            context + f" has {consumer['operation']} selector {consumer['path']} "
+                            "without accepted-predecessor regular-file facts"
+                        )
+    return issues
+
+
 def validate_setup_semantics(program_root: Path) -> list[str]:
     root = Path(program_root)
     manifest, manifest_issues = load_json_object(root / "manifest.json")
@@ -667,6 +735,7 @@ def validate_setup_semantics(program_root: Path) -> list[str]:
             issues.append("operation envelope allocations must be non-empty")
         else:
             seen_allocations: set[tuple[str, str, str]] = set()
+            seen_increment_allocations: dict[tuple[str, str, str], set[str]] = {}
             allocation_values: list[dict[str, object]] = []
             base_allocation_fields = (
                 "kind",
@@ -706,9 +775,12 @@ def validate_setup_semantics(program_root: Path) -> list[str]:
                 if allocation.get("operation") not in supported_operations:
                     issues.append(f"{label} operation is unsupported")
                 allocated = allocation.get("increment_ids")
-                if not _text_list(allocated, nonempty=True) or any(
-                    item not in increment_ids for item in (allocated or [])
-                ):
+                valid_increments = (
+                    _text_list(allocated, nonempty=True)
+                    and len(set(allocated)) == len(allocated)
+                    and all(item in increment_ids for item in allocated)
+                )
+                if not valid_increments:
                     issues.append(f"{label} increment allocation is invalid")
                 for field in ("inclusions", "exclusions"):
                     if not _text_list(allocation.get(field)):
@@ -724,9 +796,16 @@ def validate_setup_semantics(program_root: Path) -> list[str]:
                     str(allocation.get("path")),
                     str(allocation.get("operation")),
                 )
-                if key in seen_allocations:
-                    issues.append("operation envelope contains duplicate allocation")
-                seen_allocations.add(key)
+                if allocation.get("operation") in ("Modify", "Preserve"):
+                    if valid_increments:
+                        previous_increments = seen_increment_allocations.setdefault(key, set())
+                        if previous_increments.intersection(allocated):
+                            issues.append("operation envelope contains overlapping increment allocation")
+                        previous_increments.update(allocated)
+                else:
+                    if key in seen_allocations:
+                        issues.append("operation envelope contains duplicate allocation")
+                    seen_allocations.add(key)
                 if is_delete and supported_operations == SUPPORTED_OPERATIONS_V2:
                     if allocation.get("kind") != "exact-path":
                         issues.append("Delete allocation kind must be exact-path")
@@ -813,6 +892,8 @@ def validate_setup_semantics(program_root: Path) -> list[str]:
             )
         except ValueError as error:
             issues.append(str(error))
+    if not issues:
+        issues.extend(_validate_operation_envelope_schedule(semantics, supported_operations))
     return sorted(set(issues))
 
 

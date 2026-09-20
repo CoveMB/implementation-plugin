@@ -27,6 +27,8 @@ Build the complete source snapshot, source metadata, traceability, approved-prog
 
 ## Activate a Generated Program
 
+Before publication or setup approval, follow [successor permission allocation](references/program-authority.md#allocate-successor-permissions-before-approval) to declare per-increment operations and retention, validate readiness, and explain its optional-outcome limit.
+
 Render the readable setup recap from the complete manifest-v3 proposal. It must show the program outcome, exact source and workspace bindings, increments, acceptance meaning, approval mode, operation envelope, protections, exclusions, risks, and every source-defined gate. Only a direct, current, unconditional affirmative answer to that recap may become the typed setup decision.
 
 Activation persists the setup decision, any due pre-activation gate decisions, and separate v2 program-approval and workspace-selection receipts, then writes `active` / `awaiting-first-increment` status last. It creates no increment grant or product authority. Return the semantic first-increment handoff; a fresh task converts only its direct current user submission into the typed first-start intent, persists any due gates and the v2 first-start grant, and writes `active` / `preparing` status last. Exact partial prefixes are adopted on retry; divergent prefixes stop without cleanup or replacement.

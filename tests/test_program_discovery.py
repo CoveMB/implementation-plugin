@@ -112,6 +112,23 @@ class SetupV3DiscoveryTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "review prefix"):
                 REVIEW.persist_review_preparation(self.fixture.program_root, observation)
 
+    def test_pristine_successor_gaps_are_invalid_without_writes(self):
+        from tests.test_program_setup import successor_gap_candidates
+
+        self.fixture.close()
+        self.fixture = BootstrapFixture()
+        for case, manifest in successor_gap_candidates(self.fixture):
+            with self.subTest(case=case):
+                self.fixture.write_json("manifest.json", manifest)
+                if not self.fixture.program_root.exists():
+                    shutil.copytree(self.fixture.candidate, self.fixture.program_root)
+                else:
+                    (self.fixture.program_root / "manifest.json").write_bytes(canonical_json(manifest))
+                before = repository_snapshot(self.fixture.repository)
+                result = DISCOVERY.discover_programs(self.fixture.repository)
+                self.assertEqual(result.disposition, "invalid", result)
+                self.assertEqual(repository_snapshot(self.fixture.repository), before)
+
     def test_sequence_zero_routes_to_readable_setup(self) -> None:
         result = DISCOVERY.discover_programs(self.fixture.repository)
 

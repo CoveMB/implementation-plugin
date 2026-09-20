@@ -73,6 +73,28 @@ The exact setup pair owns the available product operations. `implementation-prog
 
 A v2 `Delete` allocation names one exact program-owned regular-file path, an `absent` accepted state, a supported content disposition (`migrated`, `obsolete`, or `intentional-discard`), and a rationale. It cannot collide with another allocation. When the path is created by an earlier increment, that `Create` must be its strict accepted predecessor; otherwise the live descriptor-bound baseline must establish the file before Delete authorization.
 
+## Allocate successor permissions before approval
+
+Construct a per-increment file table before publishing the setup proposal. For each exact path or bounded class, declare the operation and the facts that will apply in that increment. Keep initial `existing` observations distinct from `accepted-predecessor` requirements. Same-path `Modify` and `Preserve` records may carry different facts only for disjoint increment sets; duplicate IDs, overlapping same-operation selectors, and exact/class or nested-class ambiguity stop validation. Create/Delete retain their existing uniqueness rules. No selector wins by list order or specificity.
+
+For example, an initially existing program-owned regular file can have these explicit allocations (with the applicable ownership, protection, link and mode facts on each record):
+
+| Path | Increment | Operation | Collision |
+| --- | --- | --- | --- |
+| `shared.txt` | `INDEX` | Modify | existing |
+| `shared.txt` | `VERIFY` | Modify | accepted-predecessor |
+| `shared.txt` | `REPORT` | Preserve | accepted-predecessor |
+
+Under setup/envelope v1, every possible earlier Create/Modify output needs explicit later Modify or Preserve permission with accepted-predecessor regular-file facts in every subsequent increment. A compatible bounded class can provide coverage. Initial Preserve alone does not produce a v1 accepted product delta.
+
+Under v2, selected Preserve paths enter the accepted present-state inventory even when their bytes are unchanged. Later explicitly allocated Modify/Preserve/Delete operations on those possible outputs therefore need accepted-predecessor facts. V2 carries inherited state without requiring a later retention allocation. Delete's absent result is distinct from a present predecessor: do not add Preserve for a tombstone. Later explicit Create may recreate an absent path under the existing contract, retaining quarantine evidence and the strict-predecessor Create requirement for accepted-predecessor Delete.
+
+Run canonical setup validation before publishing and presenting the setup recap. The readiness check covers declared exact paths and deterministic path-segment prefix relationships. It does not enumerate workspace directories, interpret natural-language inclusions/exclusions as predicates, predict output bytes or modes, or certify every optional execution outcome. Exact planning still checks each concrete path against validated accepted history and all approved facts.
+
+Permissions remain optional. In the example, INDEX may omit `shared.txt` while completing other legitimate changes. Readiness passes, but VERIFY's accepted-predecessor-only Modify must then stop before writing because INDEX never accepted that file. Selecting Modify and leaving it unchanged instead remains invalid at review. Explain this limit before approval; narrow unused permissions or declare an applicable existing-state operation where expressible. Never infer acceptance, auto-add Preserve, relabel collision facts, or add overlapping same-operation alternatives for conditional states.
+
+The same validator checks new and persisted manifest-v3 setups. Inconsistent stored declarations stop without migration or rewriting history; an existing receipt cannot bypass readiness. Valid supported legacy families retain their existing routes.
+
 ## Revise without rewriting history
 
 A new source or program revision receives new immutable paths and digests. Its traceability declares the prior source, program, traceability, and accepted evidence records it preserves. Validate every declared prior digest.
