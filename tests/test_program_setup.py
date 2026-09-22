@@ -1,5 +1,6 @@
 import copy
 import json
+import shutil
 import sys
 import unittest
 from pathlib import Path
@@ -57,6 +58,207 @@ def gate_definition(
         "response_semantics": "unconditional-affirmative-satisfaction",
         "setup_reuse": setup_reuse,
     }
+
+
+def successor_gap_candidates(fixture):
+    """Malformed declarations shared by publication, discovery, and activation tests."""
+    fixture.configure_successor_chain(("ARCHIVE-INDEX", "ARCHIVE-VERIFY"))
+    fixture.configure_setup_v3()
+    original = fixture.load_json("manifest.json")
+    for case in ("existing", "missing-retention", "ambiguous"):
+        manifest = copy.deepcopy(original)
+        allocations = manifest["setup_semantics"]["operation_envelope"]["allocations"]
+        successor = next(item for item in allocations if item["operation"] == "Modify")
+        if case == "existing":
+            successor["collision"] = "existing"
+        elif case == "missing-retention":
+            allocations.remove(successor)
+        else:
+            duplicate = copy.deepcopy(successor)
+            duplicate.update(kind="bounded-path-class", path="archive-output.txt")
+            allocations.append(duplicate)
+        manifest["setup_semantics_sha256"] = canonical_compact_sha256(manifest["setup_semantics"])
+        yield case, manifest
+
+
+class SuccessorEnvelopeTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = BootstrapFixture(baseline_files={"shared.txt": b"initial\n"})
+        self.fixture.configure_successor_chain(("ARCHIVE-INDEX", "ARCHIVE-VERIFY", "ARCHIVE-PUBLISH"))
+        self.fixture.configure_setup_v3()
+        self.manifest = self.fixture.load_json("manifest.json")
+        self.allocations = self.manifest["setup_semantics"]["operation_envelope"]["allocations"]
+
+    def tearDown(self):
+        self.fixture.close()
+
+    def allocation(self, operation, increments, *, path="shared.txt", collision="accepted-predecessor", kind="exact-path"):
+        template = next(item for item in self.allocations if item["operation"] == "Modify")
+        result = copy.deepcopy(template)
+        result.update(operation=operation, increment_ids=increments, path=path, collision=collision, kind=kind)
+        return result
+
+    def validate(self):
+        self.manifest["setup_semantics_sha256"] = canonical_compact_sha256(self.manifest["setup_semantics"])
+        self.fixture.write_json("manifest.json", self.manifest)
+        return SETUP.validate_setup_semantics(self.fixture.candidate)
+
+    def use_v2(self):
+        semantics = self.manifest["setup_semantics"]
+        semantics["schema_version"] = "implementation-program-setup-semantics/v2"
+        semantics["operation_envelope"].update(schema_version="implementation-operation-envelope/v2", supported_operations=["Create", "Modify", "Delete", "Preserve"])
+        # v2 Preserve contributes a present result, so split its first/later facts.
+        catalog = next(item for item in self.allocations if item["path"] == "catalog.txt")
+        catalog["increment_ids"] = ["ARCHIVE-INDEX"]
+        later = copy.deepcopy(catalog)
+        later.update(increment_ids=["ARCHIVE-VERIFY", "ARCHIVE-PUBLISH"], collision="accepted-predecessor")
+        self.allocations.append(later)
+
+    def test_disjoint_modify_and_preserve_permissions_render_all_facts(self):
+        for operation, increment, collision in (
+            ("Modify", "ARCHIVE-INDEX", "existing"),
+            ("Modify", "ARCHIVE-VERIFY", "accepted-predecessor"),
+            ("Preserve", "ARCHIVE-PUBLISH", "accepted-predecessor"),
+        ):
+            self.allocations.append(self.allocation(operation, [increment], collision=collision))
+        self.assertEqual(self.validate(), [])
+        recap = SETUP.render_setup_recap(self.fixture.candidate)
+        self.assertEqual(recap.count("Modify shared.txt"), 2)
+        self.assertEqual(recap.count("Preserve shared.txt"), 1)
+        before = repository_snapshot(self.fixture.candidate)
+        identity = SETUP.setup_semantic_identity(self.manifest)
+        self.assertEqual(SETUP.render_setup_recap(self.fixture.candidate), recap)
+        self.assertEqual(SETUP.setup_semantic_identity(self.fixture.load_json("manifest.json")), identity)
+        self.assertEqual(repository_snapshot(self.fixture.candidate), before)
+
+    def test_malformed_or_overlapping_increment_allocations_fail_stably(self):
+        original = copy.deepcopy(self.allocations)
+        for increments in (["ARCHIVE-VERIFY", "ARCHIVE-VERIFY"], [], None, "ARCHIVE-VERIFY", 1, [None], [["ARCHIVE-VERIFY"]], ["UNKNOWN"]):
+            with self.subTest(increments=increments):
+                self.allocations[:] = copy.deepcopy(original)
+                self.allocations.append(self.allocation("Preserve", increments))
+                self.assertIn("increment allocation is invalid", " ".join(self.validate()))
+        for increments in (["ARCHIVE-VERIFY"], ["ARCHIVE-INDEX", "ARCHIVE-VERIFY"]):
+            with self.subTest(overlap=increments):
+                self.allocations[:] = copy.deepcopy(original)
+                self.allocations.extend([self.allocation("Preserve", ["ARCHIVE-VERIFY"]), self.allocation("Preserve", increments)])
+                self.assertIn("overlapping increment allocation", " ".join(self.validate()))
+
+    def test_malformed_operation_returns_diagnostics_without_crashing(self):
+        allocation = self.allocation("Preserve", ["ARCHIVE-VERIFY"])
+        self.allocations.append(allocation)
+        for operation in (None, 1, [], {}):
+            with self.subTest(operation=operation):
+                allocation["operation"] = operation
+                self.assertIn("operation is unsupported", " ".join(self.validate()))
+
+    def test_same_operation_selector_ambiguity_uses_segment_prefixes(self):
+        original = copy.deepcopy(self.allocations)
+        for first, second, invalid in (
+            (("exact-path", "notes/item.txt"), ("bounded-path-class", "notes"), True),
+            (("bounded-path-class", "notes/nested"), ("bounded-path-class", "notes"), True),
+            (("bounded-path-class", "notes-other"), ("bounded-path-class", "notes"), False),
+        ):
+            for reverse in (False, True):
+                with self.subTest(first=first, reverse=reverse):
+                    self.allocations[:] = copy.deepcopy(original)
+                    records = [self.allocation("Preserve", ["ARCHIVE-INDEX"], kind=kind, path=path, collision="existing") for kind, path in (first, second)]
+                    self.allocations.extend(reversed(records) if reverse else records)
+                    issues = self.validate()
+                    self.assertEqual(bool(issues), invalid, issues)
+                    if invalid:
+                        self.assertIn("ambiguous", " ".join(issues))
+
+    def test_v1_requires_retention_for_every_possible_producer(self):
+        original = copy.deepcopy(self.allocations)
+        for kind in ("exact-path", "bounded-path-class"):
+            with self.subTest(kind=kind):
+                self.allocations[:] = copy.deepcopy(original)
+                self.allocations.append(self.allocation("Modify", ["ARCHIVE-INDEX"], kind=kind, collision="existing"))
+                issues = " ".join(self.validate())
+                for expected in ("shared.txt", "ARCHIVE-INDEX", "ARCHIVE-VERIFY", "ARCHIVE-PUBLISH", "accepted-predecessor"):
+                    self.assertIn(expected, issues)
+                self.allocations.append(self.allocation("Preserve", ["ARCHIVE-VERIFY", "ARCHIVE-PUBLISH"], kind="bounded-path-class"))
+                self.assertEqual(self.validate(), [])
+
+    def test_wrong_collision_or_absent_successor_facts_do_not_cover_present_output(self):
+        original = copy.deepcopy(self.allocations)
+        for field, value in (("collision", "existing"), ("file_kind", "absent"), ("link_kind", "symlink")):
+            with self.subTest(field=field):
+                self.allocations[:] = copy.deepcopy(original)
+                self.allocations.append(self.allocation("Modify", ["ARCHIVE-INDEX"], collision="existing"))
+                later = self.allocation("Preserve", ["ARCHIVE-VERIFY", "ARCHIVE-PUBLISH"])
+                later[field] = value
+                self.allocations.append(later)
+                self.assertIn("accepted-predecessor", " ".join(self.validate()))
+
+    def test_v1_initial_preserve_is_not_an_inherited_product(self):
+        self.allocations.append(self.allocation("Preserve", ["ARCHIVE-INDEX"], collision="existing"))
+        self.allocations.append(self.allocation("Modify", ["ARCHIVE-PUBLISH"], collision="existing"))
+        self.assertEqual(self.validate(), [])
+
+    def test_v2_preserve_produces_present_state_without_mandatory_retention(self):
+        self.use_v2()
+        self.allocations.append(self.allocation("Preserve", ["ARCHIVE-INDEX"], collision="existing"))
+        self.assertEqual(self.validate(), [])
+        for operation in ("Modify", "Preserve", "Delete"):
+            with self.subTest(operation=operation):
+                later = self.allocation(operation, ["ARCHIVE-PUBLISH"], collision="existing")
+                if operation == "Delete":
+                    later.update(accepted_state="absent", content_disposition="obsolete", rationale="Remove the obsolete file.")
+                self.allocations.append(later)
+                self.assertIn("accepted-predecessor", " ".join(self.validate()))
+                later["collision"] = "accepted-predecessor"
+                issues = self.validate()
+                if operation == "Delete":
+                    self.assertIn("same-path Create in a strict predecessor", " ".join(issues))
+                else:
+                    self.assertEqual(issues, [])
+                self.allocations.pop()
+
+    def test_inconsistent_activated_v3_setup_fails_without_rewriting_history(self):
+        BOOTSTRAP.publish_program_proposal(
+            self.fixture.repository, self.fixture.source_plan,
+            self.fixture.candidate, self.fixture.source_sha256,
+        )
+        decision = SETUP.adapt_setup_decision(
+            self.fixture.program_root, "Yes", role="user",
+            provenance="direct-user-message",
+        )
+        observation = ACTIVATION.inspect_repository(
+            self.fixture.repository, self.fixture.head,
+        ).observation
+        ACTIVATION.activate_program(self.fixture.program_root, decision, observation)
+        manifest_path = self.fixture.program_root / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        allocations = manifest["setup_semantics"]["operation_envelope"]["allocations"]
+        next(item for item in allocations if item["operation"] == "Modify")["collision"] = "existing"
+        manifest["setup_semantics_sha256"] = canonical_compact_sha256(manifest["setup_semantics"])
+        manifest_path.write_bytes(canonical_json(manifest))
+        before = repository_snapshot(self.fixture.repository)
+        self.assertIn("accepted-predecessor", " ".join(SETUP.validate_setup_semantics(self.fixture.program_root)))
+        self.assertTrue(SETUP.validate_setup_activation_authority(self.fixture.program_root))
+        self.assertEqual(repository_snapshot(self.fixture.repository), before)
+
+    def test_invalid_direct_activation_preserves_all_bytes(self):
+        self.fixture.close()
+        self.fixture = BootstrapFixture()
+        candidates = list(successor_gap_candidates(self.fixture))
+        original = self.fixture.load_json("manifest.json")
+        shutil.copytree(self.fixture.candidate, self.fixture.program_root)
+        for case, manifest in candidates:
+            with self.subTest(case=case):
+                manifest_path = self.fixture.program_root / "manifest.json"
+                manifest_path.write_bytes(canonical_json(original))
+                decision = SETUP.adapt_setup_decision(self.fixture.program_root, "Yes", role="user", provenance="direct-user-message")
+                manifest_path.write_bytes(canonical_json(manifest))
+                before = repository_snapshot(self.fixture.repository)
+                observation = ACTIVATION.inspect_repository(self.fixture.repository, self.fixture.head).observation
+                with self.assertRaises(ValueError):
+                    SETUP.adapt_setup_decision(self.fixture.program_root, "Yes", role="user", provenance="direct-user-message")
+                with self.assertRaises(ValueError):
+                    ACTIVATION.activate_program(self.fixture.program_root, decision, observation)
+                self.assertEqual(repository_snapshot(self.fixture.repository), before)
 
 
 class ProgramSetupTests(unittest.TestCase):

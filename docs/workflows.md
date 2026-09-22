@@ -12,8 +12,8 @@ explicitly want to create a program proposal.
 ```text
 Use $implementing-staged-plans to create a new repository-backed program from
 docs/library-search-plan.md in /work/library-catalog. Inspect the repository
-freshly. Publish only the creation control plane and return the one exact launch
-prompt. Do not activate or implement it.
+freshly. Publish only the creation control plane and return the readable setup
+recap for approval. Stop before activation or implementation.
 ```
 
 The publisher binds the immutable source, traceability, proposed program,

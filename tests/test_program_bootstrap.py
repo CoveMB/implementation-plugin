@@ -56,6 +56,18 @@ class ProgramBootstrapTestCase(unittest.TestCase):
 
 
 class PublicationTests(ProgramBootstrapTestCase):
+    def test_successor_gaps_fail_before_publication_staging(self):
+        from tests.test_program_setup import successor_gap_candidates
+
+        for case, manifest in successor_gap_candidates(self.fixture):
+            with self.subTest(case=case):
+                self.fixture.write_json("manifest.json", manifest)
+                before = repository_snapshot(self.fixture.root)
+                with self.assertRaises(ValueError):
+                    self.publish()
+                self.assertEqual(repository_snapshot(self.fixture.root), before)
+                self.assertFalse(self.fixture.program_root.exists())
+
     def test_publication_freshness_uses_relative_invalid_manifest_issues(
         self,
     ) -> None:

@@ -1,3 +1,5 @@
+import copy
+import hashlib
 import json
 import re
 import subprocess
@@ -195,6 +197,185 @@ class MultiIncrementLifecycleTests(unittest.TestCase):
             raise ValueError(f"unsupported continuation domain: {domain}")
         assert receipt is not None
         return receipt
+
+    def start_permission_program(self, permissions, *, mode="approval:standard", v2=False):
+        self.fixture.close()
+        self.fixture = BootstrapFixture(baseline_files={"shared.txt": b"initial shared bytes\n"})
+        self.fixture.configure_successor_chain(("ARCHIVE-INDEX", "ARCHIVE-VERIFY", "ARCHIVE-PUBLISH"))
+        self.fixture.configure_approval_mode(mode)
+        self.fixture.configure_setup_v3()
+        manifest = self.fixture.load_json("manifest.json")
+        semantics = manifest["setup_semantics"]
+        envelope = semantics["operation_envelope"]
+        allocations = envelope["allocations"]
+        if v2:
+            semantics["schema_version"] = "implementation-program-setup-semantics/v2"
+            envelope.update(schema_version="implementation-operation-envelope/v2", supported_operations=["Create", "Modify", "Delete", "Preserve"])
+            # This case selects only its explicit shared-file Preserve permission.
+            allocations[:] = [item for item in allocations if item["path"] != "catalog.txt"]
+        self.permission_paths = set(permissions)
+        self.permission_v2 = v2
+        for path, records in permissions.items():
+            for operation, increment, collision in records:
+                template_operation = "Create" if operation == "Create" else "Modify"
+                allocation = copy.deepcopy(next(item for item in allocations if item["operation"] == template_operation))
+                allocation.update(path=path, operation=operation, increment_ids=[increment], collision=collision)
+                allocations.append(allocation)
+        manifest["setup_semantics_sha256"] = bootstrap_support.canonical_compact_sha256(semantics)
+        self.fixture.write_json("manifest.json", manifest)
+        self.assertEqual(SETUP.validate_setup_semantics(self.fixture.candidate), [])
+        BOOTSTRAP.publish_program_proposal(self.fixture.repository, self.fixture.source_plan, self.fixture.candidate, self.fixture.source_sha256)
+        observation = ACTIVATION.inspect_repository(self.fixture.repository, self.fixture.head).observation
+        decision = SETUP.adapt_setup_decision(self.fixture.program_root, "Yes", role="user", provenance="direct-user-message")
+        activation = ACTIVATION.activate_program(self.fixture.program_root, decision, observation)
+        intent = SETUP.adapt_increment_start_intent(self.fixture.program_root, activation.handoff, role="user", provenance="direct-user-message")
+        ACTIVATION.start_first_increment(self.fixture.program_root, intent, observation)
+
+    def permission_plan(self, operations):
+        _, rendered = self.run_phase("render-exact-plan")
+        plan = rendered["plan"]
+        plan = "\n".join(line for line in plan.split("\n") if not any(line.startswith(f"- `{path}` —") for path in self.permission_paths))
+        for operation in ("Create", "Modify", "Preserve"):
+            additions = "".join(f"- `{path}` — exact owned path.\n" for path, selected in operations.items() if selected == operation)
+            plan = plan.replace(f"### {operation}\n\n", f"### {operation}\n\n" + additions, 1)
+        parse = ACTIVATION.parse_exact_file_map_v2 if self.permission_v2 else ACTIVATION.parse_exact_file_map
+        file_map = parse(plan)
+        for path in self.permission_paths:
+            selected = [operation for operation in ("Create", "Modify", "Preserve") if path in getattr(file_map, operation.lower())]
+            self.assertEqual(selected, [operations[path]] if path in operations else [])
+        return plan.encode()
+
+    def prepare_permission_plan(self, operations):
+        _, prepared = self.run_phase("prepare-plan", exact_plan=self.permission_plan(operations))
+        if prepared["plan_prompt"] is not None:
+            self.run_phase("materialize-plan", prompt=prepared["plan_prompt"])
+        return json.loads((self.fixture.program_root / "increments" / self.load_status()["current_increment_id"] / "execution-baseline.json").read_text())
+
+    def execute_permission_increment(self, writes):
+        preserved = {path: (self.fixture.repository / path).read_bytes() for path in self.permission_paths - set(writes) if (self.fixture.repository / path).exists()}
+        self.run_phase("implementing")
+        for path, content in writes.items():
+            (self.fixture.repository / path).write_bytes(content)
+        self.run_phase("reviewing")
+        self.run_phase("prepare-review")
+        for path, content in preserved.items():
+            self.assertEqual((self.fixture.repository / path).read_bytes(), content)
+
+    def test_explicit_repeated_modify_and_retention_complete_three_increments(self):
+        permissions = {
+            "shared.txt": [("Modify", "ARCHIVE-INDEX", "existing"), ("Modify", "ARCHIVE-VERIFY", "accepted-predecessor"), ("Preserve", "ARCHIVE-PUBLISH", "accepted-predecessor")],
+            "retained.txt": [("Create", "ARCHIVE-INDEX", "none"), ("Preserve", "ARCHIVE-VERIFY", "accepted-predecessor"), ("Modify", "ARCHIVE-PUBLISH", "accepted-predecessor")],
+        }
+        for mode in ("approval:standard", "approval:pre-approve", "approval:full-increment"):
+            with self.subTest(mode=mode):
+                self.start_permission_program(permissions, mode=mode)
+                approved_manifest = (self.fixture.program_root / "manifest.json").read_bytes()
+                self.prepare_permission_plan({"shared.txt": "Modify", "retained.txt": "Create"})
+                self.execute_permission_increment({"shared.txt": b"first shared result\n", "retained.txt": b"retained result\n"})
+                self.rollover("immediate")
+                baseline = self.prepare_permission_plan({"shared.txt": "Modify", "retained.txt": "Preserve"})
+                self.assertIn("shared.txt", baseline["inherited_paths"])
+                self.assertIn("retained.txt", baseline["file_map"]["preserve"])
+                self.assertEqual((self.fixture.repository / "shared.txt").read_bytes(), b"first shared result\n")
+                self.execute_permission_increment({"shared.txt": b"second shared result\n"})
+                self.assertEqual((self.fixture.repository / "retained.txt").read_bytes(), b"retained result\n")
+                self.rollover("accepted-state")
+                baseline = self.prepare_permission_plan({"shared.txt": "Preserve", "retained.txt": "Modify"})
+                self.assertIn("retained.txt", baseline["inherited_paths"])
+                self.execute_permission_increment({"retained.txt": b"updated retained result\n"})
+                _, stop = self.run_phase("render-accept-stop")
+                self.run_phase("accept", prompt=stop["prompt"])
+                self.assertEqual(self.load_status()["current_increment_state"], "accepted")
+                self.assertEqual((self.fixture.repository / "shared.txt").read_bytes(), b"second shared result\n")
+                self.assertEqual((self.fixture.program_root / "manifest.json").read_bytes(), approved_manifest)
+
+    def test_optional_omission_never_becomes_accepted_history(self):
+        self.start_permission_program({"shared.txt": [("Modify", "ARCHIVE-INDEX", "existing"), ("Modify", "ARCHIVE-VERIFY", "accepted-predecessor"), ("Preserve", "ARCHIVE-PUBLISH", "accepted-predecessor")]})
+        self.prepare_permission_plan({})
+        self.execute_permission_increment({})
+        self.rollover("immediate")
+        self.assertNotIn("shared.txt", self.load_status()["inherited_workspace_binding"]["inherited_paths"])
+        plan = self.permission_plan({"shared.txt": "Modify"})
+        before = repository_snapshot(self.fixture.repository)
+        failed, _ = self.run_phase("prepare-plan", exact_plan=plan, check=False)
+        self.assertEqual(failed.returncode, 1, failed.stderr)
+        self.assertIn("Modify path no longer matches its setup-approved operation envelope observation: shared.txt", failed.stderr)
+        self.assertEqual(repository_snapshot(self.fixture.repository), before)
+
+    def test_later_first_modification_has_no_invented_predecessor(self):
+        self.start_permission_program({"shared.txt": [("Modify", "ARCHIVE-VERIFY", "existing"), ("Modify", "ARCHIVE-PUBLISH", "accepted-predecessor")]}, mode="approval:pre-approve")
+        self.prepare_permission_plan({})
+        self.execute_permission_increment({})
+        self.rollover("accepted-state")
+        self.assertNotIn("shared.txt", self.load_status()["inherited_workspace_binding"]["inherited_paths"])
+        self.prepare_permission_plan({"shared.txt": "Modify"})
+        self.execute_permission_increment({"shared.txt": b"first changed in verification\n"})
+        self.rollover("immediate")
+        baseline = self.prepare_permission_plan({"shared.txt": "Modify"})
+        self.assertIn("shared.txt", baseline["inherited_paths"])
+        self.assertEqual((self.fixture.repository / "shared.txt").read_bytes(), b"first changed in verification\n")
+
+    def test_v2_preserve_result_is_inherited_without_a_later_retention_allocation(self):
+        for successor_operation in ("Preserve", "Modify"):
+            with self.subTest(operation=successor_operation):
+                self.start_permission_program({"shared.txt": [("Preserve", "ARCHIVE-INDEX", "existing"), (successor_operation, "ARCHIVE-VERIFY", "accepted-predecessor")]}, v2=True)
+                self.prepare_permission_plan({"shared.txt": "Preserve"})
+                original = (self.fixture.repository / "shared.txt").read_bytes()
+                self.execute_permission_increment({})
+                self.rollover("immediate")
+                states = self.load_status()["inherited_workspace_binding"]["inherited_path_states"]
+                shared = next(item for item in states if item["path"] == "shared.txt")
+                self.assertTrue(shared["exists"])
+                self.assertEqual(shared["sha256"], hashlib.sha256(original).hexdigest())
+                self.prepare_permission_plan({"shared.txt": successor_operation})
+                writes = {"shared.txt": b"updated preserved file\n"} if successor_operation == "Modify" else {}
+                self.execute_permission_increment(writes)
+                self.rollover("accepted-state")
+                self.prepare_permission_plan({})
+                states = self.load_status()["inherited_workspace_binding"]["inherited_path_states"]
+                self.assertTrue(next(item for item in states if item["path"] == "shared.txt")["exists"])
+                self.assertEqual((self.fixture.repository / "shared.txt").read_bytes(), writes.get("shared.txt", original))
+
+    def test_successor_checks_reject_tampering_and_recover_exact_plan_prefix(self):
+        self.start_permission_program({"shared.txt": [("Modify", "ARCHIVE-INDEX", "existing"), ("Preserve", "ARCHIVE-VERIFY", "accepted-predecessor"), ("Preserve", "ARCHIVE-PUBLISH", "accepted-predecessor")]}, mode="approval:full-increment")
+        self.prepare_permission_plan({"shared.txt": "Modify"})
+        self.execute_permission_increment({"shared.txt": b"accepted shared result\n"})
+        self.rollover("immediate")
+        plan = self.permission_plan({"shared.txt": "Preserve"})
+        shared = self.fixture.repository / "shared.txt"
+        original = shared.read_bytes()
+        for tamper in ("bytes", "symlink", "mode", "user-work"):
+            with self.subTest(tamper=tamper):
+                if tamper == "bytes":
+                    shared.write_bytes(b"tampered\n")
+                elif tamper == "symlink":
+                    shared.unlink()
+                    shared.symlink_to("catalog.txt")
+                elif tamper == "mode":
+                    shared.chmod(0o755)
+                else:
+                    (self.fixture.repository / "user-notes.txt").write_bytes(b"user work\n")
+                before = repository_snapshot(self.fixture.repository)
+                failed, _ = self.run_phase("prepare-plan", exact_plan=plan, check=False)
+                self.assertEqual(failed.returncode, 1, failed.stderr)
+                self.assertEqual(repository_snapshot(self.fixture.repository), before)
+                if tamper == "symlink":
+                    shared.unlink()
+                if tamper == "user-work":
+                    (self.fixture.repository / "user-notes.txt").unlink()
+                shared.write_bytes(original)
+                shared.chmod(0o644)
+        failed, _ = self.run_phase("prepare-plan", exact_plan=plan, fail_label="execution-baseline", check=False)
+        self.assertEqual(failed.returncode, 1, failed.stderr)
+        self.assertIn("injected-after:execution-baseline", failed.stderr)
+        prefix = repository_snapshot(self.fixture.repository)
+        divergent, _ = self.run_phase("prepare-plan", exact_plan=plan + b"\nDivergent retry.\n", check=False)
+        self.assertEqual(divergent.returncode, 1, divergent.stderr)
+        self.assertEqual(repository_snapshot(self.fixture.repository), prefix)
+        self.run_phase("prepare-plan", exact_plan=plan)
+        recovered = repository_snapshot(self.fixture.repository)
+        self.run_phase("prepare-plan", exact_plan=plan)
+        self.assertEqual(repository_snapshot(self.fixture.repository), recovered)
 
     def test_later_continuation_crosses_a_fresh_process_boundary(self) -> None:
         self.publish_and_advance_first_to_diff()
