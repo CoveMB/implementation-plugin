@@ -1,5 +1,12 @@
 # Reference
 
+New proposals declare immutable `program_start_contract: combined-start/v1`.
+Use `render_program_start_summary` and `program_start_checkpoint` for presentation,
+`adapt_program_start_decision` with the actual presented checkpoint for a later
+direct **Start the first increment** reply, and `start_program` for activation or
+an explicitly requested retry. These APIs live in `program_setup.py` and
+`program_activation.py`. See [Combined program start](../skills/implementing-staged-plans/references/approval-checkpoints.md#combined-program-start).
+
 This page is a compact guide to the terms and decisions used by
 `implementing-staged-plans`. The [canonical skill instructions](../skills/implementing-staged-plans/SKILL.md)
 and their linked procedures remain authoritative when a user guide and the

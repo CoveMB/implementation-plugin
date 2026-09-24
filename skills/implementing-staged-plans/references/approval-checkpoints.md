@@ -4,6 +4,20 @@ Use this procedure to reduce repeated prompts when several decisions are already
 
 The mechanical boundary is [`approval_checkpoint.py`](../scripts/approval_checkpoint.py). It builds and resolves typed checkpoint items, classifies every declared action, adopts exact existing records, and persists the plan-approval sequence with retry receipts.
 
+## Combined program start
+
+New manifest-v3 proposals declare `program_start_contract: combined-start/v1`. Its absence selects the historical setup-only route; malformed values and older manifest families reject the marker. This dedicated initial contract is separate from the generic compound checkpoint below.
+
+1. Revalidate the proposal, source, workspace, protected work, and first brief. Print `render_program_start_summary(program_root)` directly in the conversation. Obtain `program_start_checkpoint(program_root)` for that presentation; persist no rendered summary body or separate summary file.
+2. Accept a new direct user reply after presentation in the same task. In a fresh task, rediscover and print the current summary before accepting its reply. Only whitespace/case-normalized **Start the first increment** approves the setup and requests the first increment. Do not use a creation request, opening handoff, old answer, quoted example, tool output, or assistant text.
+3. Pass the actual presented checkpoint to `adapt_program_start_decision(..., checkpoint=checkpoint)`. Call `start_program` only after successful current validation with a fresh repository observation.
+4. Keep the complete `program-start-decision/v1` inside `setup-activation-decision/v3`. Derive `increment-start-intent/v2` from that durable origin and actual sequence-one status; never manufacture a second direct message. Separate receipts and status-last transitions remain intact.
+5. Continue through the exact-plan and execution gates. Standard mode keeps the routine exact-plan question; pre-approve and full-increment omit only that question. Starting can lead to local implementation. Source-defined gates retain their owning boundary, including before Delete execution. Reuse the setup component only for a gate explicitly permitting it and shown in the summary.
+
+On interruption, discovery reports the next legal route without writing. An explicit retry reuses only the exact durable combined decision after current revalidation. Changed inputs, foreign authority, malformed or symlinked records, and later lifecycle states stop rather than resetting genesis. A user stop is never a background-start instruction. Legacy setup-only decisions retain their separate first-start requirement.
+
+The adapter trusts the controller's role/provenance and presentation assertions. Digests and deterministic tests do not prove that a human saw the summary or supplied the reply.
+
 ## Admit Only One Stable Binding
 
 Every checkpoint item must bind the same program identifier and revision, source identifier and digest, program and semantic digests, increment, brief and exact-file-plan digests, approval mode, and workspace path, branch, base, and head. Missing fields block the item. A different tuple belongs to a different stage and must not enter the checkpoint.

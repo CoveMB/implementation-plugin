@@ -35,7 +35,9 @@ from program_launch import (
     validate_submitted_program_launch_prompt,
 )
 from program_setup import (
+    PROGRAM_START_CONTRACT,
     SETUP_ACTIVATION_SCHEMA_V2,
+    inspect_program_start_prefix,
     inspect_sequence_zero_activation_prefix,
     setup_family_contract,
 )
@@ -58,6 +60,16 @@ from state_authority import (
 RESUMABLE_PROGRAM_STATES = frozenset({"active", "blocked"})
 SUPPORTED_PROGRAM_STATES = frozenset({*RESUMABLE_PROGRAM_STATES, "closed"})
 PLAN_A_ROUTE_DETAILS = {
+    "program-start-ready": (
+        "program-start-decision",
+        "Print the current program start summary in the conversation and wait for a new direct Start the first increment reply.",
+        True,
+    ),
+    "program-start-retry-ready": (
+        None,
+        "Only on an explicit retry request, recover the original combined decision and retry program start after revalidation.",
+        True,
+    ),
     "program-setup-ready": (
         "program-setup-approval",
         "Present the readable program setup recap and wait for a direct answer.",
@@ -1399,6 +1411,7 @@ def _load_setup_candidate(
     program_state = status.get("program_state")
     increment_state = status.get("current_increment_state")
     setup_exists = bool(setup_path and (setup_path.exists() or setup_path.is_symlink()))
+    combined_start = manifest.get("program_start_contract") == PROGRAM_START_CONTRACT
     if sequence == 0:
         prefix = inspect_sequence_zero_activation_prefix(root)
         prefix_issues = [str(issue) for issue in prefix.get("issues", [])]
@@ -1407,6 +1420,7 @@ def _load_setup_candidate(
             setup_v2 = (
                 setup_family_contract(manifest).get("activation_schema")
                 == SETUP_ACTIVATION_SCHEMA_V2
+                or combined_start
             )
         except ValueError:
             setup_v2 = False
@@ -1419,11 +1433,11 @@ def _load_setup_candidate(
                     root, validation_mode=PROPOSAL_VALIDATION_MODE
                 )
             )
-            route = "program-setup-ready"
+            route = "program-start-ready" if combined_start else "program-setup-ready"
         elif prefix_state == "pending-gate":
             route = "source-gate-approval-ready"
         elif prefix_state == "activation-retry-ready":
-            route = "program-activation-retry-ready"
+            route = "program-start-retry-ready" if combined_start else "program-activation-retry-ready"
         else:
             issues.append("v3 activation prefix is invalid")
         if issues:
@@ -1432,6 +1446,12 @@ def _load_setup_candidate(
             )
         return candidate, route, ()
     if isinstance(sequence, int) and sequence >= 1:
+        if combined_start and sequence == 1:
+            prefix = inspect_program_start_prefix(root)
+            if prefix["state"] == "invalid":
+                return candidate, "program-activation-recovery-required", ()
+            route = "source-gate-approval-ready" if prefix["state"] == "pending-gate" else "program-start-retry-ready"
+            return candidate, route, ()
         try:
             workspace_path, workspace_issues = resolve_managed_path(
                 root, roles.get("workspace"), role="logical role workspace"
@@ -1928,6 +1948,7 @@ def _single_bootstrap_prefix_disposition(
                                 "activation_schema"
                             )
                             == SETUP_ACTIVATION_SCHEMA_V2
+                            or committed_manifest.get("program_start_contract") == PROGRAM_START_CONTRACT
                         )
                     except ValueError:
                         setup_v2 = False
@@ -2411,9 +2432,12 @@ def discover_programs(
             route = routes.get(candidates[0].manifest_path, "resume")
             required_input, next_action, stop_required = PLAN_A_ROUTE_DETAILS[route]
             if route == "source-gate-approval-ready":
-                prefix = inspect_sequence_zero_activation_prefix(
-                    repository / candidates[0].program_root
-                )
+                gate_root = repository / candidates[0].program_root
+                gate_manifest, _ = load_json_object(gate_root / "manifest.json")
+                inspector = (inspect_program_start_prefix
+                    if gate_manifest and gate_manifest.get("program_start_contract") == PROGRAM_START_CONTRACT
+                    else inspect_sequence_zero_activation_prefix)
+                prefix = inspector(gate_root)
                 recap = prefix.get("recap")
                 if not isinstance(recap, str) or not recap:
                     return ProgramDiscoveryResult(

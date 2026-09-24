@@ -783,6 +783,12 @@ class BootstrapFixture:
         status["schema_version"] = "implementation-program-status/v3"
         self.write_json("state/status.json", status)
 
+    def configure_combined_start(self) -> None:
+        """Opt a newly generated v3 fixture into combined start before publication."""
+        manifest = self.load_json("manifest.json")
+        manifest["program_start_contract"] = "combined-start/v1"
+        self.write_json("manifest.json", manifest)
+
     def configure_delete_setup_v2(
         self,
         *,

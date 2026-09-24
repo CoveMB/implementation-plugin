@@ -12,8 +12,8 @@ explicitly want to create a program proposal.
 ```text
 Use $implementing-staged-plans to create a new repository-backed program from
 docs/library-search-plan.md in /work/library-catalog. Inspect the repository
-freshly. Publish only the creation control plane and return the readable setup
-recap for approval. Stop before activation or implementation.
+freshly. Publish only the creation control plane and print the short program
+start summary in the conversation. Create no recap or summary file. Stop before starting.
 ```
 
 The publisher binds the immutable source, traceability, proposed program,
@@ -25,18 +25,25 @@ Creation authority does not approve the program or permit product changes.
 
 ## 2. Approve and Activate a Generated Program
 
-Review the readable setup recap and answer its final setup question directly.
+Review the printed summary, including the workspace, increments, limits, and gates.
+After it is presented, reply directly:
 
 ```text
-Yes
+Start the first increment
 ```
 
-For manifest v3, activation records the typed setup decision and separate
-program/workspace receipts, then stops at `awaiting-first-increment` without a
-grant or product authority. Submit the returned semantic handoff in a fresh task;
-that task revalidates current state, records the first-start grant, and reaches
-`preparing`. A file, quoted answer, retrieved answer, conditional answer, or
-assistant-generated answer cannot satisfy either direct-user boundary.
+New proposals use `combined-start/v1`. That decision approves the displayed setup
+and starts the first increment under the selected approval mode. It can lead to
+local implementation after the required plan and execution checks. Starting works
+in the same task or a fresh task; a fresh task first rediscovers and prints the
+current summary, then waits for its direct reply. Creation intent, an opening
+handoff, generic “yes”, and quoted or conditional answers do not count.
+
+Separate receipts and the recoverable `awaiting-first-increment` state remain
+internal. If interrupted, request a retry of the existing combined decision;
+discovery does not continue on its own. Source gates still pause where required.
+Unmarked legacy v3 proposals retain the setup-only “yes” and separate first-start
+handoff; they are not converted or deleted.
 
 Existing manifest-v2 proposals keep the historical byte-exact launch prompt and
 combined activation behavior.

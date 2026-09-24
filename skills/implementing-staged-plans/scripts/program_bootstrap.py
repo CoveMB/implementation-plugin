@@ -24,7 +24,7 @@ from program_authority import (
     sha256_file,
     validate_program_authority,
 )
-from program_setup import render_setup_recap
+from program_setup import PROGRAM_START_CONTRACT, render_program_start_summary, render_setup_recap
 from repository_preparation import inspect_repository, validate_repository_stability
 
 
@@ -44,6 +44,7 @@ class ProposalPublication:
     adopted_paths: tuple[str, ...]
     recovered: bool
     setup_recap_sha256: str | None = None
+    program_start_summary_sha256: str | None = None
 
 
 class _UsageError(ValueError):
@@ -779,9 +780,10 @@ def publish_program_proposal(
     )
     if status_path is None:
         raise ValueError("; ".join(status_issues))
+    combined_start = manifest.get("program_start_contract") == PROGRAM_START_CONTRACT
     setup_recap_sha256 = (
         _sha256_bytes(render_setup_recap(target).encode("utf-8"))
-        if is_setup_v3
+        if is_setup_v3 and not combined_start
         else None
     )
     return ProposalPublication(
@@ -798,6 +800,9 @@ def publish_program_proposal(
             or bool(adopted)
         ),
         setup_recap_sha256=setup_recap_sha256,
+        program_start_summary_sha256=(
+            _sha256_bytes(render_program_start_summary(target).encode("utf-8")) if combined_start else None
+        ),
     )
 
 

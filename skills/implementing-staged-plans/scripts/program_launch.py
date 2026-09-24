@@ -216,8 +216,10 @@ def render_program_launch_prompt(program_root: Path) -> str:
         status, _ = _load_role(root, manifest, "status")
         if status.get("schema_version") != "implementation-program-status/v3":
             raise ValueError("manifest v3 requires status v3")
-        from program_setup import render_setup_recap
+        from program_setup import PROGRAM_START_CONTRACT, render_program_start_summary, render_setup_recap
 
+        if manifest.get("program_start_contract") == PROGRAM_START_CONTRACT:
+            return render_program_start_summary(root)
         return render_setup_recap(root)
     return render_exact_prompt(_launch_command(root))
 

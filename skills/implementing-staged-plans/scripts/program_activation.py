@@ -10,7 +10,7 @@ import importlib.util
 import json
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
@@ -20,12 +20,22 @@ from program_authority import (
     load_json_object,
     resolve_managed_path,
     sha256_file,
+    validate_program_authority,
+    PROPOSAL_VALIDATION_MODE,
 )
 from program_setup import (
     STATUS_SCHEMA_V3,
     OPERATION_ENVELOPE_SCHEMA_V2,
     SOURCE_GATE_SATISFACTION_SCHEMA,
     SETUP_SEMANTICS_SCHEMA_V2,
+    SETUP_ACTIVATION_SCHEMA_V3,
+    PROGRAM_START_CONTRACT,
+    PROGRAM_START_DECISION_SCHEMA,
+    _setup_activation_record,
+    _first_start_gate_prefix,
+    derive_program_start_intent,
+    inspect_sequence_zero_activation_prefix,
+    validate_program_start_decision,
     derive_identifier,
     render_increment_start_handoff,
     setup_family_contract,
@@ -589,11 +599,14 @@ def _build_v3_setup_record(
     semantics = manifest.get("setup_semantics")
     if not all(isinstance(value, dict) for value in (source, program, semantics)):
         raise ValueError("setup proposal bindings are incomplete")
+    combined = decision.get("schema_version") == PROGRAM_START_DECISION_SCHEMA
+    checkpoint = decision["checkpoint"] if combined else decision["recap_checkpoint"]
+    adapter_id = decision["decision_id"] if combined else decision["adapter_id"]
     receipt_seed = {
         "program_id": manifest["program_id"],
         "program_revision": manifest["program_revision"],
         "semantic_decision_identity": setup_semantic_identity(manifest),
-        "setup_adapter_id": decision["adapter_id"],
+        "setup_adapter_id": adapter_id,
         "proposal_status_sha256": proposal_status_sha256,
         "proposal_status_sequence": proposal_status_sequence,
     }
@@ -606,7 +619,8 @@ def _build_v3_setup_record(
         },
     )
     base: dict[str, object] = {
-        "schema_version": setup_family_contract(manifest)["activation_schema"],
+        "schema_version": (SETUP_ACTIVATION_SCHEMA_V3 if combined
+                           else setup_family_contract(manifest)["activation_schema"]),
         "program_id": manifest["program_id"],
         "program_revision": manifest["program_revision"],
         "source_binding": source,
@@ -618,13 +632,11 @@ def _build_v3_setup_record(
         "source_gate_definitions_sha256": manifest[
             "source_gate_definitions_sha256"
         ],
-        "recap_checkpoint": decision["recap_checkpoint"],
-        "presented_integrity_identity": decision[
-            "presented_integrity_identity"
-        ],
+        "recap_checkpoint": checkpoint,
+        "presented_integrity_identity": checkpoint["presented_integrity_identity"],
         "decision": "approved",
         "provenance_class": decision["provenance_class"],
-        "setup_adapter_id": decision["adapter_id"],
+        "setup_adapter_id": adapter_id,
         "setup_adapter_sha256": value_sha256(decision),
         "workspace_observation": _observation_value(observation),
         "integrity_drift_classification": "visible-decision-unchanged",
@@ -633,6 +645,8 @@ def _build_v3_setup_record(
         "proposal_status_sha256": proposal_status_sha256,
         "proposal_status_sequence": proposal_status_sequence,
     }
+    if combined:
+        base["program_start_decision"] = decision
     base["decision_id"] = derive_identifier("setup-activation-decision", base)
     return base
 
@@ -733,7 +747,9 @@ def _activate_setup_program(
 ) -> ActivationReceipt:
     if not isinstance(submitted_decision, dict):
         raise ValueError("v3 setup activation requires a typed setup decision")
-    decision_issues = validate_setup_decision(root, submitted_decision)
+    combined = submitted_decision.get("schema_version") == PROGRAM_START_DECISION_SCHEMA
+    decision_issues = (validate_program_start_decision(root, submitted_decision) if combined
+                       else validate_setup_decision(root, submitted_decision))
     if decision_issues:
         raise ValueError("; ".join(decision_issues))
     observation = _fresh_setup_observation(root, supplied_observation)
@@ -827,7 +843,7 @@ def _activate_setup_program(
         or recovered
     )
     _after_persist("active-waiting-status")
-    handoff = render_increment_start_handoff(root)
+    handoff = None if combined else render_increment_start_handoff(root)
     return ActivationReceipt(
         program_id=str(manifest["program_id"]),
         increment_id=str(active_status["current_increment_id"]),
@@ -841,11 +857,55 @@ def _activate_setup_program(
     )
 
 
-def start_first_increment(
+def start_program(
+    program_root: Path, decision: Mapping[str, object], observation: RepositoryObservation,
+) -> ActivationReceipt:
+    """Explicitly start or retry one combined decision through two status-last writes."""
+    root = Path(program_root)
+    _preload_activation_dependencies()
+    manifest, issues = load_json_object(root / "manifest.json")
+    if manifest is None or manifest.get("program_start_contract") != PROGRAM_START_CONTRACT:
+        raise ValueError("combined program start requires combined-start/v1")
+    if not isinstance(decision, Mapping):
+        raise ValueError("combined program start requires its typed decision")
+    fresh = _fresh_setup_observation(root, observation)
+    _v3_workspace_matches(root, manifest, fresh)
+    status_path = _v3_setup_role_path(root, manifest, "status", require_file=True)
+    status, issues = load_json_object(status_path)
+    if status is None:
+        raise ValueError("; ".join(issues))
+    sequence = status.get("state_sequence")
+    if type(sequence) is not int or (sequence, status.get("current_increment_state")) not in {
+        (0, "not-started"), (1, "awaiting-first-increment"), (2, "preparing")
+    }:
+        raise ValueError("combined start cannot reset a later lifecycle state; use its current resume route")
+    if sequence == 0:
+        prefix = inspect_sequence_zero_activation_prefix(root)
+        issues = list(prefix["issues"])
+        if prefix["state"] == "pristine":
+            issues.extend(validate_program_authority(root, validation_mode=PROPOSAL_VALIDATION_MODE))
+        else:
+            setup, _ = _setup_activation_record(root, manifest)
+            if setup.get("program_start_decision") != dict(decision):
+                issues.append("combined retry requires the original program start decision")
+        issues.extend(validate_program_start_decision(root, decision))
+        if issues:
+            raise ValueError("; ".join(issues))
+        _activate_setup_program(root, dict(decision), fresh)
+    else:
+        setup, _ = _setup_activation_record(root, manifest)
+        if setup.get("program_start_decision") != dict(decision):
+            raise ValueError("combined retry requires the original program start decision")
+    # The fresh reader checks again after sequence one. No handoff text is authority.
+    intent = derive_program_start_intent(root)
+    return start_first_increment(root, intent, fresh)
+
+
+def _build_first_increment_start(
     program_root: Path,
     start_intent: dict[str, object],
     supplied_observation: RepositoryObservation,
-) -> ActivationReceipt:
+) -> tuple[dict, dict, dict, dict, Path, Path]:
     root = Path(program_root)
     observation = _fresh_setup_observation(root, supplied_observation)
     manifest, manifest_issues = load_json_object(root / "manifest.json")
@@ -896,6 +956,10 @@ def start_first_increment(
     )
     if workspace_approval is None:
         raise ValueError("first-increment start lacks workspace approval authority")
+    if manifest.get("program_start_contract") == PROGRAM_START_CONTRACT:
+        pending = _first_start_gate_prefix(root, manifest, setup_record, setup_path, start_intent)
+        if pending:
+            raise ValueError(f"source gate {pending['gate_id']} is not durably satisfied")
     gate_satisfaction = source_gate_satisfaction(
         root,
         "before-increment-start",
@@ -959,6 +1023,38 @@ def start_first_increment(
     grants_path = _v3_setup_role_path(
         root, manifest, "increment_grants", require_file=True
     )
+    if manifest.get("program_start_contract") == PROGRAM_START_CONTRACT:
+        # Both retries and the initial write must be an exact initial prefix.
+        issues = validate_state_authority(root, observation)
+        program_approval, expected_workspace_approval, waiting_status = _v3_activation_candidates(
+            root, manifest, setup_record, sha256_file(setup_path),
+            source_gate_satisfaction(root, "before-program-activation", f"program:{manifest['program_id']}"),
+            workspace_path,
+        )
+        if approvals_path.read_bytes() != b"".join(
+            _canonical_json_line(record) for record in (program_approval, expected_workspace_approval)
+        ):
+            issues.append("combined start approvals are not the exact setup prefix")
+        expected_status = waiting_status if status["state_sequence"] == 1 else preparing_status
+        if status_path.read_bytes() != _canonical_json_bytes(expected_status):
+            issues.append("combined start status is not the exact initial prefix")
+        if grants_path.read_bytes() not in {b"", _canonical_json_line(grant_base)}:
+            issues.append("combined start grants are not the exact first-start prefix")
+        for role in ("action_authorizations", "rollovers"):
+            path = _v3_setup_role_path(root, manifest, role, require_file=True)
+            if path.read_bytes():
+                issues.append(f"combined start has unrelated {role}")
+        if issues:
+            raise ValueError("; ".join(issues))
+    return manifest, setup_record, grant_base, preparing_status, grants_path, status_path
+
+
+def start_first_increment(
+    program_root: Path, start_intent: dict[str, object], supplied_observation: RepositoryObservation,
+) -> ActivationReceipt:
+    manifest, setup_record, grant_base, preparing_status, grants_path, status_path = _build_first_increment_start(
+        program_root, start_intent, supplied_observation
+    )
     recovered = _append_or_adopt_record(
         grants_path, grant_base, "grant_id", "first-increment-start"
     )
@@ -967,7 +1063,7 @@ def start_first_increment(
         _replace_or_adopt_status(
             status_path,
             preparing_status,
-            waiting_status_sha256,
+            str(start_intent["waiting_status_sha256"]),
             "first-increment-start",
         )
         or recovered
@@ -975,7 +1071,7 @@ def start_first_increment(
     _after_persist("first-increment-status")
     return ActivationReceipt(
         program_id=str(manifest["program_id"]),
-        increment_id=str(status["current_increment_id"]),
+        increment_id=str(preparing_status["current_increment_id"]),
         increment_state="preparing",
         status_sha256=sha256_file(status_path),
         program_approval_event_id=str(setup_record["program_approval_event_id"]),
@@ -997,6 +1093,8 @@ def activate_program(
         raise ValueError("; ".join(issues))
     _preload_activation_dependencies()
     if manifest.get("schema_version") == SETUP_PROGRAM_MANIFEST_SCHEMA:
+        if manifest.get("program_start_contract") == PROGRAM_START_CONTRACT:
+            return start_program(root, submitted_value, observation)
         return _activate_setup_program(root, submitted_value, observation)
     if not isinstance(submitted_value, str):
         raise ValueError("legacy activation requires the exact launch prompt text")

@@ -38,6 +38,7 @@ SETUP_DECISION_ADAPTER_SCHEMA_V1 = "setup-approval-decision/v1"
 SETUP_DECISION_ADAPTER_SCHEMA_V2 = "setup-approval-decision/v2"
 SETUP_ACTIVATION_SCHEMA_V1 = "setup-activation-decision/v1"
 SETUP_ACTIVATION_SCHEMA_V2 = "setup-activation-decision/v2"
+SETUP_ACTIVATION_SCHEMA_V3 = "setup-activation-decision/v3"
 SETUP_SEMANTICS_SCHEMA = SETUP_SEMANTICS_SCHEMA_V1
 OPERATION_ENVELOPE_SCHEMA = OPERATION_ENVELOPE_SCHEMA_V1
 SETUP_RECAP_SCHEMA = SETUP_RECAP_SCHEMA_V1
@@ -45,12 +46,18 @@ SETUP_RECAP_CHECKPOINT_SCHEMA = SETUP_RECAP_CHECKPOINT_SCHEMA_V1
 SETUP_DECISION_ADAPTER_SCHEMA = SETUP_DECISION_ADAPTER_SCHEMA_V1
 SETUP_ACTIVATION_SCHEMA = SETUP_ACTIVATION_SCHEMA_V1
 INCREMENT_START_INTENT_SCHEMA = "increment-start-intent/v1"
+INCREMENT_START_INTENT_SCHEMA_V2 = "increment-start-intent/v2"
 SOURCE_GATE_DEFINITION_SCHEMA = "source-gate-definition/v1"
 SOURCE_GATE_RECAP_SCHEMA = "source-gate-recap/v1"
 SOURCE_GATE_DECISION_ADAPTER_SCHEMA = "source-gate-decision-adapter/v1"
 SOURCE_GATE_DECISION_SCHEMA = "source-gate-decision/v1"
 SOURCE_GATE_SATISFACTION_SCHEMA = "source-gate-satisfaction/v1"
 DIRECT_USER_PROVENANCE = "direct-user-message"
+PROGRAM_START_CONTRACT = "combined-start/v1"
+PROGRAM_START_SUMMARY_SCHEMA = "program-start-summary/v1"
+PROGRAM_START_CHECKPOINT_SCHEMA = "program-start-checkpoint/v1"
+PROGRAM_START_DECISION_SCHEMA = "program-start-decision/v1"
+PROGRAM_START_ACTIONS = ("approve-program-setup", "start-first-increment")
 SUPPORTED_OPERATIONS_V1 = ("Create", "Modify", "Preserve")
 SUPPORTED_OPERATIONS_V2 = ("Create", "Modify", "Delete", "Preserve")
 SUPPORTED_OPERATIONS = SUPPORTED_OPERATIONS_V1
@@ -474,6 +481,8 @@ def validate_setup_semantics(program_root: Path) -> list[str]:
     issues: list[str] = []
     if manifest.get("schema_version") != MANIFEST_SCHEMA_V3:
         return ["program setup requires implementation-program-manifest/v3"]
+    if "program_start_contract" in manifest and manifest["program_start_contract"] != PROGRAM_START_CONTRACT:
+        issues.append("unsupported program_start_contract")
     semantics = manifest.get("setup_semantics")
     expected_semantic_fields = (
         "schema_version",
@@ -938,6 +947,225 @@ def _work_summary(protected_work: Mapping[str, object]) -> str:
     return ", ".join(parts) + f"; active Git operation: {operation}"
 
 
+def _program_start_manifest(program_root: Path) -> dict[str, Any]:
+    issues = validate_setup_semantics(program_root)
+    if issues:
+        raise ValueError("; ".join(issues))
+    manifest = _load_manifest(program_root)
+    if manifest.get("program_start_contract") != PROGRAM_START_CONTRACT:
+        raise ValueError("program requires combined-start/v1")
+    return manifest
+
+
+def render_program_start_summary(program_root: Path) -> str:
+    """Render the immutable v1 presentation in memory, including material limits."""
+    manifest = _program_start_manifest(program_root)
+    semantics = manifest["setup_semantics"]
+    workspace = semantics["workspace"]
+    approval = semantics["approval"]
+    lines = [
+        f"{semantics['program']['name']}: {semantics['program']['intended_outcome']}",
+        "Starting approves this setup and starts the first increment. It may lead to "
+        "local implementation under the selected approval mode and all remaining gates.",
+        "",
+    ]
+    for increment in semantics["increments"]:
+        first = " (first)" if increment["increment_id"] == semantics["first_increment_id"] else ""
+        lines.append(f"- {increment['increment_id']}{first}: {increment['intended_outcome']}")
+    routine = (
+        "You will still approve the exact-plan before implementation."
+        if approval["routine_exact_plan_question"] else
+        "The routine exact-plan question is omitted; exact plan, baseline, and action authority checks remain."
+    )
+    lines.extend([
+        "", f"Repository: {workspace['repository']}",
+        f"Workspace: {workspace['path']} on branch {workspace['branch']}.",
+        f"Protected existing work: {_work_summary(workspace['protected_work'])}.",
+        f"Approval mode: {approval['mode']}. {routine}", "",
+    ])
+    # Group only identical meanings, never expand exact paths into directory grants.
+    groups: dict[tuple[object, ...], list[str]] = {}
+    for allocation in semantics["operation_envelope"]["allocations"]:
+        if allocation["operation"] == "Delete":
+            condition = (" only against accepted predecessor evidence"
+                         if allocation["collision"] == "accepted-predecessor" else "")
+            exclusions = f" Excluding {'; '.join(allocation['exclusions'])}." if allocation["exclusions"] else ""
+            lines.append(
+                f"Delete {allocation['path']} for {', '.join(allocation['increment_ids'])}{condition}: "
+                f"{allocation['content_disposition']}; accepted state {allocation['accepted_state']}. "
+                f"{allocation['rationale']}{exclusions} Subject to its exact plan and execution gates."
+            )
+        else:
+            key = (allocation["operation"], allocation["kind"], allocation["collision"],
+                   tuple(allocation["inclusions"]), tuple(allocation["exclusions"]),
+                   tuple(allocation["increment_ids"]))
+            groups.setdefault(key, []).append(allocation["path"])
+    for (operation, kind, collision, inclusions, exclusions, increments), paths in groups.items():
+        scope = "bounded class under " + ", ".join(paths) if kind == "bounded-path-class" else f"{len(paths)} exact path(s)"
+        condition = "; only against accepted predecessor evidence" if collision == "accepted-predecessor" else ""
+        limits = f"; excluding {'; '.join(exclusions)}" if exclusions else ""
+        lines.append(f"{operation}: {'; '.join(inclusions)} ({scope}; {', '.join(increments)}){condition}{limits}.")
+    for label, field in (("Protections", "protections"), ("Exclusions", "exclusions"),
+                         ("Boundaries", "external_boundaries"), ("Risks", "material_risks")):
+        if semantics[field]:
+            lines.append(f"{label}: {'; '.join(semantics[field])}")
+    lines.append("Remaining approval boundaries: " + "; ".join(approval["remaining_boundaries"]) + ".")
+    for gate in manifest["source_gate_definitions"]:
+        reuse = "Starting also satisfies this setup-reusable gate." if gate["setup_reuse"] else "Requires its own answer."
+        lines.append(f"Gate ({gate['trigger']}, {gate['protected_subject']}): {gate['question']} {reuse}")
+    roles = manifest["logical_roles"]
+    links = {}
+    for role in ("canonical_source_snapshot", "approved_program", "traceability"):
+        path, issues = resolve_managed_path(Path(program_root), roles[role], role=f"logical role {role}")
+        if path is None:
+            raise ValueError("; ".join(issues))
+        links[role] = path.resolve().as_posix()
+    lines.append("")
+    for source in semantics["sources"]:
+        if source["source_id"] == manifest["source_binding"]["source_id"]:
+            lines.append(f"Source: [{source['title']}]({links['canonical_source_snapshot']})")
+        else:
+            lines.append(f"Source: {source['title']} at {source['location']}")
+    lines.extend([
+        f"Details: [program proposal]({links['approved_program']}); "
+        f"[operation envelope]({Path(program_root).resolve().as_posix()}/manifest.json); "
+        f"[traceability]({links['traceability']}).",
+        "", "Start the first increment",
+    ])
+    return "\n".join(lines)
+
+
+def _protected_work_identity(manifest: Mapping[str, object]) -> str:
+    """Bind existing user bytes and staged blobs, not just Git's path lists."""
+    from repository_preparation import _run_git
+
+    workspace = manifest["setup_semantics"]["workspace"]
+    protected = workspace["protected_work"]
+    paths = sorted({path for field in ("staged_paths", "modified_paths", "untracked_paths", "conflicted_paths")
+                    for path in protected[field]})
+    records = []
+    for relative in paths:
+        path, issues = resolve_managed_path(Path(workspace["path"]), relative,
+                                           role="protected existing work", require_file=False)
+        if path is None or (path.exists() and not path.is_file()):
+            raise ValueError("unsafe protected work: " + "; ".join(issues))
+        record = {"path": relative, "sha256": sha256_file(path) if path.is_file() else None}
+        if relative in protected["staged_paths"]:
+            record["index_sha256"] = _bytes_sha256(_run_git(Path(workspace["path"]),
+                ["ls-files", "--stage", "-z", "--", relative], timeout_seconds=10).stdout)
+        records.append(record)
+    return value_sha256(records)
+
+
+def _program_start_checkpoint(
+    root: Path, manifest: Mapping[str, object], proposal_status_sha256: str,
+    *, protected_work_sha256: str | None = None,
+) -> dict[str, object]:
+    """Project immutable genesis facts; historical callers retain the original status."""
+    first = manifest["setup_semantics"]["first_increment_id"]
+    immutable_artifacts = {}
+    for role in ("approved_program", "source_metadata"):
+        path, issues = resolve_managed_path(root, manifest["logical_roles"][role], role=f"logical role {role}")
+        if path is None:
+            raise ValueError("; ".join(issues))
+        immutable_artifacts[role] = sha256_file(path)
+    value = {
+        "schema_version": PROGRAM_START_CHECKPOINT_SCHEMA,
+        "renderer_schema": PROGRAM_START_SUMMARY_SCHEMA,
+        "renderer_version": 1,
+        "summary_sha256": _bytes_sha256(render_program_start_summary(root).encode("utf-8")),
+        "semantic_decision_identity": setup_semantic_identity(manifest),
+        "presented_integrity_identity": _presented_integrity(root, manifest),
+        "immutable_artifacts": immutable_artifacts,
+        "program_id": manifest["program_id"],
+        "program_revision": manifest["program_revision"],
+        "status_sha256": proposal_status_sha256,
+        "state_sequence": 0,
+        "protected_work_sha256": (_protected_work_identity(manifest)
+                                  if protected_work_sha256 is None else protected_work_sha256),
+        "first_increment_id": first,
+        "brief_binding": _increment_brief_binding(root, manifest, {"current_increment_id": first}),
+    }
+    value["checkpoint_id"] = derive_identifier("program-start-checkpoint", value)
+    return value
+
+
+def program_start_checkpoint(program_root: Path) -> dict[str, object]:
+    root = Path(program_root)
+    manifest = _program_start_manifest(root)
+    status, status_path = _load_role(root, manifest, "status")
+    traceability, _ = _load_role(root, manifest, "traceability")
+    issues = _validate_proposal_status(manifest, traceability, status)
+    if type(status.get("state_sequence")) is not int or status.get("current_increment_id") != manifest["setup_semantics"]["first_increment_id"]:
+        issues.append("program start requires the sequence-zero first increment")
+    if issues:
+        raise ValueError("; ".join(issues))
+    return _program_start_checkpoint(root, manifest, sha256_file(status_path))
+
+
+def adapt_program_start_decision(
+    program_root: Path, response: str, *, role: str, provenance: str,
+    checkpoint: Mapping[str, object],
+) -> dict[str, object]:
+    current = program_start_checkpoint(program_root)
+    if canonical_identity_bytes(checkpoint) != canonical_identity_bytes(current):
+        raise ValueError("stale program start checkpoint")
+    affirmative = (role == "user" and provenance == DIRECT_USER_PROVENANCE
+                   and " ".join(response.lower().split()) == "start the first increment")
+    value = {
+        "schema_version": PROGRAM_START_DECISION_SCHEMA,
+        "checkpoint": current,
+        "decision": "approved" if affirmative else "no-decision",
+        "requested_actions": list(PROGRAM_START_ACTIONS),
+        "conversation_role": role,
+        "provenance_class": provenance,
+        "response_sha256": _bytes_sha256(response.encode("utf-8")),
+    }
+    value["decision_id"] = derive_identifier("program-start-decision", value)
+    return value
+
+
+def _program_start_decision_issues(
+    root: Path, decision: Mapping[str, object], proposal_status_sha256: str, *, live: bool = False,
+) -> list[str]:
+    issues = _exact_fields(decision, ("schema_version", "checkpoint", "decision", "requested_actions",
+        "conversation_role", "provenance_class", "response_sha256", "decision_id"), "program start decision")
+    if issues:
+        return issues
+    try:
+        manifest = _program_start_manifest(root)
+        checkpoint = decision.get("checkpoint")
+        if not isinstance(checkpoint, dict) or not _is_sha256(checkpoint.get("protected_work_sha256")):
+            raise ValueError("program start protected work binding is invalid")
+        expected = _program_start_checkpoint(root, manifest, proposal_status_sha256,
+            protected_work_sha256=None if live else checkpoint["protected_work_sha256"])
+    except ValueError as error:
+        return [str(error)]
+    if canonical_identity_bytes(decision.get("checkpoint")) != canonical_identity_bytes(expected):
+        issues.append("program start checkpoint binding mismatch")
+    if (decision.get("schema_version") != PROGRAM_START_DECISION_SCHEMA
+        or decision.get("decision") != "approved"
+        or decision.get("requested_actions") != list(PROGRAM_START_ACTIONS)
+        or decision.get("conversation_role") != "user"
+        or decision.get("provenance_class") != DIRECT_USER_PROVENANCE
+        or not _is_sha256(decision.get("response_sha256"))):
+        issues.append("program start requires explicit direct combined consent")
+    base = dict(decision)
+    identity = base.pop("decision_id", None)
+    if identity != derive_identifier("program-start-decision", base):
+        issues.append("program start decision identity mismatch")
+    return sorted(set(issues))
+
+
+def validate_program_start_decision(program_root: Path, decision: Mapping[str, object]) -> list[str]:
+    root = Path(program_root)
+    try:
+        checkpoint = program_start_checkpoint(root)
+    except ValueError as error:
+        return [str(error)]
+    return _program_start_decision_issues(root, decision, checkpoint["status_sha256"], live=True)
+
+
 def render_setup_recap(program_root: Path) -> str:
     root = Path(program_root)
     issues = validate_setup_semantics(root)
@@ -1106,6 +1334,8 @@ def adapt_setup_decision(
 ) -> dict[str, object]:
     root = Path(program_root)
     manifest = _load_manifest(root)
+    if "program_start_contract" in manifest:
+        raise ValueError("combined program requires a program start decision")
     family = setup_family_contract(manifest)
     expected_checkpoint = setup_recap_checkpoint(root)
     if checkpoint is not None and dict(checkpoint) != expected_checkpoint:
@@ -1148,6 +1378,8 @@ def validate_setup_decision(
         "setup decision adapter",
     )
     root = Path(program_root)
+    if "program_start_contract" in _load_manifest(root):
+        issues.append("combined program requires a program start decision")
     try:
         family = setup_family_contract(_load_manifest(root))
     except ValueError as error:
@@ -1251,6 +1483,8 @@ def adapt_increment_start_intent(
 ) -> dict[str, object]:
     root = Path(program_root)
     manifest = _load_manifest(root)
+    if "program_start_contract" in manifest:
+        raise ValueError("combined program requires a derived program start intent")
     status, status_path = _load_role(root, manifest, "status")
     expected = render_increment_start_handoff(root)
     if role != "user" or provenance != DIRECT_USER_PROVENANCE:
@@ -1273,10 +1507,58 @@ def adapt_increment_start_intent(
     return base
 
 
+def derive_program_start_intent(program_root: Path) -> dict[str, object]:
+    """Derive first-start authority from the persisted direct combined decision."""
+    root = Path(program_root)
+    manifest = _program_start_manifest(root)
+    setup, setup_path = _setup_activation_record(root, manifest)
+    status, status_path = _load_role(root, manifest, "status")
+    first = manifest["setup_semantics"]["first_increment_id"]
+    state = status.get("current_increment_state")
+    if (status.get("program_state") != "active" or status.get("current_increment_id") != first
+        or type(status.get("state_sequence")) is not int
+        or (state, status["state_sequence"]) not in {("awaiting-first-increment", 1), ("preparing", 2)}):
+        raise ValueError("combined start intent requires the initial first-start boundary")
+    if state == "awaiting-first-increment":
+        waiting_sha256 = sha256_file(status_path)
+    else:
+        previous = status.get("previous_state")
+        if not isinstance(previous, dict) or type(previous.get("state_sequence")) is not int or previous.get("state_sequence") != 1 or previous.get("current_increment_state") != "awaiting-first-increment":
+            raise ValueError("combined start intent waiting predecessor is invalid")
+        waiting_sha256 = previous.get("status_sha256")
+    if not _is_sha256(waiting_sha256):
+        raise ValueError("combined start intent waiting status is invalid")
+    decision = setup["program_start_decision"]
+    issues = _program_start_decision_issues(root, decision, setup["proposal_status_sha256"], live=True)
+    if issues:
+        raise ValueError("; ".join(issues))
+    value = {
+        "schema_version": INCREMENT_START_INTENT_SCHEMA_V2,
+        "program_id": manifest["program_id"], "program_revision": manifest["program_revision"],
+        "increment_id": first, "waiting_status_sha256": waiting_sha256,
+        "waiting_status_sequence": 1,
+        "brief_binding": decision["checkpoint"]["brief_binding"],
+        "setup_activation_decision_id": setup["decision_id"],
+        "setup_activation_decision_sha256": sha256_file(setup_path),
+        "program_start_decision_id": decision["decision_id"],
+        "program_start_decision_sha256": value_sha256(decision),
+        "provenance_class": "derived-program-start-decision",
+    }
+    value["intent_id"] = derive_identifier("increment-start-intent", value)
+    return value
+
+
 def validate_increment_start_intent(
     program_root: Path, intent: Mapping[str, object]
 ) -> list[str]:
     """Validate the complete current first-increment start intent contract."""
+    if intent.get("schema_version") == INCREMENT_START_INTENT_SCHEMA_V2:
+        try:
+            expected = derive_program_start_intent(program_root)
+        except ValueError as error:
+            return [str(error)]
+        return ([] if canonical_identity_bytes(intent) == canonical_identity_bytes(expected)
+                else ["derived program start intent binding mismatch"])
     issues = _exact_fields(
         intent,
         (
@@ -1301,6 +1583,8 @@ def validate_increment_start_intent(
     except ValueError as error:
         issues.append(str(error))
         return sorted(set(issues))
+    if "program_start_contract" in manifest:
+        issues.append("combined program requires a derived program start intent")
     if intent.get("schema_version") != INCREMENT_START_INTENT_SCHEMA:
         issues.append("increment start intent schema mismatch")
     base = dict(intent)
@@ -1473,6 +1757,13 @@ def _setup_activation_record(
     program_root: Path, manifest: Mapping[str, object]
 ) -> tuple[dict[str, object], Path]:
     record, path = _load_role(program_root, manifest, "setup_activation_decision")
+    if manifest.get("program_start_contract") == PROGRAM_START_CONTRACT:
+        issues = _setup_activation_record_issues(Path(program_root), manifest, record)
+        if path.read_bytes() != canonical_json_bytes(record):
+            issues.append("combined setup activation bytes are not canonical")
+        if issues:
+            raise ValueError("; ".join(issues))
+        return record, path
     expected_schema = setup_family_contract(manifest)["activation_schema"]
     if record.get("schema_version") != expected_schema or not _is_text(
         record.get("decision_id")
@@ -1513,6 +1804,12 @@ def persist_source_gate_decision(
             "setup_adapter_id"
         ):
             raise ValueError("source-gate setup boundary authority mismatch")
+        if manifest.get("program_start_contract") == PROGRAM_START_CONTRACT:
+            decision_issues = validate_program_start_decision(
+                root, setup_record["program_start_decision"]
+            )
+            if decision_issues:
+                raise ValueError("; ".join(decision_issues))
     elif trigger == "before-increment-start":
         if status.get("current_increment_state") == "awaiting-first-increment":
             intent_issues = validate_increment_start_intent(
@@ -1542,6 +1839,23 @@ def persist_source_gate_decision(
     elif trigger == "before-program-closure":
         if boundary_authority != status.get("closure_binding"):
             raise ValueError("source-gate closure boundary authority mismatch")
+    if manifest.get("program_start_contract") == PROGRAM_START_CONTRACT and (
+        trigger == "before-program-activation"
+        or (trigger == "before-increment-start"
+            and status.get("current_increment_state") == "awaiting-first-increment")
+    ):
+        from program_activation import (
+            _observation_value, _v3_workspace_matches, _without_owned_program_paths,
+        )
+        from repository_preparation import inspect_repository
+
+        selected = manifest["setup_semantics"]["workspace"]
+        fresh = _without_owned_program_paths(root, inspect_repository(
+            Path(selected["path"]), selected["base_commit"]
+        ).observation)
+        _v3_workspace_matches(root, manifest, fresh)
+        if dict(workspace_observation) != _observation_value(fresh):
+            raise ValueError("source-gate workspace observation is stale")
     records, ledger_path = _load_role(
         root, manifest, "source_gate_decisions", json_lines=True
     )
@@ -1700,17 +2014,27 @@ def _setup_activation_record_issues(
     manifest: Mapping[str, object],
     setup: Mapping[str, object],
 ) -> list[str]:
-    issues = _exact_fields(
-        dict(setup), SETUP_ACTIVATION_FIELDS, "setup-activation decision"
-    )
+    combined = manifest.get("program_start_contract") == PROGRAM_START_CONTRACT
+    fields = (*SETUP_ACTIVATION_FIELDS, "program_start_decision") if combined else SETUP_ACTIVATION_FIELDS
+    issues = _exact_fields(dict(setup), fields, "setup-activation decision")
     setup_base = dict(setup)
     decision_id = setup_base.pop("decision_id", None)
     semantics = manifest.get("setup_semantics")
     try:
-        expected_activation_schema = setup_family_contract(manifest)[
-            "activation_schema"
-        ]
-        expected_checkpoint = setup_recap_checkpoint(root)
+        expected_activation_schema = (SETUP_ACTIVATION_SCHEMA_V3 if combined
+                                      else setup_family_contract(manifest)["activation_schema"])
+        if combined:
+            decision = setup.get("program_start_decision")
+            if not isinstance(decision, dict):
+                raise ValueError("combined setup requires the complete program start decision")
+            issues.extend(_program_start_decision_issues(root, decision, setup.get("proposal_status_sha256")))
+            expected_checkpoint = decision.get("checkpoint")
+            if (setup.get("setup_adapter_id") != decision.get("decision_id")
+                or setup.get("setup_adapter_sha256") != value_sha256(decision)
+                or not _is_exact_integer(setup.get("proposal_status_sequence"))):
+                issues.append("combined setup decision origin mismatch")
+        else:
+            expected_checkpoint = setup_recap_checkpoint(root)
     except ValueError as error:
         expected_activation_schema = None
         expected_checkpoint = None
@@ -1765,6 +2089,7 @@ def _activation_gate_record_issues(
     setup_path: Path,
     definition: Mapping[str, object],
     record: Mapping[str, object],
+    *, start_intent: Mapping[str, object] | None = None,
 ) -> list[str]:
     gate_id = str(definition.get("gate_id"))
     issues = _exact_fields(
@@ -1792,11 +2117,11 @@ def _activation_gate_record_issues(
         or record.get("setup_activation_decision_id") != setup.get("decision_id")
         or record.get("setup_activation_decision_sha256")
         != sha256_file(setup_path)
-        or record.get("status_sha256") != setup.get("proposal_status_sha256")
+        or record.get("status_sha256") != (start_intent["waiting_status_sha256"] if start_intent else setup.get("proposal_status_sha256"))
         or not _is_exact_integer(record.get("status_sequence"))
-        or record.get("status_sequence") != setup.get("proposal_status_sequence")
+        or record.get("status_sequence") != (1 if start_intent else setup.get("proposal_status_sequence"))
         or record.get("protected_subject") != definition.get("protected_subject")
-        or record.get("trigger") != "before-program-activation"
+        or record.get("trigger") != ("before-increment-start" if start_intent else "before-program-activation")
         or record.get("workspace_observation") != setup.get("workspace_observation")
         or record.get("gate_recap_checkpoint") != expected_checkpoint
         or record.get("decision") != "satisfied"
@@ -1806,7 +2131,7 @@ def _activation_gate_record_issues(
         or record.get("exact_plan_sha256") is not None
         or record.get("execution_baseline_sha256") is not None
         or record.get("boundary_authority")
-        != {"setup_adapter_id": setup.get("setup_adapter_id")}
+        != (dict(start_intent) if start_intent else {"setup_adapter_id": setup.get("setup_adapter_id")})
         or decision_id != _identifier("source-gate-decision", decision_base)
     ):
         issues.append(f"source gate {gate_id} decision binding is invalid")
@@ -1859,6 +2184,75 @@ def _activation_approval_prefix_issues(
     )
 
 
+def _first_start_gate_prefix(
+    root: Path, manifest: Mapping[str, object], setup: Mapping[str, object],
+    setup_path: Path, intent: Mapping[str, object],
+) -> dict[str, object] | None:
+    """Validate the exact gate prefix; return the next separately answered gate."""
+    records, ledger_path = _load_role(root, manifest, "source_gate_decisions", json_lines=True)
+    activation = [gate for gate in _gate_definitions(manifest)
+                  if gate["trigger"] == "before-program-activation" and not gate["setup_reuse"]]
+    first_start = [gate for gate in _gate_definitions(manifest)
+                   if gate["trigger"] == "before-increment-start"
+                   and gate["protected_subject"] == f"increment:{intent['increment_id']}"
+                   and not gate["setup_reuse"]]
+    expected = activation + first_start
+    if (len(records) < len(activation) or len(records) > len(expected)
+        or [record.get("gate_id") for record in records] != [gate["gate_id"] for gate in expected[:len(records)]]
+        or ledger_path.read_bytes() != b"".join(canonical_identity_bytes(record) + b"\n" for record in records)):
+        raise ValueError("combined start source gates are not the exact initial prefix")
+    for definition, record in zip(expected, records):
+        issues = _activation_gate_record_issues(root, manifest, setup, setup_path, definition, record,
+            start_intent=intent if definition["trigger"] == "before-increment-start" else None)
+        if issues:
+            raise ValueError("; ".join(issues))
+    return expected[len(records)] if len(records) < len(expected) else None
+
+
+def inspect_program_start_prefix(program_root: Path) -> dict[str, object]:
+    """Read combined start recovery evidence without resuming any transaction."""
+    from program_activation import (_build_first_increment_start, _v3_activation_candidates,
+                                    _v3_workspace_matches, _without_owned_program_paths)
+    from repository_preparation import inspect_repository
+    from state_authority import validate_state_authority
+
+    root = Path(program_root)
+    try:
+        manifest = _program_start_manifest(root)
+        status, status_path = _load_role(root, manifest, "status")
+        if type(status.get("state_sequence")) is int and status["state_sequence"] == 0:
+            return inspect_sequence_zero_activation_prefix(root)
+        intent = derive_program_start_intent(root)
+        setup, setup_path = _setup_activation_record(root, manifest)
+        selected = manifest["setup_semantics"]["workspace"]
+        observation = _without_owned_program_paths(root,
+            inspect_repository(Path(selected["path"]), selected["base_commit"]).observation)
+        _, workspace_path = _v3_workspace_matches(root, manifest, observation)
+        issues = validate_state_authority(root, observation)
+        if issues:
+            raise ValueError("; ".join(issues))
+        pending = _first_start_gate_prefix(root, manifest, setup, setup_path, intent)
+        if pending:
+            satisfaction = source_gate_satisfaction(root, "before-program-activation", f"program:{manifest['program_id']}")
+            program, workspace, waiting = _v3_activation_candidates(root, manifest, setup,
+                sha256_file(setup_path), satisfaction, workspace_path)
+            _, approvals_path = _load_role(root, manifest, "approvals", json_lines=True)
+            if (status_path.read_bytes() != canonical_json_bytes(waiting)
+                or approvals_path.read_bytes() != b"".join(canonical_identity_bytes(record) + b"\n" for record in (program, workspace))):
+                raise ValueError("combined waiting prefix is divergent")
+            for role in ("increment_grants", "action_authorizations", "rollovers"):
+                _, path = _load_role(root, manifest, role, json_lines=True)
+                if path.read_bytes():
+                    raise ValueError("combined authority precedes its source gate")
+            return {"state": "pending-gate", "gate_id": pending["gate_id"],
+                    "protected_subject": pending["protected_subject"], "issues": [],
+                    "recap": render_source_gate_recap(root, pending["gate_id"], pending["protected_subject"])}
+        _build_first_increment_start(root, intent, observation)
+        return {"state": "activation-retry-ready" if status["state_sequence"] == 1 else "started", "issues": []}
+    except (KeyError, TypeError, ValueError, OSError) as error:
+        return {"state": "invalid", "issues": [str(error)]}
+
+
 def inspect_sequence_zero_activation_prefix(
     program_root: Path,
 ) -> dict[str, object]:
@@ -1900,6 +2294,10 @@ def inspect_sequence_zero_activation_prefix(
         issues.extend(_validate_proposal_status(manifest, traceability, status))
     if grants or actions:
         issues.append("v3 proposal contains authority outside the activation prefix")
+    if manifest.get("program_start_contract") == PROGRAM_START_CONTRACT:
+        rollovers, _ = _load_role(root, manifest, "rollovers", json_lines=True)
+        if rollovers:
+            issues.append("combined proposal contains rollover authority")
     setup_exists = setup_path.exists() or setup_path.is_symlink()
     if not setup_exists:
         if approvals or gates:
@@ -1913,7 +2311,8 @@ def inspect_sequence_zero_activation_prefix(
     if setup is None:
         issues.extend(setup_issues)
         return {"state": "invalid", "issues": sorted(set(issues))}
-    if setup_family.get("activation_schema") == SETUP_ACTIVATION_SCHEMA_V2:
+    if (setup_family.get("activation_schema") == SETUP_ACTIVATION_SCHEMA_V2
+        or manifest.get("program_start_contract") == PROGRAM_START_CONTRACT):
         if setup_path.read_bytes() != canonical_json_bytes(setup):
             issues.append("setup-v2 activation decision bytes are not canonical")
         for label, records, ledger_path in (

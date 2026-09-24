@@ -154,6 +154,15 @@ is not separately authorized, leave both results and verdicts absent and report
 
 ## What these checks prove
 
+Combined-start coverage uses synthetic programs: strict new-proposal consent,
+output-only summary identity, initial-prefix recovery, source-gate ordering,
+both operation families and approval modes, successor authority, and supported
+v1 closure. Existing Delete-family terminal closure remains PLUG-002 work.
+The adapter still trusts the controller's presentation and role assertions.
+Manual conversation traces and unit tests do not establish live host behavior,
+human comprehension, or accessibility conformance; a live evaluator campaign
+and installation remain separate authorized work.
+
 The local tests can establish that required files exist, metadata stays
 consistent, reader-document links resolve, examples retain the expected command
 and invocation forms, forbidden package surfaces remain blocked, and the
