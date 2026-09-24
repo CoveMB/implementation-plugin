@@ -30,22 +30,9 @@ Use the existing Python modules and standard library. Do not add a UI framework,
 
 ## Summary contract
 
-Render the summary deterministically from validated canonical records. Its reading order is:
+The compact v2 implementation refines the original v1 grouping approach. The canonical layout, authoring rules, and version compatibility are defined in [Compact presentation and authoring](../../../skills/implementing-staged-plans/references/approval-checkpoints.md#compact-presentation-and-authoring). Render deterministically from validated canonical records: outcome, numbered increments, workspace, approval consequences, scope and risks, actual Delete disclosures and gates, detail links, and one start action.
 
-1. Program outcome and what starting will do.
-2. One outcome line per increment, in order; identify the first increment.
-3. Selected repository, workspace, branch, protected existing work, and approval mode in plain language.
-4. Material scope limits, changes from the source request, exclusions, risks, and any destructive operation with its exact target and disposition.
-5. Source-defined gates and remaining design, Git, provider, installation, and other consequential-action boundaries.
-6. Links to the source plan, approved-program proposal, detailed operation envelope, and traceability, followed by the explicit start choice.
-
-All links point to existing source or machine artifacts. There is no summary-file link or recap logical role. On rediscovery, regenerate the prose from the bound records and renderer version. Persist no summary body in the checkpoint or decision receipt.
-
-Group repeated ordinary operation details by their actual meaning. Do not synthesize a broader directory permission from a set of exact paths. Keep conditional permissions visibly conditional. No automatic deletion is implied by showing a Delete allocation.
-
-Aim for approximately 250–400 words for an ordinary five-increment program, with no hard truncation rule. Additional material risks or gates may require more text. Do not dump requirement IDs, hashes, mode bits, or repeated allocation metadata into the default summary. Detailed records remain available for inspection; linking them is not evidence that the user read every requirement.
-
-The summary must distinguish the approval modes: standard still asks for the exact plan; pre-approve and full-increment omit that routine pause but retain all applicable authority checks. Starting may lead to local implementation under those checks. Do not misleadingly promise that starting can only create records.
+Ordinary allocation rows are omitted, with the complete conditional scope retained in linked records. Aim for 250–400 visible words for an ordinary five-increment program; never truncate unique risks or gates. Persist no summary body. Keep the original v1 renderer byte-compatible for durable history and recovery; fresh consent binds the compact v2 presentation. Legacy setup-only routes remain unchanged.
 
 W3C's current supplemental guidance supports putting important actions first and explaining consequences at the point of choice: [important information](https://www.w3.org/WAI/WCAG2/supplemental/patterns/o2p04-page-important/) and [results of actions](https://www.w3.org/WAI/WCAG2/supplemental/patterns/o7p03-supported-choice/). These inform the design; they do not establish accessibility conformance.
 

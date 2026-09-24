@@ -13,7 +13,7 @@ explicitly want to create a program proposal.
 Use $implementing-staged-plans to create a new repository-backed program from
 docs/library-search-plan.md in /work/library-catalog. Inspect the repository
 freshly. Publish only the creation control plane and print the short program
-start summary in the conversation. Create no recap or summary file. Stop before starting.
+start summary once in the conversation: numbered increments, workspace, approval scope, limits, detail links, and one start action. Create no recap or summary file. Stop before starting.
 ```
 
 The publisher binds the immutable source, traceability, proposed program,

@@ -16,6 +16,20 @@ New manifest-v3 proposals declare `program_start_contract: combined-start/v1`. I
 
 On interruption, discovery reports the next legal route without writing. An explicit retry reuses only the exact durable combined decision after current revalidation. Changed inputs, foreign authority, malformed or symlinked records, and later lifecycle states stop rather than resetting genesis. A user stop is never a background-start instruction. Legacy setup-only decisions retain their separate first-start requirement.
 
+### Compact presentation and authoring
+
+The current `program-start-summary/v2` renderer prints the program outcome, numbered increments in canonical order, one workspace/branch line, **Starting authorizes**, **Scope**, **Main limits**, actual Delete disclosures and source gates, then links to the source plan, full proposal, and exact scope. Its final line already contains the single start action. Print this canonical output once; add at most one short verified creation-status sentence in an ordinary response. Do not append an allocation dump, workflow-policy explanation, repeated start instruction, or stock skill appendix. Required host disclosures still apply. Never replace the bound text with an assistant paraphrase.
+
+For newly authored proposals, keep each increment outcome and the existing protection, exclusion, boundary, and risk fields concise. Put decision-relevant exceptions in those canonical fields, such as repairs limited to independently validated findings or instruction edits limited to one named section. Keep complete conditional allocations and traceability in the linked machine records. Do not rewrite published manifests to improve their prose.
+
+The ordinary five-increment target is 250–400 visible words, counting link labels rather than destinations. Ordinary Create/Modify/Preserve allocations never become summary rows. Preserve every distinct program-level restriction and risk; only exact repetitions after whitespace/terminal-punctuation normalization may disappear. Actual Delete targets, disposition, rationale, predecessor conditions, and gate questions remain explicit even when they exceed the ordinary budget. Protected-work text describes the selection snapshot, not a fresh cleanliness claim.
+
+### Presentation version and durable consent
+
+Fresh checkpoints use `program-start-summary/v2` with integer renderer version `2`. Checkpoint and decision schemas remain `program-start-checkpoint/v1` and `program-start-decision/v1`. A previously printed, unpersisted v1 checkpoint is stale: show current v2 and wait for its new direct reply. This applies in either the same task or a fresh task, without rewriting the proposal.
+
+A validated durable setup decision retains its recorded `program-start-summary/v1`/integer `1` or v2/integer `2` pair. Historical validation and interrupted starts reproduce that version's exact text and preserve the original decision. Fresh adaptation requires a pristine proposal; an existing durable decision routes to retry. Never select v1 merely to accept an old answer. Unknown or mismatched pairs, Boolean versions, changed text digests, or changed source/workspace/protected-work/brief bindings stop. Publication's current summary digest is informational; it does not replace durable consent or require an immutable inventory rewrite.
+
 The adapter trusts the controller's role/provenance and presentation assertions. Digests and deterministic tests do not prove that a human saw the summary or supplied the reply.
 
 ## Admit Only One Stable Binding

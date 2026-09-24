@@ -19,6 +19,8 @@ an old setup-only “yes” cannot recover combined consent. Stale source, works
 protected bytes, first brief, or malformed prefixes stop without cleanup or a
 new grant. Preserve the evidence and resolve the reported mismatch first.
 
+After a summary-renderer upgrade, an old answer with no durable setup record is stale. Redisplay the compact summary and obtain a fresh reply. A durable v1 decision remains valid for its exact recovery route; do not edit its version or approve it again.
+
 An unmarked legacy proposal still uses setup-only approval and its separate
 first-start handoff. Do not edit its marker or receipt to convert it.
 

@@ -54,7 +54,7 @@ SOURCE_GATE_DECISION_SCHEMA = "source-gate-decision/v1"
 SOURCE_GATE_SATISFACTION_SCHEMA = "source-gate-satisfaction/v1"
 DIRECT_USER_PROVENANCE = "direct-user-message"
 PROGRAM_START_CONTRACT = "combined-start/v1"
-PROGRAM_START_SUMMARY_SCHEMA = "program-start-summary/v1"
+CURRENT_PROGRAM_START_RENDERER_VERSION = 2
 PROGRAM_START_CHECKPOINT_SCHEMA = "program-start-checkpoint/v1"
 PROGRAM_START_DECISION_SCHEMA = "program-start-decision/v1"
 PROGRAM_START_ACTIONS = ("approve-program-setup", "start-first-increment")
@@ -957,7 +957,7 @@ def _program_start_manifest(program_root: Path) -> dict[str, Any]:
     return manifest
 
 
-def render_program_start_summary(program_root: Path) -> str:
+def _render_program_start_summary_v1(program_root: Path) -> str:
     """Render the immutable v1 presentation in memory, including material limits."""
     manifest = _program_start_manifest(program_root)
     semantics = manifest["setup_semantics"]
@@ -1035,6 +1035,95 @@ def render_program_start_summary(program_root: Path) -> str:
     return "\n".join(lines)
 
 
+
+def render_program_start_summary(
+    program_root: Path, *, renderer_version: int | None = None,
+) -> str:
+    """Render current consent, or reproduce explicitly selected historical bytes."""
+    version = CURRENT_PROGRAM_START_RENDERER_VERSION if renderer_version is None else renderer_version
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError("unsupported program start renderer version")
+    if version == 1:
+        return _render_program_start_summary_v1(program_root)
+    return _render_program_start_summary_v2(program_root)
+
+
+def _render_program_start_summary_v2(program_root: Path) -> str:
+    manifest = _program_start_manifest(program_root)
+    semantics = manifest["setup_semantics"]
+    workspace = semantics["workspace"]
+    approval = semantics["approval"]
+    lines = [f"**{semantics['program']['name']}**: {semantics['program']['intended_outcome']}", ""]
+    for number, increment in enumerate(semantics["increments"], 1):
+        next_action = " (next)" if increment["increment_id"] == semantics["first_increment_id"] else ""
+        label = increment["increment_id"].replace("-", " ")
+        lines.append(f"{number}. **{label}{next_action}:** {increment['intended_outcome']}")
+    location = f"**Workspace:** [selected worktree]({workspace['path']}) on branch {workspace['branch']}."
+    if workspace["repository"] != workspace["path"]:
+        location += f" Repository: {workspace['repository']}."
+    lines.extend(["", location])
+    protected = workspace["protected_work"]
+    if any(protected[field] for field in ("staged_paths", "modified_paths", "untracked_paths", "conflicted_paths", "active_git_operation")):
+        lines.append(f"Protected work at selection: {_work_summary(protected)}.")
+    modes = {
+        "approval:standard": "Standard approval: you still approve the exact-plan before implementation.",
+        "approval:pre-approve": "Pre-approved mode: the routine exact-plan question is omitted.",
+        "approval:full-increment": "Full-increment mode: the routine exact-plan question is omitted.",
+    }
+    lines.extend(["", "**Starting authorizes:** setup and first-increment local implementation, "
+                  "subject to the exact scope and remaining gates. " + modes[approval["mode"]]])
+    # Only exact repetitions can disappear. Never infer equivalence or clip warnings.
+    seen: set[str] = set()
+    def statements(values: Sequence[str]) -> str:
+        result = []
+        for value in values:
+            normalized = " ".join(value.split())
+            key = normalized.rstrip(".;!?")
+            if key not in seen:
+                seen.add(key)
+                result.append(normalized if normalized.endswith((".", ";", "!", "?")) else normalized + ".")
+        return " ".join(result)
+
+    boundaries = statements([*semantics["external_boundaries"], *approval["remaining_boundaries"]])
+    if boundaries:
+        lines.append(boundaries)
+    protections = statements(semantics["protections"])
+    exclusions = statements(semantics["exclusions"])
+    scope = " ".join(part for part in (protections, "Excluded: " + exclusions if exclusions else "") if part)
+    if scope:
+        lines.extend(["", "**Scope:** " + scope])
+    risks = statements(semantics["material_risks"])
+    if risks:
+        lines.extend(["", "**Main limits:** " + risks])
+    for allocation in semantics["operation_envelope"]["allocations"]:
+        if allocation["operation"] != "Delete":
+            continue
+        condition = (" only against accepted predecessor evidence"
+                     if allocation["collision"] == "accepted-predecessor" else "")
+        exclusions = f" Excluding {'; '.join(allocation['exclusions'])}." if allocation["exclusions"] else ""
+        lines.extend(["",
+            f"Delete {allocation['path']} for {', '.join(allocation['increment_ids'])}{condition}: "
+            f"{allocation['content_disposition']}; accepted state {allocation['accepted_state']}. "
+            f"{allocation['rationale']}{exclusions} Subject to its exact plan and execution gates."])
+    for gate in manifest["source_gate_definitions"]:
+        reuse = "Starting also satisfies this setup-reusable gate." if gate["setup_reuse"] else "Requires its own answer."
+        lines.extend(["", f"Gate {gate['gate_id']} ({gate['trigger']}, {gate['protected_subject']}): {gate['question']} {reuse}"])
+    links = {}
+    for role in ("canonical_source_snapshot", "approved_program"):
+        path, issues = resolve_managed_path(Path(program_root), manifest["logical_roles"][role], role=f"logical role {role}")
+        if path is None:
+            raise ValueError("; ".join(issues))
+        links[role] = path.resolve().as_posix()
+    for source in semantics["sources"]:
+        if source["source_id"] != manifest["source_binding"]["source_id"]:
+            lines.extend(["", f"Source: {source['title']} at {source['location']}"])
+    lines.extend(["", f"[Source plan]({links['canonical_source_snapshot']}) · "
+                  f"[Full proposal]({links['approved_program']}) · "
+                  f"[Exact scope]({Path(program_root).resolve().as_posix()}/manifest.json)",
+                  "", "To approve this setup and begin increment 1, reply: **Start the first increment**"])
+    return "\n".join(lines)
+
+
 def _protected_work_identity(manifest: Mapping[str, object]) -> str:
     """Bind existing user bytes and staged blobs, not just Git's path lists."""
     from repository_preparation import _run_git
@@ -1059,7 +1148,7 @@ def _protected_work_identity(manifest: Mapping[str, object]) -> str:
 
 def _program_start_checkpoint(
     root: Path, manifest: Mapping[str, object], proposal_status_sha256: str,
-    *, protected_work_sha256: str | None = None,
+    *, renderer_version: int, protected_work_sha256: str | None = None,
 ) -> dict[str, object]:
     """Project immutable genesis facts; historical callers retain the original status."""
     first = manifest["setup_semantics"]["first_increment_id"]
@@ -1071,9 +1160,9 @@ def _program_start_checkpoint(
         immutable_artifacts[role] = sha256_file(path)
     value = {
         "schema_version": PROGRAM_START_CHECKPOINT_SCHEMA,
-        "renderer_schema": PROGRAM_START_SUMMARY_SCHEMA,
-        "renderer_version": 1,
-        "summary_sha256": _bytes_sha256(render_program_start_summary(root).encode("utf-8")),
+        "renderer_schema": f"program-start-summary/v{renderer_version}",
+        "renderer_version": renderer_version,
+        "summary_sha256": _bytes_sha256(render_program_start_summary(root, renderer_version=renderer_version).encode("utf-8")),
         "semantic_decision_identity": setup_semantic_identity(manifest),
         "presented_integrity_identity": _presented_integrity(root, manifest),
         "immutable_artifacts": immutable_artifacts,
@@ -1100,7 +1189,11 @@ def program_start_checkpoint(program_root: Path) -> dict[str, object]:
         issues.append("program start requires the sequence-zero first increment")
     if issues:
         raise ValueError("; ".join(issues))
-    return _program_start_checkpoint(root, manifest, sha256_file(status_path))
+    prefix = inspect_sequence_zero_activation_prefix(root)
+    if prefix["state"] != "pristine":
+        raise ValueError("fresh program start checkpoint requires a pristine proposal; retry its durable decision")
+    return _program_start_checkpoint(root, manifest, sha256_file(status_path),
+                                     renderer_version=CURRENT_PROGRAM_START_RENDERER_VERSION)
 
 
 def adapt_program_start_decision(
@@ -1137,8 +1230,12 @@ def _program_start_decision_issues(
         checkpoint = decision.get("checkpoint")
         if not isinstance(checkpoint, dict) or not _is_sha256(checkpoint.get("protected_work_sha256")):
             raise ValueError("program start protected work binding is invalid")
+        version = checkpoint.get("renderer_version")
+        if (type(version) is not int or version not in (1, 2)
+            or checkpoint.get("renderer_schema") != f"program-start-summary/v{version}"):
+            raise ValueError("unsupported program start renderer pair")
         expected = _program_start_checkpoint(root, manifest, proposal_status_sha256,
-            protected_work_sha256=None if live else checkpoint["protected_work_sha256"])
+            renderer_version=version, protected_work_sha256=None if live else checkpoint["protected_work_sha256"])
     except ValueError as error:
         return [str(error)]
     if canonical_identity_bytes(decision.get("checkpoint")) != canonical_identity_bytes(expected):
@@ -1160,10 +1257,23 @@ def _program_start_decision_issues(
 def validate_program_start_decision(program_root: Path, decision: Mapping[str, object]) -> list[str]:
     root = Path(program_root)
     try:
-        checkpoint = program_start_checkpoint(root)
+        prefix = inspect_sequence_zero_activation_prefix(root)
+        if prefix["issues"]:
+            return list(prefix["issues"])
+        if prefix["state"] == "pristine":
+            checkpoint = program_start_checkpoint(root)
+            if canonical_identity_bytes(decision.get("checkpoint")) != canonical_identity_bytes(checkpoint):
+                return ["stale program start checkpoint; present the current summary and obtain a new reply"]
+            proposal_status_sha256 = checkpoint["status_sha256"]
+        else:
+            manifest = _program_start_manifest(root)
+            setup, _ = _setup_activation_record(root, manifest)
+            if canonical_identity_bytes(setup.get("program_start_decision")) != canonical_identity_bytes(decision):
+                return ["combined retry requires the original program start decision"]
+            proposal_status_sha256 = setup["proposal_status_sha256"]
     except ValueError as error:
         return [str(error)]
-    return _program_start_decision_issues(root, decision, checkpoint["status_sha256"], live=True)
+    return _program_start_decision_issues(root, decision, proposal_status_sha256, live=True)
 
 
 def render_setup_recap(program_root: Path) -> str:

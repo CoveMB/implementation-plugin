@@ -25,7 +25,7 @@ When the direct creation request omits an approval mode, select `approval:full-i
 
 Build the complete source snapshot, source metadata, traceability, approved-program proposal, immutable manifest-v3 setup semantics and operation envelope, initial workspace proposal, first brief, empty ledgers, and sequence-zero status in memory. Publish through [`program_bootstrap.py`](scripts/program_bootstrap.py), with `manifest.json` last as the discovery commit point. Adopt only an exact owner-bound prefix; preserve and stop on any divergent, unsafe, stale-instruction, or foreign-owned byte.
 
-For every newly generated proposal, set immutable `program_start_contract` to `combined-start/v1` before building bound bytes. Generate no `setup-recap.md`, replacement summary document, saved prose copy, or summary logical role. Print `render_program_start_summary` in the conversation, retain its `program_start_checkpoint` as presentation metadata, and stop. Creation intent never supplies the later start decision. Never add the marker to an existing proposal.
+For every newly generated proposal, set immutable `program_start_contract` to `combined-start/v1` before building bound bytes. Generate no `setup-recap.md`, replacement summary document, saved prose copy, or summary logical role. Follow the [compact presentation and authoring contract](references/approval-checkpoints.md#compact-presentation-and-authoring): print `render_program_start_summary` once in the conversation, retain its `program_start_checkpoint` as presentation metadata, and stop. Creation intent never supplies the later start decision. Never add the marker to an existing proposal.
 
 ## Activate a Generated Program
 

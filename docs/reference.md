@@ -7,6 +7,8 @@ direct **Start the first increment** reply, and `start_program` for activation o
 an explicitly requested retry. These APIs live in `program_setup.py` and
 `program_activation.py`. See [Combined program start](../skills/implementing-staged-plans/references/approval-checkpoints.md#combined-program-start).
 
+New presentations use compact renderer v2. Existing durable decisions retain their original renderer; see [presentation compatibility](../skills/implementing-staged-plans/references/approval-checkpoints.md#presentation-version-and-durable-consent).
+
 This page is a compact guide to the terms and decisions used by
 `implementing-staged-plans`. The [canonical skill instructions](../skills/implementing-staged-plans/SKILL.md)
 and their linked procedures remain authoritative when a user guide and the

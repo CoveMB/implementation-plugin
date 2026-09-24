@@ -62,7 +62,7 @@ class ProgramStartContractTests(unittest.TestCase):
 
     def test_presented_checkpoint_and_closed_decision_reject_drift(self):
         checkpoint = SETUP.program_start_checkpoint(self.root)
-        for key, value in (("state_sequence", False), ("first_increment_id", "OTHER"), ("renderer_version", 2), ("summary_sha256", "0" * 64)):
+        for key, value in (("state_sequence", False), ("first_increment_id", "OTHER"), ("renderer_version", 99), ("summary_sha256", "0" * 64)):
             changed = copy.deepcopy(checkpoint)
             changed[key] = value
             with self.subTest(key=key), self.assertRaises(ValueError):
@@ -115,7 +115,8 @@ class ProgramStartContractTests(unittest.TestCase):
             self.assertIn("Start the first increment", summary)
             self.assertIn("catalog.txt", summary)
             self.assertIn("obsolete", summary)
-            self.assertIn(mode, summary)
+            self.assertIn({"approval:standard": "Standard approval", "approval:pre-approve": "Pre-approved mode",
+                           "approval:full-increment": "Full-increment mode"}[mode], summary)
             self.assertIn("exact-plan", summary)
             self.assertIn("local implementation", summary)
             self.assertIn("ARCHIVE-INDEX", summary)
@@ -165,7 +166,7 @@ class ProgramStartContractTests(unittest.TestCase):
         summary = SETUP.render_program_start_summary(self.root)
         for outcome in outcomes:
             self.assertIn(outcome, summary)
-        for text in ("catalog.txt", "obsolete", "before-program-activation", "setup-reusable", "accepted predecessor", "separate approval"):
+        for text in ("catalog.txt", "obsolete", "before-program-activation", "setup-reusable", "separate approval"):
             self.assertIn(text, summary)
         self.assertNotIn("check-69.txt", summary)
         self.assertNotIn("100644", summary)
@@ -194,7 +195,9 @@ class ProgramStartContractTests(unittest.TestCase):
         summary = SETUP.render_program_start_summary(self.root)
         links = re.findall(r"\]\(([^)]+)\)", summary)
         self.assertEqual(len(links), 4)
-        self.assertTrue(all(Path(link).is_absolute() and Path(link).is_file() for link in links), links)
+        self.assertEqual(Path(links[0]), self.fixture.repository.resolve())
+        self.assertTrue(Path(links[0]).is_dir())
+        self.assertTrue(all(Path(link).is_absolute() and Path(link).is_file() for link in links[1:]), links)
 
     def test_summary_and_checkpoint_are_stable_across_equivalent_root_paths(self):
         equivalent_root = self.root / ".." / self.root.name
@@ -202,6 +205,178 @@ class ProgramStartContractTests(unittest.TestCase):
                          SETUP.render_program_start_summary(equivalent_root))
         self.assertEqual(SETUP.program_start_checkpoint(self.root),
                          SETUP.program_start_checkpoint(equivalent_root))
+
+
+class CompactProgramStartSummaryTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = BootstrapFixture()
+        self.fixture.configure_setup_v3()
+        self.fixture.configure_combined_start()
+        self.root = self.fixture.candidate
+
+    def tearDown(self):
+        self.fixture.close()
+
+    def write_manifest(self, manifest):
+        manifest["setup_semantics_sha256"] = canonical_compact_sha256(manifest["setup_semantics"])
+        self.fixture.write_json("manifest.json", manifest)
+
+    def varied_manifest(self):
+        ids = ("ARCHIVE-INDEX", "REQUEST-CONTROL", "RETRY-WAITS", "CHECKPOINTS", "PUBLISH-RESUME")
+        self.fixture.configure_successor_chain(ids)
+        self.fixture.configure_setup_v3()
+        self.fixture.configure_combined_start()
+        manifest = self.fixture.load_json("manifest.json")
+        semantics = manifest["setup_semantics"]
+        outcomes = (
+            "Verify stored archive checksums and establish the accepted archive inventory for later work.",
+            "Coordinate archive requests through one shared controller while preserving existing request behavior.",
+            "Handle retries with bounded waits and explicit terminal outcomes when work cannot continue.",
+            "Save resumable checkpoints without duplicating completed work or losing accepted archive progress.",
+            "Resume interrupted local work with clear progress reporting and explicit approval before external publication.",
+        )
+        for increment, outcome in zip(semantics["increments"], outcomes, strict=True):
+            increment["intended_outcome"] = outcome
+        semantics["protections"] = [
+            "Preserve existing user files, accepted archive data, and checkpoint recovery evidence.",
+            "Earlier-stage repairs are limited to independently validated findings within the exact approved scope.",
+            "Instruction edits are limited to the project-purpose section; all other instructions remain protected.",
+        ]
+        semantics["exclusions"] = ["No provider access, credential use, external publication, or mutation of persistent archive data."]
+        semantics["external_boundaries"] = ["Git commits, pushes, installation, deployment, and other external actions require separate approval."]
+        semantics["approval"]["remaining_boundaries"] = [
+            "Material design decisions require your answer before implementation.",
+            "Source gates, increment acceptance, continuation, and final closure retain their existing approval requirements.",
+        ]
+        semantics["material_risks"] = [
+            "Repository drift invalidates the setup checkpoint and requires the selected worktree to be checked again.",
+            "Local deterministic checks do not prove provider behavior or certify unattended external publishing.",
+        ]
+        allocations = semantics["operation_envelope"]["allocations"]
+        create = next(item for item in allocations if item["operation"] == "Create" and item["kind"] == "exact-path")
+        modify = next(item for item in allocations if item["operation"] == "Modify" and item["kind"] == "exact-path")
+        preserve = next(item for item in allocations if item["operation"] == "Preserve")
+        for index in range(25):
+            for template in (create, modify, preserve):
+                allocation = copy.deepcopy(template)
+                allocation["path"] = f"existing-{index}.txt" if template is preserve else f"output-{index}.txt"
+                allocation["inclusions"] = [f"required archive scope {index}"]
+                allocation["exclusions"] = [f"unrelated archive scope {index}"]
+                if template is create:
+                    allocation["increment_ids"] = [ids[0]]
+                elif template is modify:
+                    allocation["increment_ids"] = list(ids[1:])
+                allocations.append(allocation)
+        self.write_manifest(manifest)
+        return manifest
+
+    def test_varied_ordinary_allocations_fit_the_complete_visible_budget(self):
+        manifest = self.varied_manifest()
+        semantics = manifest["setup_semantics"]
+        allocations = semantics["operation_envelope"]["allocations"]
+        self.assertGreaterEqual(len(allocations), 70)
+        groups = {(a["operation"], a["kind"], a["collision"], tuple(a["inclusions"]),
+                   tuple(a["exclusions"]), tuple(a["increment_ids"])) for a in allocations}
+        self.assertGreaterEqual(len(groups), 20)
+        self.assertEqual(SETUP.validate_setup_semantics(self.root), [])
+        before = repository_snapshot(self.fixture.root)
+        summary = SETUP.render_program_start_summary(self.root)
+        visible = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", summary)
+        self.assertLessEqual(len(visible.split()), 400)
+        self.assertEqual(len(re.findall(r"^\d+\. ", summary, re.MULTILINE)), 5)
+        self.assertNotRegex(summary, r"(?m)^(Create|Modify|Preserve):")
+        self.assertEqual(summary.count("Start the first increment"), 1)
+        for increment in semantics["increments"]:
+            self.assertIn(increment["intended_outcome"], summary)
+        for field in ("protections", "exclusions", "external_boundaries", "material_risks"):
+            for statement in semantics[field]:
+                self.assertIn(statement, summary)
+        for statement in semantics["approval"]["remaining_boundaries"]:
+            self.assertIn(statement, summary)
+        self.assertEqual(summary.count(semantics["workspace"]["path"]), 1)
+        self.assertIn(semantics["workspace"]["branch"], summary)
+        self.assertEqual(repository_snapshot(self.fixture.root), before)
+
+    def test_more_ordinary_scope_changes_checkpoint_but_not_summary(self):
+        manifest = self.varied_manifest()
+        summary = SETUP.render_program_start_summary(self.root)
+        checkpoint = SETUP.program_start_checkpoint(self.root)
+        allocation = copy.deepcopy(manifest["setup_semantics"]["operation_envelope"]["allocations"][0])
+        allocation["path"] = "another-output.txt"
+        allocation["increment_ids"] = ["PUBLISH-RESUME"]
+        manifest["setup_semantics"]["operation_envelope"]["allocations"].append(allocation)
+        self.write_manifest(manifest)
+        self.assertEqual(SETUP.render_program_start_summary(self.root), summary)
+        changed = SETUP.program_start_checkpoint(self.root)
+        self.assertEqual(changed["summary_sha256"], checkpoint["summary_sha256"])
+        self.assertNotEqual(changed["checkpoint_id"], checkpoint["checkpoint_id"])
+
+    def test_distinct_warnings_are_not_clipped_and_exact_repetitions_appear_once(self):
+        manifest = self.varied_manifest()
+        semantics = manifest["setup_semantics"]
+        statement = semantics["exclusions"][0]
+        semantics["protections"].append("  " + statement.rstrip(".") + "  ")
+        risk = "Unique risk detail " + " ".join(f"condition{index}" for index in range(450)) + "."
+        semantics["material_risks"].append(risk)
+        self.write_manifest(manifest)
+        summary = SETUP.render_program_start_summary(self.root)
+        self.assertEqual(summary.count(statement.rstrip(".")), 1)
+        self.assertIn(risk, summary)
+        self.assertNotRegex(summary, r"(?m)^(Create|Modify|Preserve):")
+
+    def test_exclusion_fragments_are_identified_as_excluded_scope(self):
+        manifest = self.fixture.load_json("manifest.json")
+        manifest["setup_semantics"]["exclusions"] = ["Product deletion or broad cleanup", "Live provider trials"]
+        self.write_manifest(manifest)
+        summary = SETUP.render_program_start_summary(self.root)
+        self.assertIn("Excluded: Product deletion or broad cleanup. Live provider trials.", summary)
+
+    def test_selected_user_work_and_distinct_repository_remain_visible(self):
+        workspace = self.fixture.load_json("state/workspace.json")
+        workspace["repository"]["identity"] = str(self.fixture.root / "original-repository")
+        workspace["pre_existing_work_at_selection"]["untracked_paths"] = ["user-draft.txt"]
+        self.fixture.write_json("state/workspace.json", workspace)
+        self.fixture.configure_setup_v3()
+        before = repository_snapshot(self.fixture.root)
+        summary = SETUP.render_program_start_summary(self.root)
+        self.assertIn("Protected work at selection:", summary)
+        self.assertIn("user-draft.txt", summary)
+        self.assertIn(workspace["repository"]["identity"], summary)
+        self.assertIn(workspace["implementation_workspace"]["path"], summary)
+        self.assertEqual(repository_snapshot(self.fixture.root), before)
+
+    def test_delete_and_separate_gate_disclosures_survive_the_size_target(self):
+        reused = gate_definition("GATE-SETUP", setup_reuse=True)
+        separate = gate_definition("GATE-EXECUTION", "before-product-execution")
+        separate["protected_subject"] = "increment:ARCHIVE-INDEX"
+        separate["question"] = "Confirm these execution conditions: " + " ".join(
+            f"required-condition-{index}" for index in range(410)) + "?"
+        for gate in (reused, separate):
+            gate["source_sha256"] = self.fixture.source_sha256
+        self.fixture.configure_delete_setup_v2(source_gate_definitions=(reused, separate))
+        before = repository_snapshot(self.fixture.root)
+        summary = SETUP.render_program_start_summary(self.root)
+        self.assertIn("Delete catalog.txt for ARCHIVE-INDEX: obsolete; accepted state absent.", summary)
+        self.assertIn("The accepted program no longer needs the archive catalog.", summary)
+        self.assertIn("Subject to its exact plan and execution gates.", summary)
+        self.assertIn(separate["question"], summary)
+        self.assertIn("Requires its own answer.", summary)
+        self.assertIn("Starting also satisfies this setup-reusable gate.", summary)
+        self.assertGreater(len(summary.split()), 400)
+        self.assertEqual(summary.count("Start the first increment"), 1)
+        self.assertEqual(repository_snapshot(self.fixture.root), before)
+
+    def test_explicit_renderer_versions_are_closed(self):
+        for version in (True, False, 0, 3, "2"):
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                SETUP.render_program_start_summary(self.root, renderer_version=version)
+        self.assertEqual(SETUP.render_program_start_summary(self.root),
+                         SETUP.render_program_start_summary(self.root, renderer_version=2))
+
+    def test_historical_v1_bytes_remain_exact(self):
+        expected = 'Archive integrity program: Verify stored archive checksums.\nStarting approves this setup and starts the first increment. It may lead to local implementation under the selected approval mode and all remaining gates.\n\n- ARCHIVE-INDEX (first): Verify every stored checksum.\n\nRepository: <fixture>/repository\nWorkspace: <fixture>/repository on branch archive-maintenance.\nProtected existing work: staged: none, modified: none, untracked: none, conflicted: none; active Git operation: none.\nApproval mode: approval:standard. You will still approve the exact-plan before implementation.\n\nCreate: archive checksum output (1 exact path(s); ARCHIVE-INDEX).\nPreserve: existing archive catalog (1 exact path(s); ARCHIVE-INDEX).\nCreate: required review scope reports (bounded class under reviews; ARCHIVE-INDEX).\nProtections: Preserve catalog.txt byte-for-byte.\nExclusions: No external publication.\nBoundaries: Git and provider actions require separate approval.\nRisks: Repository drift invalidates the setup checkpoint.\nRemaining approval boundaries: source-defined gates; diff disposition; continuation; consequential actions.\n\nSource: [Archive Plan](<fixture>/candidate/source/implementation-plan.md)\nDetails: [program proposal](<fixture>/candidate/program/implementation-program.md); [operation envelope](<fixture>/candidate/manifest.json); [traceability](<fixture>/candidate/program/traceability.json).\n\nStart the first increment'
+        actual = SETUP.render_program_start_summary(self.root, renderer_version=1)
+        self.assertEqual(actual.replace(self.fixture.root.resolve().as_posix(), "<fixture>"), expected)
 
 
 class ProgramStartFixture:
@@ -281,7 +456,7 @@ class CombinedProgramStartTests(ProgramStartFixture, unittest.TestCase):
                 self.tearDown()
                 self.setUp()
                 if mutation == "decision":
-                    self.decision["checkpoint"]["renderer_version"] = 2
+                    self.decision["checkpoint"]["renderer_version"] = 99
                 elif mutation == "source":
                     (self.root / "source/implementation-plan.md").write_text("Changed source\n")
                 elif mutation == "brief":
@@ -455,9 +630,12 @@ class ProgramStartDiscoveryTests(ProgramStartFixture, unittest.TestCase):
         self.assertIsNone(receipt.setup_recap_sha256)
         self.assertEqual(receipt.program_start_summary_sha256, self.decision["checkpoint"]["summary_sha256"])
         before = repository_snapshot(self.fixture.root)
-        self.assertEqual(launch.render_program_launch_prompt(self.root), SETUP.render_program_start_summary(self.root))
+        summary = launch.render_program_launch_prompt(self.root)
+        self.assertEqual(summary, SETUP.render_program_start_summary(self.root, renderer_version=2))
+        self.assertEqual(summary.count("Start the first increment"), 1)
+        self.assertEqual(self.decision["checkpoint"]["renderer_version"], 2)
         self.assertEqual(repository_snapshot(self.fixture.root), before)
-        self.assertFalse(any("recap" in path.name or "summary" in path.name for path in self.root.rglob("*")))
+        self.assertFalse(any("recap" in path.name or "summary" in path.name for path in self.fixture.root.rglob("*")))
 
 
 class ProgramStartLifecycleTests(ProgramStartFixture, unittest.TestCase):
@@ -644,6 +822,192 @@ class ProgramStartLifecycleTests(ProgramStartFixture, unittest.TestCase):
                     self.assertEqual((self.root / "state/setup-activation-decision.json").read_bytes(), genesis)
                     self.assertEqual(SETUP.validate_setup_activation_authority(self.root), [])
                     self.assertEqual((self.fixture.repository / "catalog.txt").exists(), not delete)
+
+
+class ProgramStartRendererCompatibilityTests(ProgramStartFixture, unittest.TestCase):
+    configure = ProgramStartLifecycleTests.configure
+    persist_gate = ProgramStartLifecycleTests.persist_gate
+    authorize = ProgramStartLifecycleTests.authorize
+    review = ProgramStartLifecycleTests.review
+
+    def old_decision(self):
+        # Reconstruct the pre-upgrade presentation, never consent to v1 using v2 prose.
+        decision = copy.deepcopy(self.decision)
+        checkpoint = decision["checkpoint"]
+        checkpoint.update(renderer_schema="program-start-summary/v1", renderer_version=1,
+                          summary_sha256=SETUP._bytes_sha256(
+                              SETUP.render_program_start_summary(self.root, renderer_version=1).encode("utf-8")))
+        checkpoint.pop("checkpoint_id")
+        checkpoint["checkpoint_id"] = SETUP.derive_identifier("program-start-checkpoint", checkpoint)
+        decision.pop("decision_id")
+        decision["decision_id"] = SETUP.derive_identifier("program-start-decision", decision)
+        return decision
+
+    def install_old_setup(self):
+        self.decision = self.old_decision()
+        manifest = json.loads((self.root / "manifest.json").read_text())
+        record = ACTIVATION._build_v3_setup_record(self.root, manifest, self.decision,
+            ACTIVATION._without_owned_program_paths(self.root, self.observation()),
+            self.decision["checkpoint"]["status_sha256"], 0)
+        path = self.root / manifest["logical_roles"]["setup_activation_decision"]
+        path.write_bytes(canonical_json(record))
+        return path
+
+    def test_fresh_v2_requires_new_consent_and_pristine_origin(self):
+        old = self.old_decision()
+        before = repository_snapshot(self.fixture.root)
+        checkpoint = SETUP.program_start_checkpoint(self.root)
+        self.assertEqual((checkpoint["renderer_schema"], checkpoint["renderer_version"]),
+                         ("program-start-summary/v2", 2))
+        with self.assertRaises(ValueError):
+            SETUP.adapt_program_start_decision(self.root, "Start the first increment", role="user",
+                provenance="direct-user-message", checkpoint=old["checkpoint"])
+        with self.assertRaises(ValueError):
+            ACTIVATION.start_program(self.root, old, self.observation())
+        self.assertEqual(repository_snapshot(self.fixture.root), before)
+        self.assertEqual(SETUP.validate_program_start_decision(self.root, self.decision), [])
+        self.install_old_setup()
+        before = repository_snapshot(self.fixture.root)
+        with self.assertRaises(ValueError):
+            SETUP.program_start_checkpoint(self.root)
+        with self.assertRaises(ValueError):
+            SETUP.adapt_program_start_decision(self.root, "Start the first increment", role="user",
+                provenance="direct-user-message", checkpoint=checkpoint)
+        self.assertEqual(repository_snapshot(self.fixture.root), before)
+
+    def test_durable_v1_recovers_every_prefix_and_fresh_process_discovery(self):
+        for label in (None, "program-approval", "workspace-approval", "active-waiting-status",
+                      "first-increment-grant", "first-increment-status"):
+            with self.subTest(label=label):
+                self.tearDown()
+                self.setUp()
+                setup_path = self.install_old_setup()
+                genesis = setup_path.read_bytes()
+                if label:
+                    def interrupt(actual):
+                        if actual == label:
+                            raise RuntimeError(label)
+                    with mock.patch.object(ACTIVATION, "_after_persist", side_effect=interrupt):
+                        with self.assertRaisesRegex(RuntimeError, label):
+                            ACTIVATION.start_program(self.root, self.decision, self.observation())
+                before = repository_snapshot(self.fixture.root)
+                discovered = run_program_discovery(self.fixture.repository)
+                self.assertIn(discovered["disposition"], {"program-start-retry-ready", "resume"}, discovered)
+                self.assertEqual(repository_snapshot(self.fixture.root), before)
+                prefixes = {name: (self.root / "state" / name).read_bytes()
+                            for name in ("approvals.jsonl", "increment-grants.jsonl")}
+                ACTIVATION.start_program(self.root, self.decision, self.observation())
+                self.assertEqual(self.status()["current_increment_state"], "preparing")
+                self.assertEqual(setup_path.read_bytes(), genesis)
+                self.assertEqual(SETUP.validate_setup_activation_authority(self.root), [])
+                for name, original in prefixes.items():
+                    self.assertTrue((self.root / "state" / name).read_bytes().startswith(original))
+
+    def test_v1_pending_gates_recover_without_new_consent(self):
+        gates = [gate_definition("GATE-A"), gate_definition("GATE-B", "before-increment-start")]
+        gates[1]["protected_subject"] = "increment:ARCHIVE-INDEX"
+        self.configure(gates=gates)
+        setup_path = self.install_old_setup()
+        genesis = setup_path.read_bytes()
+        for index, gate in enumerate(gates):
+            with self.assertRaisesRegex(ValueError, "not durably satisfied"):
+                ACTIVATION.start_program(self.root, self.decision, self.observation())
+            self.assertEqual(self.status()["state_sequence"], index)
+            self.assertEqual(run_program_discovery(self.fixture.repository)["disposition"], "source-gate-approval-ready")
+            setup = json.loads(genesis)
+            boundary = {"setup_adapter_id": setup["setup_adapter_id"]} if index == 0 else SETUP.derive_program_start_intent(self.root)
+            self.persist_gate(gate, boundary)
+        ACTIVATION.start_program(self.root, self.decision, self.observation())
+        self.assertEqual(setup_path.read_bytes(), genesis)
+        self.assertEqual(self.status()["current_increment_state"], "preparing")
+
+    def test_v1_durable_origin_never_excuses_drift(self):
+        for mutation in ("source", "brief", "workspace", "decision", "record"):
+            with self.subTest(mutation=mutation):
+                self.tearDown()
+                self.setUp()
+                path = self.install_old_setup()
+                if mutation == "source":
+                    (self.root / "source/implementation-plan.md").write_text("Changed source\n")
+                elif mutation == "brief":
+                    (self.root / self.decision["checkpoint"]["brief_binding"]["path"]).write_text("Changed brief\n")
+                elif mutation == "workspace":
+                    (self.fixture.repository / "catalog.txt").write_text("Changed protected catalog\n")
+                elif mutation == "decision":
+                    self.decision["response_sha256"] = "0" * 64
+                else:
+                    path.write_bytes(path.read_bytes() + b"\n")
+                before = repository_snapshot(self.fixture.root)
+                with self.assertRaises(ValueError):
+                    ACTIVATION.start_program(self.root, self.decision, self.observation())
+                self.assertEqual(repository_snapshot(self.fixture.root), before)
+
+    def test_v1_retry_rechecks_bytes_of_already_dirty_protected_work(self):
+        for trigger in ("before-program-activation", "before-increment-start"):
+            with self.subTest(trigger=trigger):
+                self.fixture.close()
+                self.fixture = BootstrapFixture()
+                catalog = self.fixture.repository / "catalog.txt"
+                catalog.write_text("User draft one\n")
+                workspace = self.fixture.load_json("state/workspace.json")
+                workspace["pre_existing_work_at_selection"]["modified_paths"] = list(self.observation().modified_paths)
+                self.fixture.write_json("state/workspace.json", workspace)
+                gate = gate_definition("GATE-A", trigger)
+                if trigger == "before-increment-start":
+                    gate["protected_subject"] = "increment:ARCHIVE-INDEX"
+                gate["source_sha256"] = self.fixture.source_sha256
+                self.fixture.configure_setup_v3(source_gate_definitions=(gate,))
+                self.fixture.configure_combined_start()
+                self.publish()
+                setup_path = self.install_old_setup()
+                with self.assertRaisesRegex(ValueError, "not durably satisfied"):
+                    ACTIVATION.start_program(self.root, self.decision, self.observation())
+                setup = json.loads(setup_path.read_text())
+                boundary = ({"setup_adapter_id": setup["setup_adapter_id"]}
+                            if trigger == "before-program-activation" else SETUP.derive_program_start_intent(self.root))
+                catalog.write_text("User draft two\n")
+                before = repository_snapshot(self.fixture.root)
+                with self.assertRaisesRegex(ValueError, "checkpoint binding mismatch"):
+                    self.persist_gate(gate, boundary)
+                with self.assertRaises(ValueError):
+                    ACTIVATION.start_program(self.root, self.decision, self.observation())
+                self.assertEqual(repository_snapshot(self.fixture.root), before)
+
+    def test_renderer_pairs_are_closed_even_with_recomputed_identifiers(self):
+        for schema, version in (("program-start-summary/v1", 2), ("program-start-summary/v2", 1),
+                                ("program-start-summary/v1", True), ("program-start-summary/v2", False),
+                                ("program-start-summary/v99", 99), ("unknown", 2)):
+            with self.subTest(schema=schema, version=version):
+                decision = copy.deepcopy(self.decision)
+                checkpoint = decision["checkpoint"]
+                checkpoint.update(renderer_schema=schema, renderer_version=version)
+                checkpoint.pop("checkpoint_id")
+                checkpoint["checkpoint_id"] = SETUP.derive_identifier("program-start-checkpoint", checkpoint)
+                decision.pop("decision_id")
+                decision["decision_id"] = SETUP.derive_identifier("program-start-decision", decision)
+                before = repository_snapshot(self.fixture.root)
+                self.assertTrue(SETUP._program_start_decision_issues(self.root, decision, checkpoint["status_sha256"]))
+                with self.assertRaises(ValueError):
+                    ACTIVATION.start_program(self.root, decision, self.observation())
+                self.assertEqual(repository_snapshot(self.fixture.root), before)
+
+    def test_v1_history_survives_successor_and_closure(self):
+        self.configure(successors=True)
+        setup_path = self.install_old_setup()
+        genesis = setup_path.read_bytes()
+        ACTIVATION.start_program(self.root, self.decision, self.observation())
+        self.review()
+        prompt = DIFF.render_diff_disposition_prompt(self.root)
+        DIFF.persist_diff_disposition(self.root, prompt[prompt.index("Accept and continue"):], self.observation())
+        self.assertEqual(self.status()["current_increment_id"], "ARCHIVE-VERIFY")
+        self.assertEqual(SETUP.validate_setup_activation_authority(self.root), [])
+        self.review()
+        DIFF.persist_diff_disposition(self.root, DIFF.render_diff_disposition_prompt(self.root), self.observation())
+        CLOSURE.prepare_program_closure(self.root, self.observation())
+        CLOSURE.persist_program_closure(self.root, CLOSURE.render_program_closure_prompt(self.root), self.observation())
+        self.assertEqual(self.status()["program_state"], "closed")
+        self.assertEqual(setup_path.read_bytes(), genesis)
+        self.assertEqual(SETUP.validate_setup_activation_authority(self.root), [])
 
 
 if __name__ == "__main__":
