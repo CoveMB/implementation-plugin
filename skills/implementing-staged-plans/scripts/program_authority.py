@@ -65,6 +65,7 @@ SETUP_PROGRAM_ONLY_LOGICAL_ROLES = frozenset(
 )
 SETUP_PROGRAM_ONLY_MANIFEST_FIELDS = frozenset(
     {
+        "program_start_contract",
         "setup_semantics",
         "setup_semantics_sha256",
         "source_gate_definitions",
@@ -80,6 +81,7 @@ SETUP_AUTHORITY_RECORD_SCHEMAS = frozenset(
         "implementation-increment-grant/v2",
         "setup-activation-decision/v1",
         "setup-activation-decision/v2",
+        "setup-activation-decision/v3",
         "source-gate-decision/v1",
     }
 )

@@ -5,6 +5,23 @@ the current source, configuration, and repository state before changing
 anything. Do not delete plugin caches, reset a repository, discard work, or
 bypass an approval gate as a routine fix.
 
+## A new program is waiting to start or recover
+
+`program-start-ready` requires the current summary printed in the conversation,
+then a new direct **Start the first increment** reply. In a fresh task, the opening
+handoff selects the program; redisplay the summary before its reply. No recap or
+replacement summary file should exist.
+
+`program-start-retry-ready` means the combined decision is already durable but its
+transaction was interrupted. Explicitly request a retry of that exact decision.
+Discovery itself writes nothing. A pending source gate still needs its own answer;
+an old setup-only “yes” cannot recover combined consent. Stale source, workspace,
+protected bytes, first brief, or malformed prefixes stop without cleanup or a
+new grant. Preserve the evidence and resolve the reported mismatch first.
+
+An unmarked legacy proposal still uses setup-only approval and its separate
+first-start handoff. Do not edit its marker or receipt to convert it.
+
 ## The plugin or skill does not appear
 
 **Likely cause:** The marketplace was added but the plugin was not installed,

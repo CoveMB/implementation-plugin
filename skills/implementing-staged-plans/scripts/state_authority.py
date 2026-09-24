@@ -117,6 +117,7 @@ SETUP_ONLY_STATUS_SCHEMAS = frozenset(
         "implementation-setup-activation-status-binding/v1",
         "setup-activation-decision/v1",
         "setup-activation-decision/v2",
+        "setup-activation-decision/v3",
         "source-gate-decision/v1",
         "source-gate-satisfaction/v1",
     }
