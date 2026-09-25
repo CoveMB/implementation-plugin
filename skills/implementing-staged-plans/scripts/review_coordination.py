@@ -22,6 +22,8 @@ from execution_discipline import (
 )
 from repository_preparation import (
     PRODUCT_PATH_STATES_SCHEMA_V2,
+    _normalized_file_map_path,
+    _section_body,
     SemanticNameRecord,
     product_path_states_v2_from_value,
     validate_semantic_naming_inventory,
@@ -331,6 +333,34 @@ def _parse_timestamp(value: object) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo is not None else None
+
+
+def parse_raw_review_report_paths(markdown: str) -> dict[str, str]:
+    """Read exact, unique declarations in canonical scope order."""
+    heading = "Review scopes and specialist predicates"
+    if len(re.findall(rf"^## {heading}\s*$", markdown, re.MULTILINE)) != 1:
+        raise ValueError("exact plan must have one review scopes section")
+    allowed = (*REQUIRED_REVIEW_SCOPES, *RISK_REVIEW_SCOPES.values())
+    declarations: dict[str, str] = {}
+    for line in _section_body(markdown, heading).splitlines():
+        stripped = line.strip()
+        match = re.fullmatch(r"- ([a-z][a-z-]*): `([^`]+)`", stripped)
+        if match is None:
+            # Prose is allowed; a scope-led line or a path declaration is not prose.
+            content = re.sub(r"^[-*]\s+", "", stripped)
+            if any(re.match(rf"{re.escape(scope)}(?:\W|$)", content) for scope in allowed) or re.match(r"[-*] .*:.*`", stripped):
+                raise ValueError("malformed raw review report declaration")
+            continue
+        scope, raw_path = match.groups()
+        if scope not in allowed or scope in declarations:
+            raise ValueError(f"unknown or duplicate raw review report scope: {scope}")
+        path = _normalized_file_map_path(raw_path)
+        if path in declarations.values():
+            raise ValueError("exact plan raw review report paths must be distinct")
+        declarations[scope] = path
+    if tuple(scope for scope in declarations if scope in REQUIRED_REVIEW_SCOPES) != REQUIRED_REVIEW_SCOPES:
+        raise ValueError("exact plan must name one ordered requirements, architecture, and test-evidence raw report")
+    return {scope: declarations[scope] for scope in allowed if scope in declarations}
 
 
 def select_review_scopes(

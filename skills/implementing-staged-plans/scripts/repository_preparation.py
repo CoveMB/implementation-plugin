@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import date
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -998,6 +998,59 @@ def _normalized_file_map_path(raw_path: str) -> str:
     ):
         raise ValueError(f"exact-file map path is unsafe: {raw_path!r}")
     return raw_path
+
+
+def matching_operation_allocations(
+    allocations: Sequence[Mapping[str, object]],
+    increment_id: str,
+    operation: str,
+    path: str,
+) -> tuple[Mapping[str, object], ...]:
+    """Use the setup envelope's exact or bounded selector without widening it."""
+    return tuple(
+        allocation
+        for allocation in allocations
+        if isinstance(allocation, Mapping)
+        and allocation.get("operation") == operation
+        and increment_id in allocation.get("increment_ids", [])
+        and (
+            allocation.get("path") == path
+            if allocation.get("kind") == "exact-path"
+            else allocation.get("kind") == "bounded-path-class"
+            and isinstance(allocation.get("path"), str)
+            and (path == allocation["path"] or path.startswith(str(allocation["path"]) + "/"))
+        )
+    )
+
+
+def effective_execution_baseline(
+    program_root: Path,
+    status: Mapping[str, object],
+    baseline: ExecutionBaseline,
+) -> ExecutionBaseline:
+    """Project an independently validated, increment-bound report allocation."""
+    from blocked_recovery import validated_review_allocation_supplement
+
+    supplement = validated_review_allocation_supplement(program_root, status)
+    if supplement is None:
+        return baseline
+    if baseline.schema_version != EXECUTION_BASELINE_SCHEMA:
+        raise ValueError("review allocation requires execution baseline v1")
+    additions = tuple(supplement["report_paths"].values())
+    original_paths = (*baseline.file_map.create, *baseline.file_map.modify, *baseline.file_map.preserve)
+    if set(additions).intersection(original_paths):
+        raise ValueError("review allocation overlaps the original execution map")
+    return replace(
+        baseline,
+        file_map=replace(
+            baseline.file_map,
+            create=tuple(sorted((*baseline.file_map.create, *additions))),
+        ),
+        path_baselines=(
+            *baseline.path_baselines,
+            *(ExecutionPathBaseline(path, "Create", None) for path in additions),
+        ),
+    )
 
 
 def _parse_exact_file_map(

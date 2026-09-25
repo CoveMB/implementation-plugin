@@ -38,6 +38,7 @@ from repository_preparation import (
     EXECUTION_BASELINE_SCHEMA_V2,
     PRODUCT_PATH_STATES_SCHEMA_V2,
     execution_baseline_from_value,
+    effective_execution_baseline,
     execution_baseline_v2_from_value,
     inspect_repository,
     product_path_states_v2_from_value,
@@ -232,7 +233,7 @@ def _live_product_delta(
         ):
             raise ValueError("live accepted product result changed")
         return product_result, str(product_result["sha256"])
-    baseline = execution_baseline_from_value(baseline_value)
+    baseline = effective_execution_baseline(root, status, execution_baseline_from_value(baseline_value))
     assessment = validate_execution_workspace(
         root,
         baseline,

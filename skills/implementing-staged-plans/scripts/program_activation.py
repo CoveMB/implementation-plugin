@@ -60,6 +60,8 @@ from repository_preparation import (
     execution_baseline_v2_from_value,
     product_path_states_v2_value,
     inspect_repository,
+    matching_operation_allocations,
+    effective_execution_baseline,
     parse_exact_file_map,
     parse_exact_file_map_v2,
     validate_execution_workspace,
@@ -1426,6 +1428,12 @@ def _build_plan_candidate(
     except UnicodeDecodeError as error:
         raise ValueError("exact-file plan must be UTF-8") from error
     file_map = _parse_exact_file_map_for_manifest(manifest, markdown)
+    from review_coordination import parse_raw_review_report_paths
+
+    raw_paths = parse_raw_review_report_paths(markdown)
+    undeclared = sorted(set(raw_paths.values()) - set(file_map.create))
+    if undeclared:
+        raise ValueError("raw review report requires exact Create allocation: " + ", ".join(undeclared))
     v2_protected_paths: tuple[str, ...] = ()
     v2_protected_identities: tuple[tuple[int, int], ...] = ()
     if isinstance(file_map, ExactFileMapV2):
@@ -1442,9 +1450,12 @@ def _build_plan_candidate(
     )
     managed_issues = validate_program_lifecycle_file_map(root, Path(observation.path), str(status["current_increment_id"]), file_map, required)
     if isinstance(status.get("rollover_binding"), dict):
-        from program_rollover import validated_inherited_paths
+        from program_rollover import validated_inherited_paths, validated_retained_review_report_paths
 
         inherited_paths = validated_inherited_paths(root, status, observation)
+        retained_reports = validated_retained_review_report_paths(root, status)
+        if not set(retained_reports).issubset(file_map.preserve):
+            raise ValueError("successor plan must Preserve retained allocation reports")
     else:
         inherited_paths = ()
     inherited_set = set(inherited_paths)
@@ -1477,24 +1488,9 @@ def _build_plan_candidate(
                 for path in paths:
                     if (path, operation) in managed:
                         continue
-                    matches = [
-                        allocation
-                        for allocation in allocations
-                        if isinstance(allocation, dict)
-                        and allocation.get("operation") == operation
-                        and status["current_increment_id"]
-                        in allocation.get("increment_ids", [])
-                        and (
-                            allocation.get("path") == path
-                            if allocation.get("kind") == "exact-path"
-                            else allocation.get("kind") == "bounded-path-class"
-                            and isinstance(allocation.get("path"), str)
-                            and (
-                                path == allocation["path"]
-                                or path.startswith(str(allocation["path"]) + "/")
-                            )
-                        )
-                    ]
+                    matches = matching_operation_allocations(
+                        allocations, str(status["current_increment_id"]), operation, path
+                    )
                     if len(matches) != 1:
                         envelope_issues.append(
                             f"{operation} path is outside the setup-approved operation envelope: {path}"
@@ -2257,6 +2253,7 @@ def advance_execution_state(
         if is_v2_baseline
         else execution_baseline_from_value(baseline_value)
     )
+    baseline = effective_execution_baseline(root, status, baseline)
     v2_delete_execution = is_v2_baseline and current_state == "authorized" and target_increment_state == "implementing"
     delete_recoveries: dict[str, object] = {}
     delete_baselines: dict[str, dict[str, object]] = {}

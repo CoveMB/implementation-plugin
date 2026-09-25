@@ -21,8 +21,8 @@ from program_authority import load_json_object, resolve_managed_path, sha256_fil
 from repository_preparation import (
     ExecutionWorkspaceAssessment,
     RepositoryInspection,
-    _section_body,
     execution_baseline_from_value,
+    effective_execution_baseline,
     execution_baseline_v2_from_value,
     inspect_repository,
     parse_exact_file_map,
@@ -45,6 +45,7 @@ from review_coordination import (
     ReviewReport,
     ReviewRiskPredicate,
     load_raw_review_report,
+    parse_raw_review_report_paths,
     render_review_packet,
     select_review_scopes,
     validate_review_bundle,
@@ -136,24 +137,7 @@ def _resolve_increment_paths(
 
 
 def _raw_report_paths(markdown: str) -> dict[str, str]:
-    body = _section_body(markdown, "Review scopes and specialist predicates")
-    matches = re.findall(
-        r"^- (requirements|architecture|test-evidence): `([^`]+)`\s*$",
-        body,
-        flags=re.MULTILINE,
-    )
-    if tuple(scope for scope, _path in matches) != (
-        "requirements",
-        "architecture",
-        "test-evidence",
-    ):
-        raise ValueError(
-            "exact plan must name one ordered requirements, architecture, and test-evidence raw report"
-        )
-    paths = [path for _scope, path in matches]
-    if len(set(paths)) != len(paths):
-        raise ValueError("exact plan raw review report paths must be distinct")
-    return dict(matches)
+    return parse_raw_review_report_paths(markdown)
 
 
 def _status_prior(
@@ -186,10 +170,23 @@ def _load_current_report_inputs(
     raw_values: dict[str, dict[str, object]] = {}
     reports: list[ReviewReport] = []
     findings: list[ReviewFinding] = []
-    for scope in ("requirements", "architecture", "test-evidence"):
+    paths: dict[str, Path] = {}
+    for scope, relative in raw_paths.items():
+        path, issues = resolve_managed_path(workspace, relative, role=f"raw {scope} report")
+        if path is None:
+            raise ValueError("; ".join(issues))
+        paths[scope] = path
+    architecture = load_raw_review_report(paths["architecture"], "architecture")
+    predicates = tuple(ReviewRiskPredicate(**item) for item in architecture["risk_predicates"])
+    selected = select_review_scopes(predicates)
+    missing = set(selected) - set(raw_paths)
+    unexpected = set(raw_paths) - set(selected)
+    if missing or unexpected:
+        raise ValueError(f"review declarations differ from selected risk scopes: missing {sorted(missing)}, unexpected {sorted(unexpected)}")
+    for scope in selected:
         relative = raw_paths[scope]
-        path = workspace / relative
-        value = load_raw_review_report(path, scope)
+        path = paths[scope]
+        value = architecture if scope == "architecture" else load_raw_review_report(path, scope)
         if (
             value.get("program_id") != program_id
             or value.get("program_revision") != program_revision
@@ -453,7 +450,7 @@ def _build_report_bundle(
         changed_files_by_purpose=tuple(
             f"{path}: exact-plan-declared product or review input" for path in product_paths
         ),
-        human_review_order=("requirements", "architecture", "test-evidence"),
+        human_review_order=select_review_scopes(predicates),
         requirements_and_acceptance=("all required raw review scopes reconciled",),
         exact_commands_and_results=command_lines,
         baseline_failures=tuple(final_value.get("baseline_failures", ())),
@@ -525,10 +522,6 @@ def _review_workspace_context(
     )
     if any(path not in file_map.create for path in review_outputs):
         raise ValueError("review evidence and packet require exact-plan Create allocation")
-    raw_paths = _raw_report_paths(plan_markdown)
-    undeclared = sorted(set(raw_paths.values()).difference(file_map.create))
-    if undeclared:
-        raise ValueError("raw review report is not declared by the exact plan: " + ", ".join(undeclared))
     baseline_value, baseline_issues = load_json_object(paths["baseline"])
     if baseline_value is None:
         raise ValueError("; ".join(baseline_issues))
@@ -542,6 +535,14 @@ def _review_workspace_context(
         if is_v2
         else execution_baseline_from_value(baseline_value)
     )
+    baseline = effective_execution_baseline(root, status, baseline)
+    from blocked_recovery import validated_review_allocation_supplement
+
+    supplement = validated_review_allocation_supplement(root, status)
+    raw_paths = dict(supplement["report_paths"]) if supplement is not None else _raw_report_paths(plan_markdown)
+    undeclared = sorted(set(raw_paths.values()).difference(baseline.file_map.create))
+    if undeclared:
+        raise ValueError("raw review report is not declared by the effective exact plan: " + ", ".join(undeclared))
     increment_state = assessment_state or str(status["current_increment_state"])
     if is_v2:
         protected_paths, protected_identities = descriptor_protection_context(

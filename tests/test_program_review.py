@@ -24,19 +24,20 @@ SCRIPT_PATH = SCRIPT_ROOT / "program_review.py"
 REVIEW = load_script_module("program_review", SCRIPT_PATH)
 
 
-def implementing_program() -> tuple[BootstrapFixture, Path, object]:
+def implementing_program(touched_predicates: tuple[str, ...] = ()) -> tuple[BootstrapFixture, Path, object]:
     fixture = BootstrapFixture()
     program_root, observation = activated_program(
         fixture, "approval:full-increment"
     )
     ACTIVATION.prepare_exact_plan(
-        program_root, exact_plan_bytes(program_root, observation), observation
+        program_root, (_exact_plan_bytes(program_root, observation, touched_predicates)
+                       if touched_predicates else exact_plan_bytes(program_root, observation)), observation
     )
     ACTIVATION.advance_execution_state(program_root, "implementing", observation)
     (fixture.repository / "archive-output.txt").write_text(
         "archive output\n", encoding="utf-8"
     )
-    write_raw_review_reports(fixture.repository)
+    write_raw_review_reports(fixture.repository, touched_predicates=touched_predicates)
     product_observation = ACTIVATION.inspect_repository(
         fixture.repository, fixture.head
     ).observation
@@ -45,8 +46,9 @@ def implementing_program() -> tuple[BootstrapFixture, Path, object]:
 
 def reviewing_program(
     raw_mutator=None,
+    touched_predicates: tuple[str, ...] = (),
 ) -> tuple[BootstrapFixture, Path, object]:
-    fixture, program_root, _observation = implementing_program()
+    fixture, program_root, _observation = implementing_program(touched_predicates)
     if raw_mutator is not None:
         raw_mutator(fixture)
     product_observation = ACTIVATION.inspect_repository(
@@ -61,6 +63,133 @@ def reviewing_program(
 class ProgramReviewTests(unittest.TestCase):
     def discover(self, fixture: BootstrapFixture) -> dict[str, object]:
         return run_program_discovery(fixture.repository)
+
+    def test_specialist_declaration_is_retained(self) -> None:
+        scopes = ("requirements", "architecture", "test-evidence", "specialist-provider")
+        markdown = "## Review scopes and specialist predicates\n" + "\n".join(
+            f"- {scope}: `reviews/{scope}.json`" for scope in scopes
+        )
+        self.assertEqual(tuple(REVIEW._raw_report_paths(markdown)), scopes)
+
+    def test_specialist_declarations_reject_ambiguity_and_unsafe_paths(self) -> None:
+        base = "## Review scopes and specialist predicates\n" + "\n".join(
+            f"- {scope}: `reviews/{scope}.json`" for scope in ("requirements", "architecture", "test-evidence")
+        ) + "\n"
+        for declaration in (
+            "- unknown: `reviews/unknown.json`", "- requirements: `reviews/again.json`",
+            "- specialist-provider: reviews/provider.json", "- specialist-provider: `reviews/requirements.json`",
+            *[f"- specialist-provider: `{path}`" for path in ("/absolute.json", "../escape.json", "reviews/./alias.json", "reviews//alias.json", "reviews/../alias.json", "reviews\\alias.json")],
+        ):
+            with self.subTest(declaration=declaration), self.assertRaises(ValueError):
+                REVIEW._raw_report_paths(base + declaration)
+
+    def test_specialist_plan_declaration_preflight_preserves_all_bytes(self) -> None:
+        fixture = BootstrapFixture()
+        self.addCleanup(fixture.close)
+        root, observation = activated_program(fixture, "approval:full-increment")
+        plan = _exact_plan_bytes(root, observation).decode()
+        before = repository_snapshot(fixture.repository)
+        invalid = plan.replace("## Commit boundaries", "- specialist-provider: `reviews/specialist-provider.json`\n\n## Commit boundaries")
+        with self.assertRaises(ValueError):
+            ACTIVATION.prepare_exact_plan(root, invalid.encode(), observation)
+        self.assertEqual(repository_snapshot(fixture.repository), before)
+
+    def test_specialist_provider_reaches_diff_gate(self) -> None:
+        fixture = BootstrapFixture()
+        self.addCleanup(fixture.close)
+        program_root, observation = activated_program(fixture, "approval:full-increment")
+        predicates = ("provider-external-state",)
+        ACTIVATION.prepare_exact_plan(
+            program_root, _exact_plan_bytes(program_root, observation, predicates), observation
+        )
+        ACTIVATION.advance_execution_state(program_root, "implementing", observation)
+        (fixture.repository / "archive-output.txt").write_text("archive output\n")
+        write_raw_review_reports(fixture.repository, touched_predicates=predicates)
+        observation = ACTIVATION.inspect_repository(fixture.repository, fixture.head).observation
+        ACTIVATION.advance_execution_state(program_root, "reviewing", observation)
+        candidate = REVIEW.build_review_preparation(program_root, observation)
+        evidence = json.loads(candidate.evidence_bytes)
+        report = evidence["reports"][-1]
+        self.assertEqual(report["scope"], "specialist-provider")
+        self.assertEqual(report["raw_report_path"], "reviews/specialist-provider.json")
+        self.assertEqual(report["raw_report_sha256"], hashlib.sha256(
+            (fixture.repository / "reviews/specialist-provider.json").read_bytes()).hexdigest())
+        REVIEW.persist_review_preparation(program_root, observation)
+        self.assertEqual(self.discover(fixture)["disposition"], "resume")
+
+    def test_specialist_scope_matrix_builds_production_bundles(self) -> None:
+        cases = (
+            ("security-privacy", "specialist-security-privacy"),
+            ("public-api-compatibility", "specialist-compatibility"),
+            ("concurrency-reliability-distributed-state", "specialist-reliability"),
+            ("persistent-data-migrations", "specialist-persistent-data"),
+            ("accessibility", "specialist-accessibility"),
+            ("platform-deployment-infrastructure", "specialist-platform"),
+            ("payments-financial-state", "specialist-financial"),
+            ("performance", "specialist-performance"),
+            ("provider-external-state", "specialist-provider"),
+        )
+        combinations = [(), *[(case,) for case in cases], tuple(cases[i] for i in (0, 1, 2, 7, 8)), cases]
+        for combination in combinations:
+            with self.subTest(scopes=combination):
+                fixture, root, observation = reviewing_program(touched_predicates=tuple(item[0] for item in combination))
+                try:
+                    candidate = REVIEW.build_review_preparation(root, observation)
+                    evidence = json.loads(candidate.evidence_bytes)
+                    expected = ("requirements", "architecture", "test-evidence", *(item[1] for item in combination))
+                    self.assertEqual(tuple(item["scope"] for item in evidence["reports"]), expected)
+                    self.assertEqual(tuple(evidence["review_packet"]["human_review_order"]), expected)
+                    for scope in expected:
+                        self.assertIn(scope.encode(), candidate.packet_bytes)
+                finally:
+                    fixture.close()
+
+    def test_specialist_invalid_inputs_preserve_transaction_bytes(self) -> None:
+        for mutation in ("missing", "symlink", "parent-symlink", "scope", "program_id", "program_revision", "increment_id", "duplicate-id", "unselected", "missing-declaration", "stale", "open"):
+            with self.subTest(mutation=mutation):
+                fixture, root, observation = implementing_program(("provider-external-state",))
+                try:
+                    path = fixture.repository / "reviews/specialist-provider.json"
+                    value = json.loads(path.read_text())
+                    if mutation == "missing":
+                        path.unlink()
+                    elif mutation == "symlink":
+                        path.unlink()
+                        path.symlink_to("requirements.json")
+                    elif mutation == "parent-symlink":
+                        (fixture.repository / "reviews").rename(fixture.repository / "held-reviews")
+                        (fixture.repository / "reviews").symlink_to("held-reviews", target_is_directory=True)
+                    elif mutation in ("scope", "program_id", "program_revision", "increment_id"):
+                        value[mutation] = 99 if mutation == "program_revision" else "wrong"
+                        path.write_bytes(canonical_json(value))
+                    elif mutation == "duplicate-id":
+                        value["report_id"] = "requirements-initial"
+                        path.write_bytes(canonical_json(value))
+                    elif mutation in ("unselected", "missing-declaration"):
+                        architecture = fixture.repository / "reviews/architecture.json"
+                        value = json.loads(architecture.read_text())
+                        for predicate in value["risk_predicates"]:
+                            if predicate["predicate"] == "provider-external-state":
+                                predicate["touched"] = mutation != "unselected"
+                            if predicate["predicate"] == "accessibility":
+                                predicate["touched"] = mutation == "missing-declaration"
+                        architecture.write_bytes(canonical_json(value))
+                    elif mutation == "stale":
+                        self.make_verification_stale(fixture)
+                    else:
+                        self.add_open_finding(fixture, "specialist-provider")
+                    observation = ACTIVATION.inspect_repository(fixture.repository, fixture.head).observation
+                    if mutation not in ("missing", "symlink", "parent-symlink"):
+                        ACTIVATION.advance_execution_state(root, "reviewing", observation)
+                    before = repository_snapshot(fixture.repository)
+                    with self.assertRaises(ValueError):
+                        if mutation in ("missing", "symlink", "parent-symlink"):
+                            ACTIVATION.advance_execution_state(root, "reviewing", observation)
+                        else:
+                            REVIEW.persist_review_preparation(root, observation)
+                    self.assertEqual(repository_snapshot(fixture.repository), before)
+                finally:
+                    fixture.close()
 
     def test_setup_v2_review_binds_typed_product_result(self) -> None:
         fixture = BootstrapFixture()
@@ -99,7 +228,7 @@ class ProgramReviewTests(unittest.TestCase):
             ).observation
             prepared = ACTIVATION.prepare_exact_plan(
                 fixture.program_root,
-                _exact_plan_bytes(fixture.program_root, observation),
+                _exact_plan_bytes(fixture.program_root, observation, ("provider-external-state",)),
                 observation,
             )
             ACTIVATION.materialize_exact_plan(
@@ -111,7 +240,7 @@ class ProgramReviewTests(unittest.TestCase):
             (fixture.repository / "archive-output.txt").write_text(
                 "archive output\n", encoding="utf-8"
             )
-            write_raw_review_reports(fixture.repository)
+            write_raw_review_reports(fixture.repository, touched_predicates=("provider-external-state",))
             observation = ACTIVATION.inspect_repository(
                 fixture.repository, fixture.head
             ).observation
@@ -218,7 +347,7 @@ class ProgramReviewTests(unittest.TestCase):
                 fixture.repository, fixture.head
             ).observation
             prepared = ACTIVATION.prepare_exact_plan(
-                fixture.program_root, _exact_plan_bytes(fixture.program_root, observation), observation
+                fixture.program_root, _exact_plan_bytes(fixture.program_root, observation, ("provider-external-state",)), observation
             )
             ACTIVATION.materialize_exact_plan(
                 fixture.program_root, prepared.plan_prompt, observation
@@ -229,7 +358,7 @@ class ProgramReviewTests(unittest.TestCase):
             (fixture.repository / "archive-output.txt").write_text(
                 "archive output\n", encoding="utf-8"
             )
-            write_raw_review_reports(fixture.repository)
+            write_raw_review_reports(fixture.repository, touched_predicates=("provider-external-state",))
             self.add_open_finding(fixture)
             observation = ACTIVATION.inspect_repository(
                 fixture.repository, fixture.head
@@ -388,8 +517,9 @@ class ProgramReviewTests(unittest.TestCase):
             "awaiting-diff-status",
         ):
             with self.subTest(label=failure_label):
-                fixture, program_root, observation = reviewing_program()
+                fixture, program_root, observation = reviewing_program(touched_predicates=("provider-external-state",))
                 try:
+                    authority_bytes = (program_root / "state/action-authorizations.jsonl").read_bytes()
                     def interrupt(label: str) -> None:
                         if label == failure_label:
                             raise RuntimeError("injected review interruption")
@@ -410,6 +540,10 @@ class ProgramReviewTests(unittest.TestCase):
                     recovered = REVIEW.persist_review_preparation(program_root, observation)
                     self.assertTrue(recovered.recovered)
                     self.assertEqual(repository_snapshot(program_root), completed)
+                    self.assertEqual((program_root / "state/action-authorizations.jsonl").read_bytes(), authority_bytes)
+                    evidence = json.loads((program_root / "increments/ARCHIVE-INDEX/review-evidence.json").read_text())
+                    self.assertEqual([report["scope"] for report in evidence["reports"]],
+                                     ["requirements", "architecture", "test-evidence", "specialist-provider"])
                 finally:
                     fixture.close()
 
@@ -421,8 +555,9 @@ class ProgramReviewTests(unittest.TestCase):
             "awaiting-diff-status",
         ):
             with self.subTest(label=failure_label):
-                fixture, program_root, observation = reviewing_program()
+                fixture, program_root, observation = reviewing_program(touched_predicates=("provider-external-state",))
                 try:
+                    authority_bytes = (program_root / "state/action-authorizations.jsonl").read_bytes()
                     def interrupt(label: str) -> None:
                         if label == failure_label:
                             raise RuntimeError("injected review interruption")
@@ -519,15 +654,15 @@ class ProgramReviewTests(unittest.TestCase):
         value.update(changes)
         path.write_bytes(canonical_json(value))
 
-    def add_open_finding(self, fixture: BootstrapFixture) -> None:
+    def add_open_finding(self, fixture: BootstrapFixture, scope: str = "requirements") -> None:
         self.change_raw(
             fixture,
-            "requirements",
+            scope,
             findings=[
                 {
                     "finding_id": "F-OPEN",
-                    "report_id": "requirements-initial",
-                    "scope": "requirements",
+                    "report_id": f"{scope}-initial",
+                    "scope": scope,
                     "classification": "material",
                     "summary": "review found a material defect",
                     "evidence": "exact evidence",
@@ -548,19 +683,20 @@ class ProgramReviewTests(unittest.TestCase):
         fixture: BootstrapFixture,
         *,
         finding_id: str = "F-OPEN",
+        scope: str = "requirements",
     ) -> None:
-        requirements_path = fixture.repository / "reviews/requirements.json"
+        requirements_path = fixture.repository / f"reviews/{scope}.json"
         requirements = json.loads(requirements_path.read_text(encoding="utf-8"))
         requirements.update(
-            report_id="requirements-follow-up",
+            report_id=f"{scope}-follow-up",
             follow_up_for_finding_ids=[finding_id],
             persisted_at="2026-08-18T10:30:00Z",
             reconciled_at="2026-08-18T10:40:00Z",
             findings=[
                 {
                     "finding_id": finding_id,
-                    "report_id": "requirements-follow-up",
-                    "scope": "requirements",
+                    "report_id": f"{scope}-follow-up",
+                    "scope": scope,
                     "classification": "material",
                     "summary": "review found a material defect",
                     "evidence": "exact evidence",
@@ -591,15 +727,15 @@ class ProgramReviewTests(unittest.TestCase):
                 "repair": "corrected the archive output",
                 "verification_command": "python3 -m unittest tests.test_archive_output",
                 "verification_result": "passed with exit 0",
-                "renewed_report_ids": ["requirements-follow-up"],
+                "renewed_report_ids": [f"{scope}-follow-up"],
                 "changed_paths": ["archive-output.txt"],
-                "affected_scopes": ["requirements"],
+                "affected_scopes": [scope],
             }
         ]
         evidence_path.write_bytes(canonical_json(evidence))
 
     def test_material_finding_round_trip_returns_to_diff_gate(self) -> None:
-        fixture, program_root, observation = reviewing_program(self.add_open_finding)
+        fixture, program_root, observation = reviewing_program(lambda fixture: self.add_open_finding(fixture, "specialist-provider"), ("provider-external-state",))
         try:
             remediation = REVIEW.persist_review_remediation(program_root, observation)
             self.assertEqual(remediation.increment_state, "remediating")
@@ -608,7 +744,7 @@ class ProgramReviewTests(unittest.TestCase):
             (fixture.repository / "archive-output.txt").write_text(
                 "repaired archive output\n", encoding="utf-8"
             )
-            self.repair_open_finding(fixture)
+            self.repair_open_finding(fixture, scope="specialist-provider")
             repaired = ACTIVATION.inspect_repository(
                 fixture.repository, fixture.head
             ).observation
@@ -628,7 +764,8 @@ class ProgramReviewTests(unittest.TestCase):
                     "requirements-initial",
                     "architecture-initial",
                     "test-evidence-initial",
-                    "requirements-follow-up",
+                    "specialist-provider-initial",
+                    "specialist-provider-follow-up",
                 ),
             )
             self.assertEqual(evidence["findings"][0]["finding_id"], "F-OPEN")

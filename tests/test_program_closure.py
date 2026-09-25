@@ -27,6 +27,23 @@ def accepted_program():
 
 
 class ProgramClosureTests(unittest.TestCase):
+    def test_terminal_specialist_closure_with_and_without_allocation_recovery(self):
+        from tests.test_blocked_recovery import reviewed_specialist_program
+
+        for recovery in (False, True):
+            with self.subTest(recovery=recovery):
+                fixture, root, observation = reviewed_specialist_program(recovery=recovery, terminal=True)
+                self.addCleanup(fixture.close)
+                reports = {p: v for p, v in repository_snapshot(fixture.repository).items()
+                           if p.startswith("reviews/") and p.endswith(".json")}
+                DIFF.persist_accept_stop(root, DIFF.render_diff_disposition_prompt(root), observation)
+                CLOSURE.prepare_program_closure(root, observation)
+                prompt = CLOSURE.render_program_closure_prompt(root)
+                CLOSURE.persist_program_closure(root, prompt, observation)
+                self.assertEqual(json.loads((root / "state/status.json").read_text())["program_state"], "closed")
+                self.assertEqual(self.discover(fixture)["disposition"], "terminal-programs")
+                self.assertEqual({p: repository_snapshot(fixture.repository)[p] for p in reports}, reports)
+
     def test_unavailable_selection_cannot_satisfy_closure_preconditions(self):
         from program_authority import resolve_increment_successor
 

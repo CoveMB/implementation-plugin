@@ -36,6 +36,7 @@ from repository_preparation import (
     PRODUCT_PATH_STATES_SCHEMA_V2,
     ExactFileMap,
     execution_baseline_from_value,
+    effective_execution_baseline,
     execution_baseline_v2_from_value,
     inspect_repository,
     product_path_states_v2_from_value,
@@ -57,6 +58,7 @@ ROLLOVER_RECORD_SCHEMA = "implementation-increment-rollover/v1"
 ROLLOVER_BINDING_SCHEMA = "implementation-increment-rollover-binding/v1"
 INHERITED_WORKSPACE_SCHEMA = "implementation-inherited-workspace/v1"
 ROLLOVER_RECORD_SCHEMA_V2 = "implementation-increment-rollover/v2"
+ROLLOVER_RECORD_SCHEMA_V3 = "implementation-increment-rollover/v3"
 ROLLOVER_BINDING_SCHEMA_V2 = "implementation-increment-rollover-binding/v2"
 INHERITED_WORKSPACE_SCHEMA_V2 = "implementation-inherited-workspace/v2"
 ACTION_AUTHORIZATION_SCHEMA_V3 = "implementation-action-authorization/v3"
@@ -424,7 +426,7 @@ def _build_rollover_candidate(
     baseline = (
         execution_baseline_v2_from_value(baseline_value)
         if is_v2_result
-        else execution_baseline_from_value(baseline_value)
+        else effective_execution_baseline(root, status, execution_baseline_from_value(baseline_value))
     )
     required = _required_increment_rollover_writes(
         root,
@@ -684,10 +686,18 @@ def _build_rollover_candidate(
             "successor_grant_id": grant_id,
         },
     )
+    allocation_binding = status.get("review_allocation_binding")
     rollover_record = {
         "schema_version": (
-            ROLLOVER_RECORD_SCHEMA_V2 if is_v2_result else ROLLOVER_RECORD_SCHEMA
+            ROLLOVER_RECORD_SCHEMA_V2 if is_v2_result else (
+                ROLLOVER_RECORD_SCHEMA_V3 if allocation_binding else ROLLOVER_RECORD_SCHEMA
+            )
         ),
+        **({
+            "review_allocation_binding": dict(allocation_binding),
+            "execution_baseline_binding": dict(baseline_binding),
+            "approved_exact_file_plan_sha256": status["approved_exact_file_plan_sha256"],
+        } if allocation_binding else {}),
         "rollover_id": rollover_id,
         "continuation_domain": domain,
         "continuation_checkpoint_id": checkpoint_id,
@@ -757,6 +767,10 @@ def _build_rollover_candidate(
             }
         )
     successor_status = dict(status)
+    if allocation_binding:
+        # The immutable rollover retains provenance; the successor owns no extension.
+        for field in ("review_allocation_binding", "blocked_context", "block_resolution_binding"):
+            successor_status.pop(field, None)
     for field in (
         "approved_exact_file_plan_sha256",
         "pending_exact_file_plan_sha256",
@@ -1429,6 +1443,58 @@ def _validate_rollover_file_binding(
     return path
 
 
+def _historical_review_allocation(
+    root: Path, status: Mapping[str, object], record: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    """Validate archived allocation authority using its original increment context."""
+    from blocked_recovery import validated_review_allocation_supplement
+
+    historical_status = dict(status)
+    for field in ("blocked_context", "block_resolution_binding", "review_allocation_binding"):
+        historical_status.pop(field, None)
+    historical_status.update(
+        program_state="active",
+        current_increment_state="accepted",
+        current_increment_id=record.get("current_increment_id"),
+        current_increment_authority_binding=record.get("prior_increment_authority_binding"),
+        execution_baseline_binding=record.get("execution_baseline_binding"),
+        approved_exact_file_plan_sha256=record.get("approved_exact_file_plan_sha256"),
+        review_allocation_binding=record.get("review_allocation_binding"),
+    )
+    supplement = validated_review_allocation_supplement(root, historical_status)
+    if (supplement is not None) != (record.get("schema_version") == ROLLOVER_RECORD_SCHEMA_V3):
+        raise ValueError("rollover review allocation record family differs")
+    if supplement is None:
+        return None
+    product_delta = record.get("accepted_product_delta")
+    if not isinstance(product_delta, list):
+        raise ValueError("rollover allocation accepted delta is missing")
+    reports = {*supplement["report_paths"].values(),
+               *(item["path"] for item in supplement["retained_reports"])}
+    for relative in reports:
+        matches = [item for item in product_delta if isinstance(item, Mapping) and item.get("path") == relative]
+        target, issues = resolve_managed_path(
+            Path(supplement["workspace"]["path"]), relative, role="retained allocation report",
+        )
+        if target is None or len(matches) != 1 or matches[0].get("sha256") != sha256_file(target):
+            raise ValueError("rollover retained review report changed: " + relative + "; ".join(issues))
+    return supplement
+
+
+def validated_retained_review_report_paths(
+    program_root: Path, status: Mapping[str, object],
+) -> tuple[str, ...]:
+    """Reports from completed allocation recoveries must remain Preserve paths."""
+    root = Path(program_root)
+    reports: set[str] = set()
+    for record in _validated_completed_rollover_records(root, status, allow_unbound_suffix=False):
+        supplement = _historical_review_allocation(root, status, record)
+        if supplement is not None:
+            reports.update(supplement["report_paths"].values())
+            reports.update(item["path"] for item in supplement["retained_reports"])
+    return tuple(sorted(reports))
+
+
 def _validated_completed_rollover_records(
     program_root: Path,
     status: Mapping[str, object],
@@ -1578,9 +1644,11 @@ def _validated_completed_rollover_records(
         traceability, _ = _load_role_object(root, manifest, "traceability")
     for index, record in enumerate(completed):
         record_is_v2 = record.get("schema_version") == ROLLOVER_RECORD_SCHEMA_V2
-        if record.get("schema_version") != (
-            ROLLOVER_RECORD_SCHEMA_V2 if is_setup_v2 else ROLLOVER_RECORD_SCHEMA
-        ):
+        supported_schemas = (
+            {ROLLOVER_RECORD_SCHEMA_V2} if is_setup_v2 else
+            {ROLLOVER_RECORD_SCHEMA, ROLLOVER_RECORD_SCHEMA_V3}
+        )
+        if record.get("schema_version") not in supported_schemas:
             raise ValueError("rollover chain contains an unsupported record")
         current = record.get("current_increment_id")
         successor = record.get("successor_increment_id")
@@ -1606,6 +1674,7 @@ def _validated_completed_rollover_records(
             accepted_prefix += (current,)
         if record.get("prior_increment_authority_binding") != expected_authority:
             raise ValueError("rollover chain prior increment authority is invalid")
+        _historical_review_allocation(root, status, record)
         matching_actions = [
             action
             for action in actions

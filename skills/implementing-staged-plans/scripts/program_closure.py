@@ -37,6 +37,7 @@ from program_authority import (
 from program_setup import source_gate_satisfaction
 from repository_preparation import (
     execution_baseline_from_value,
+    effective_execution_baseline,
     inspect_repository,
     parse_exact_file_map,
     validate_execution_workspace,
@@ -392,7 +393,7 @@ def build_closure_preparation(
     baseline_value, baseline_issues = load_json_object(paths["baseline"])
     if baseline_value is None:
         raise ValueError("; ".join(baseline_issues))
-    baseline = execution_baseline_from_value(baseline_value)
+    baseline = effective_execution_baseline(root, status, execution_baseline_from_value(baseline_value))
     inspection = inspect_repository(Path(normalized.path), normalized.base_commit)
     assessment = validate_execution_workspace(
         root,
