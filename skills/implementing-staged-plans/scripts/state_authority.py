@@ -238,6 +238,7 @@ ACTION_NAMES = frozenset(
         "write-program-artifact",
         "rollover-increment",
         "resume-blocked-program",
+        "allocate-review-reports",
         "create-workspace",
         "modify-workspace",
         "run-local-verification",
@@ -2550,6 +2551,12 @@ def validate_state_authority(
     )
     execution_workspace_validated = False
     if status is not None:
+        if manifest.get("schema_version") in {NEW_PROGRAM_MANIFEST_SCHEMA, SETUP_PROGRAM_MANIFEST_SCHEMA}:
+            try:
+                from blocked_recovery import validated_review_allocation_supplement
+                validated_review_allocation_supplement(root, status)
+            except (ImportError, KeyError, OSError, TypeError, ValueError) as error:
+                issues.append(str(error))
         issues.extend(validate_state(root, manifest, status, observation))
         approved_plan = status.get("approved_exact_file_plan_sha256")
         if (
@@ -2627,6 +2634,7 @@ def validate_state_authority(
                             REPOSITORY_INSPECTION_SCHEMA,
                             RepositoryInspection,
                             execution_baseline_from_value,
+                            effective_execution_baseline,
                             execution_baseline_v2_from_value,
                             validate_execution_workspace,
                             validate_execution_workspace_v2,
@@ -2641,7 +2649,8 @@ def validate_state_authority(
                             if is_v2_baseline
                             else execution_baseline_from_value(baseline_value)
                         )
-                    except (ImportError, ValueError) as error:
+                        baseline = effective_execution_baseline(root, status, baseline)
+                    except (ImportError, KeyError, OSError, TypeError, ValueError) as error:
                         issues.append(str(error))
                     else:
                         if baseline.program_id != manifest.get("program_id"):

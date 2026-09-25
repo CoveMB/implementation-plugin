@@ -9,7 +9,7 @@ import json
 import re
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PurePosixPath
 
 from program_activation import (
@@ -33,6 +33,9 @@ from repository_preparation import (
     REPOSITORY_INSPECTION_SCHEMA,
     RepositoryInspection,
     execution_baseline_from_value,
+    effective_execution_baseline,
+    matching_operation_allocations,
+    parse_exact_file_map,
     inspect_repository,
     validate_execution_workspace,
 )
@@ -52,6 +55,15 @@ BLOCK_RESOLUTION_RECORD_SCHEMA = "implementation-block-resolution/v1"
 BLOCK_RESOLUTION_COMMAND_SCHEMA = "implementation-block-resolution-command/v1"
 BLOCK_RESOLUTION_CANDIDATE_SCHEMA = "implementation-block-resolution-candidate/v1"
 BLOCK_RESOLUTION_BINDING_SCHEMA = "implementation-block-resolution-binding/v1"
+
+BLOCKED_CONTEXT_SCHEMA_V2 = "implementation-blocked-context/v2"
+BLOCK_RESOLUTION_RECORD_SCHEMA_V2 = "implementation-block-resolution/v2"
+BLOCK_RESOLUTION_COMMAND_SCHEMA_V2 = "implementation-block-resolution-command/v2"
+BLOCK_RESOLUTION_CANDIDATE_SCHEMA_V2 = "implementation-block-resolution-candidate/v2"
+BLOCK_RESOLUTION_BINDING_SCHEMA_V2 = "implementation-block-resolution-binding/v2"
+REVIEW_ALLOCATION_SCHEMA = "implementation-review-allocation-supplement/v1"
+REVIEW_ALLOCATION_BINDING_SCHEMA = "implementation-review-allocation-binding/v1"
+ALLOCATION_ACTIONS = ["allocate-review-reports", "resume-blocked-program"]
 
 
 @dataclass(frozen=True)
@@ -163,6 +175,254 @@ def _safe_relative_path(value: object) -> str:
     return value
 
 
+def _bound_object(root: Path, binding: Mapping[str, object], role: str) -> dict[str, object]:
+    path, issues = resolve_managed_path(root, binding.get("path"), role=role)
+    if path is None:
+        raise ValueError("; ".join(issues))
+    if sha256_file(path) != binding.get("sha256"):
+        raise ValueError(f"{role} digest mismatch")
+    value, issues = load_json_object(path)
+    if value is None:
+        raise ValueError("; ".join(issues))
+    return value
+
+
+def _review_allocation_shape(
+    root: Path, manifest: Mapping[str, object], status: Mapping[str, object],
+    context: Mapping[str, object], *, require_absent: bool,
+) -> dict[str, object]:
+    """Derive only report paths; read provenance without execution-validator recursion."""
+    from review_coordination import (
+        ReviewRiskPredicate,
+        load_raw_review_report,
+        parse_raw_review_report_paths,
+        select_review_scopes,
+    )
+
+    if manifest.get("schema_version") != SETUP_PROGRAM_MANIFEST_SCHEMA:
+        raise ValueError("review allocation requires a setup-approved operation envelope")
+    if context.get("schema_version") != BLOCKED_CONTEXT_SCHEMA or context.get("prior_increment_state") != "implementing":
+        raise ValueError("initial review allocation requires an unsupplemented implementing block")
+    baseline = _bound_object(root, context["execution_baseline_binding"], "original review allocation baseline")
+    if baseline.get("schema_version") != "implementation-execution-baseline/v1":
+        raise ValueError("review allocation requires execution baseline v1")
+    plan_binding = context["exact_file_plan_binding"]
+    plan_path, issues = resolve_managed_path(root, plan_binding.get("path"), role="original allocation plan")
+    if plan_path is None or sha256_file(plan_path) != plan_binding.get("sha256"):
+        raise ValueError("original review allocation plan changed: " + "; ".join(issues))
+    if baseline.get("exact_file_plan_sha256") != plan_binding.get("sha256"):
+        raise ValueError("original allocation baseline plan differs")
+    markdown = plan_path.read_text(encoding="utf-8")
+    file_map = parse_exact_file_map(markdown)
+    raw_paths = parse_raw_review_report_paths(markdown)
+    if not set(raw_paths.values()).issubset(file_map.create):
+        raise ValueError("original report paths require exact Create ownership")
+    workspace_record = _bound_object(root, context["workspace_binding"], "original allocation workspace")
+    selected_workspace = workspace_record["implementation_workspace"]
+    workspace = Path(selected_workspace["path"])
+    reports = {}
+    retained = []
+    for scope, relative in raw_paths.items():
+        path, issues = resolve_managed_path(workspace, relative, role="retained review report")
+        if path is None:
+            raise ValueError("; ".join(issues))
+        value = load_raw_review_report(path, scope)
+        if (value["program_id"], value["program_revision"], value["increment_id"]) != (status["program_id"], status["program_revision"], status["current_increment_id"]):
+            raise ValueError("retained review report identity differs")
+        reports[scope] = value
+        retained.append({"scope": scope, "path": relative, "sha256": sha256_file(path)})
+    selected = select_review_scopes(tuple(ReviewRiskPredicate(**item) for item in reports["architecture"]["risk_predicates"]))
+    if set(selected) == set(raw_paths) and all(report["reconciled_at"] for report in reports.values()):
+        raise ValueError("review allocation is already complete")
+    parents = {PurePosixPath(path).parent.as_posix() for path in raw_paths.values()}
+    if len(parents) != 1 or "." in parents:
+        raise ValueError("review allocation requires one existing review directory")
+    directory = next(iter(parents)) + "/recovery-" + str(context["block_id"])
+    report_paths = {scope: f"{directory}/{scope}.json" for scope in selected}
+    semantics = manifest["setup_semantics"]
+    if semantics["operation_envelope"]["schema_version"] != "implementation-operation-envelope/v1":
+        raise ValueError("review allocation requires operation envelope v1")
+    allocations = semantics["operation_envelope"]["allocations"]
+    increment_ids = [item["increment_id"] for item in semantics["increments"]]
+    current = str(status["current_increment_id"])
+    later = increment_ids[increment_ids.index(current) + 1:]
+    envelope_bindings = []
+    for relative in report_paths.values():
+        if relative in {*file_map.create, *file_map.modify, *file_map.preserve}:
+            raise ValueError("review allocation must use fresh report paths")
+        path, issues = resolve_managed_path(workspace, relative, role="allocated review report", require_file=False)
+        if path is None:
+            raise ValueError("; ".join(issues))
+        if require_absent and path.exists():
+            raise ValueError("review allocation destination is occupied")
+        if path.exists() and (not path.is_file() or path.stat().st_nlink != 1 or path.stat().st_mode & 0o111):
+            raise ValueError("allocated review report must be a non-executable regular file")
+        matches = matching_operation_allocations(allocations, current, "Create", relative)
+        if len(matches) != 1:
+            raise ValueError("review allocation is outside the approved Create envelope")
+        allocation = matches[0]
+        if (allocation.get("kind") != "bounded-path-class"
+            or allocation.get("ownership") != "program"
+            or allocation.get("protected") is not False or allocation.get("user_work") is not False
+            or (allocation.get("file_kind"), allocation.get("link_kind"), allocation.get("mode"), allocation.get("collision")) != ("absent", "none", None, "none")
+            or allocation.get("exclusions")):
+            raise ValueError("review allocation lacks an unambiguous report Create class")
+        retention = []
+        for successor in later:
+            matches = matching_operation_allocations(allocations, successor, "Preserve", relative)
+            if len(matches) != 1 or any(matches[0].get(key) != expected for key, expected in (
+                ("file_kind", "regular-file"), ("link_kind", "none"), ("mode", "100644"), ("collision", "accepted-predecessor"))) or matches[0].get("exclusions"):
+                raise ValueError("review allocation lacks successor Preserve coverage")
+            retention.append({"increment_id": successor, "allocation": dict(matches[0])})
+        envelope_bindings.append({"path": relative, "operation": "Create", "baseline_sha256": None, "allocation": dict(allocation), "retention": retention})
+    return {
+        "schema_version": REVIEW_ALLOCATION_SCHEMA,
+        "program_id": status["program_id"], "program_revision": status["program_revision"],
+        "increment_id": current, "source_binding": dict(status["source_binding"]),
+        "program_binding": dict(status["program_binding"]),
+        "workspace": dict(selected_workspace),
+        "exact_file_plan_binding": dict(plan_binding),
+        "execution_baseline_binding": dict(context["execution_baseline_binding"]),
+        "current_increment_authority_binding": dict(context["current_increment_authority_binding"]),
+        "blocked_context_sha256": _sha256_bytes(_canonical_json_bytes(dict(context))),
+        "original_evidence_bindings": context["evidence_bindings"],
+        "retained_reports": retained,
+        "selected_scopes": list(selected), "report_paths": report_paths,
+        "architecture_risk_sha256": next(item["sha256"] for item in retained if item["scope"] == "architecture"),
+        "additions": envelope_bindings,
+        "pending_review_work": ["Complete the exact fresh raw reports with truthful assessments and reconciliation times.", "Run fresh final verification and the ordinary review writer; stop at diff approval."],
+    }
+
+
+def validated_review_allocation_supplement(
+    program_root: Path, status: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    """Validate the originating grant independently of the latest block resolution."""
+    root = Path(program_root)
+    manifest, issues = load_json_object(root / "manifest.json")
+    if manifest is None:
+        raise ValueError("; ".join(issues))
+    if manifest.get("schema_version") not in {NEW_PROGRAM_MANIFEST_SCHEMA, SETUP_PROGRAM_MANIFEST_SCHEMA}:
+        if status.get("review_allocation_binding") is not None:
+            raise ValueError("review allocation is unsupported for this manifest")
+        return None
+    resolutions, issues = load_json_lines(_role_path(root, manifest, "block_resolutions"))
+    actions, action_issues = load_json_lines(_role_path(root, manifest, "action_authorizations"))
+    if resolutions is None or actions is None:
+        raise ValueError("; ".join((*issues, *action_issues)))
+    current = status.get("current_increment_id")
+    grants = [
+        action for action in actions
+        if "allocate-review-reports" in action.get("actions", [])
+        and action.get("increment_id") == current
+    ]
+    records = [
+        record for record in resolutions
+        if isinstance(record.get("review_allocation_supplement"), Mapping)
+        and record["review_allocation_supplement"].get("increment_id") == current
+    ]
+    binding = status.get("review_allocation_binding")
+    if binding is None:
+        context = status.get("blocked_context", {})
+        # An initial action/resolution prefix has not yet granted report writes.
+        pending = status.get("program_state") == "blocked" and isinstance(context, Mapping) and context.get("schema_version") == BLOCKED_CONTEXT_SCHEMA
+        if (grants or records) and not (pending and all(item.get("block_id") == context.get("block_id") for item in (*grants, *records))):
+            raise ValueError("granted review allocation binding is missing")
+        return None
+    binding_fields = {
+        "schema_version", "increment_id", "resolution_id", "resolution_sha256",
+        "action_authorization_id", "action_authorization_sha256", "supplement_sha256",
+    }
+    if (
+        not isinstance(binding, Mapping)
+        or set(binding) != binding_fields
+        or binding.get("schema_version") != REVIEW_ALLOCATION_BINDING_SCHEMA
+        or binding.get("increment_id") != current
+    ):
+        raise ValueError("review allocation binding is invalid")
+    if len(grants) != 1 or len(records) != 1:
+        raise ValueError("review allocation requires exactly one originating grant and resolution")
+    action, record = grants[0], records[0]
+    _require_exact_record_bytes(_role_path(root, manifest, "action_authorizations"), action, "authorization_id")
+    _require_exact_record_bytes(_role_path(root, manifest, "block_resolutions"), record, "resolution_id")
+    supplement = record["review_allocation_supplement"]
+    context = record.get("blocked_context")
+    if (record.get("schema_version") != BLOCK_RESOLUTION_RECORD_SCHEMA_V2 or record.get("recovery_kind") != "allocate-review-reports"
+        or not isinstance(context, Mapping)
+        or record.get("resolution_id") != binding["resolution_id"]
+        or _sha256_bytes(_canonical_json_line(record)) != binding["resolution_sha256"]
+        or action.get("authorization_id") != binding["action_authorization_id"]
+        or _sha256_bytes(_canonical_json_line(action)) != binding["action_authorization_sha256"]
+        or record.get("action_authorization_id") != binding["action_authorization_id"]
+        or record.get("action_authorization_sha256") != binding["action_authorization_sha256"]
+        or _sha256_bytes(_canonical_json_bytes(dict(supplement))) != binding["supplement_sha256"]
+        or action.get("schema_version") != "implementation-action-authorization/v2"
+        or action.get("decision") != "authorized" or action.get("actions") != ALLOCATION_ACTIONS
+        or action.get("review_allocation_supplement") != supplement
+        or record.get("submitted_prompt_sha256") != action.get("submitted_prompt_sha256")
+        or record.get("blocked_context_sha256") != supplement.get("blocked_context_sha256")
+        or record.get("block_id") != context.get("block_id")
+        or action.get("block_id") != context.get("block_id")
+        or record.get("restored_increment_state") != "implementing"):
+        raise ValueError("review allocation originating records differ")
+    for field in ("current_increment_authority_binding", "execution_baseline_binding"):
+        if context.get(field) != status.get(field):
+            raise ValueError(f"review allocation {field} differs")
+    if context["exact_file_plan_binding"].get("sha256") != status.get("approved_exact_file_plan_sha256"):
+        raise ValueError("review allocation exact plan differs")
+    expected = _review_allocation_shape(root, manifest, status, context, require_absent=False)
+    product_sha256 = supplement.get("original_product_sha256")
+    if not isinstance(product_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", product_sha256) is None:
+        raise ValueError("review allocation original product fingerprint is invalid")
+    expected["original_product_sha256"] = product_sha256
+    expected["blocked_status_sha256"] = record.get("blocked_status_sha256")
+    expected["blocked_status_sequence"] = context["prior_status_sequence"] + 1
+    if record.get("blocked_status_sequence") != expected["blocked_status_sequence"] or action.get("blocked_status_sha256") != expected["blocked_status_sha256"]:
+        raise ValueError("review allocation blocked status differs")
+    if supplement != expected:
+        raise ValueError("review allocation preserved provenance differs")
+    return supplement
+
+
+def _require_exact_record_bytes(path: Path, record: Mapping[str, object], identifier: str) -> None:
+    matches = [line for line in path.read_bytes().splitlines(keepends=True)
+               if line.strip() and json.loads(line).get(identifier) == record.get(identifier)]
+    if matches != [_canonical_json_line(dict(record))]:
+        raise ValueError("review allocation authority record bytes differ")
+
+
+def _preflight_versioned_resolution(
+    action_path: Path, resolution_path: Path, candidate: BlockResolutionCandidate,
+) -> None:
+    loaded = []
+    for path, expected, identifier in (
+        (action_path, candidate.action_record, "authorization_id"),
+        (resolution_path, candidate.resolution_record, "resolution_id"),
+    ):
+        records, issues = load_json_lines(path)
+        if records is None:
+            raise ValueError("; ".join(issues))
+        matches = [
+            record for record in records
+            if record.get("block_id") == expected["block_id"]
+            or record.get(identifier) == expected[identifier]
+        ]
+        loaded.append((path, expected, identifier, matches))
+    if candidate.resolution_record["schema_version"] != BLOCK_RESOLUTION_RECORD_SCHEMA_V2 and not any(
+        "recovery_kind" in record for _path, _expected, _identifier, matches in loaded for record in matches
+    ):
+        return
+    present = []
+    for path, expected, identifier, matches in loaded:
+        if matches and matches != [expected]:
+            raise ValueError("blocked-recovery-required: divergent recovery prefix")
+        if matches:
+            _require_exact_record_bytes(path, expected, identifier)
+        present.append(bool(matches))
+    if present[1] and not present[0]:
+        raise ValueError("blocked-recovery-required: resolution precedes its action")
+
+
 def _execution_contract(
     root: Path,
     manifest: Mapping[str, object],
@@ -191,7 +451,7 @@ def _execution_contract(
     baseline_value, baseline_issues = load_json_object(baseline_path)
     if baseline_value is None:
         raise ValueError("; ".join(baseline_issues))
-    baseline = execution_baseline_from_value(baseline_value)
+    baseline = effective_execution_baseline(root, status, execution_baseline_from_value(baseline_value))
     storage = manifest.get("increment_storage")
     if not isinstance(storage, Mapping):
         raise ValueError("manifest increment_storage must be an object")
@@ -290,8 +550,10 @@ def _build_blocked_context(
     evidence = _validate_evidence_bindings(
         Path(observation.path), baseline, request.evidence_bindings
     )
+    supplement = validated_review_allocation_supplement(root, status)
+    context_schema = BLOCKED_CONTEXT_SCHEMA_V2 if supplement is not None else BLOCKED_CONTEXT_SCHEMA
     seed = {
-        "schema_domain": BLOCKED_CONTEXT_SCHEMA,
+        "schema_domain": context_schema,
         "reason_code": reason_code,
         "prior_program_state": status["program_state"],
         "prior_increment_state": status["current_increment_state"],
@@ -310,8 +572,10 @@ def _build_blocked_context(
         "recovery_criteria": list(criteria),
         "evidence_bindings": list(evidence),
     }
+    if supplement is not None:
+        seed["review_allocation_binding"] = dict(status["review_allocation_binding"])
     return {
-        "schema_version": BLOCKED_CONTEXT_SCHEMA,
+        "schema_version": context_schema,
         "block_id": _identifier("program-block", seed),
         **{key: value for key, value in seed.items() if key != "schema_domain"},
     }
@@ -397,6 +661,8 @@ def validate_blocked_context(
         "recovery_criteria",
         "evidence_bindings",
     }
+    if isinstance(context, Mapping) and context.get("schema_version") == BLOCKED_CONTEXT_SCHEMA_V2:
+        expected_keys.add("review_allocation_binding")
     if not isinstance(context, Mapping) or set(context) != expected_keys:
         return ("blocked context shape is invalid",)
     try:
@@ -439,8 +705,13 @@ def validate_blocked_context(
         "current_increment_state"
     ) != "blocked":
         issues.append("blocked context requires both controlling states blocked")
-    if context.get("schema_version") != BLOCKED_CONTEXT_SCHEMA:
+    if context.get("schema_version") not in {BLOCKED_CONTEXT_SCHEMA, BLOCKED_CONTEXT_SCHEMA_V2}:
         issues.append("blocked context schema is invalid")
+    if context.get("schema_version") == BLOCKED_CONTEXT_SCHEMA_V2 and (
+        context.get("review_allocation_binding") != status.get("review_allocation_binding")
+        or status.get("review_allocation_binding") is None
+    ):
+        issues.append("blocked context review allocation binding differs")
     if context.get("prior_program_state") != "active" or context.get(
         "prior_increment_state"
     ) not in {"implementing", "reviewing"}:
@@ -510,7 +781,7 @@ def validate_blocked_context(
     if context.get("evidence_bindings") != list(validated_evidence):
         issues.append("blocked context evidence inventory differs")
     seed = {
-        "schema_domain": BLOCKED_CONTEXT_SCHEMA,
+        "schema_domain": context["schema_version"],
         **{
             key: value
             for key, value in context.items()
@@ -544,7 +815,7 @@ def _candidate_value(value: object) -> dict[str, object]:
         "evidence_bindings",
     }:
         raise ValueError("block-resolution candidate shape is invalid")
-    if value.get("schema_version") != BLOCK_RESOLUTION_CANDIDATE_SCHEMA:
+    if value.get("schema_version") not in {BLOCK_RESOLUTION_CANDIDATE_SCHEMA, BLOCK_RESOLUTION_CANDIDATE_SCHEMA_V2}:
         raise ValueError("block-resolution candidate schema is invalid")
     return value
 
@@ -563,6 +834,17 @@ def build_block_resolution_candidate(
         raise ValueError("; ".join(context_issues))
     value = _candidate_value(candidate_value)
     context = status["blocked_context"]
+    allocation_request = value["schema_version"] == BLOCK_RESOLUTION_CANDIDATE_SCHEMA_V2
+    retained_supplement = validated_review_allocation_supplement(root, status)
+    versioned = allocation_request or retained_supplement is not None
+    command_schema = BLOCK_RESOLUTION_COMMAND_SCHEMA_V2 if versioned else BLOCK_RESOLUTION_COMMAND_SCHEMA
+    recovery_kind = "allocate-review-reports" if allocation_request else "resume-blocked-program"
+    if allocation_request and (retained_supplement is not None or any(status.get(key) is not None for key in ("review_preparation_binding", "review_remediation_binding", "diff_disposition_binding"))):
+        raise ValueError("review allocation is unavailable after an existing grant or review prefix")
+    if versioned:
+        authority_issues = validate_state_authority(root, normalized)
+        if authority_issues:
+            raise ValueError("; ".join(authority_issues))
     if value["block_id"] != context["block_id"]:
         raise ValueError("block-resolution candidate block_id differs")
     results = value["criterion_results"]
@@ -571,7 +853,7 @@ def build_block_resolution_candidate(
         not isinstance(results, list)
         or not all(
             isinstance(item, dict)
-            and set(item) == {"criterion", "satisfied"}
+            and set(item) == ({"criterion", "satisfied", "evidence"} if allocation_request else {"criterion", "satisfied"})
             and type(item["criterion"]) is str
             and type(item["satisfied"]) is bool
             for item in results
@@ -590,13 +872,43 @@ def build_block_resolution_candidate(
         {"criterion": criterion, "satisfied": True}
         for criterion in context["recovery_criteria"]
     ]
-    if results != expected_results:
+    if allocation_request:
+        if any(not isinstance(item.get("evidence"), str) or not item["evidence"].strip() or len(item["evidence"]) > 2000 for item in results):
+            raise ValueError("allocation resume criteria need concrete evidence; pending review is not completed evidence")
+        compared_results = [{"criterion": item["criterion"], "satisfied": item["satisfied"]} for item in results]
+    else:
+        compared_results = results
+    if compared_results != expected_results:
         raise ValueError("every recovery criterion must be satisfied exactly once")
     if evidence_bindings != context["evidence_bindings"]:
         raise ValueError("resolution evidence must equal the blocked evidence inventory")
     blocked_status_sha256 = sha256_file(status_path)
+    supplement = None
+    if allocation_request:
+        storage = _manifest["increment_storage"]
+        for field in ("review_evidence_filename", "review_packet_filename"):
+            path, issues = resolve_managed_path(root, f"{storage['root']}/{status['current_increment_id']}/{storage[field]}", require_file=False)
+            if path is None or path.exists():
+                raise ValueError("review allocation cannot adopt an existing review prefix")
+        supplement = _review_allocation_shape(root, _manifest, status, context, require_absent=True)
+        baseline, *_ = _execution_contract(root, _manifest, status)
+        assessment = validate_execution_workspace(root, baseline, replace(inspect_repository(Path(normalized.path), normalized.base_commit), observation=normalized), increment_state="implementing")
+        if not assessment.valid:
+            raise ValueError("; ".join(assessment.issues))
+        retained_paths = {item["path"] for item in supplement["retained_reports"]}
+        supplement["original_product_sha256"] = _sha256_bytes(_canonical_json_bytes({"paths": [item for item in assessment.product_delta if item["path"] not in retained_paths]}))
+        supplement["blocked_status_sha256"] = blocked_status_sha256
+        supplement["blocked_status_sequence"] = status["state_sequence"]
+    extension = {}
+    if versioned:
+        extension["recovery_kind"] = recovery_kind
+        if supplement is not None:
+            extension["review_allocation_supplement"] = supplement
+        else:
+            extension["review_allocation_binding"] = dict(status["review_allocation_binding"])
     base_seed = {
-        "schema_domain": BLOCK_RESOLUTION_COMMAND_SCHEMA,
+        "schema_domain": command_schema,
+        **extension,
         "block_id": context["block_id"],
         "blocked_context_sha256": _sha256_bytes(
             _canonical_json_bytes(dict(context))
@@ -617,7 +929,8 @@ def build_block_resolution_candidate(
         {"base_seed_sha256": base_seed_sha256, "checkpoint_id": checkpoint_id},
     )
     command = {
-        "schema_version": BLOCK_RESOLUTION_COMMAND_SCHEMA,
+        "schema_version": command_schema,
+        **extension,
         "base_seed_sha256": base_seed_sha256,
         "checkpoint_id": checkpoint_id,
         "action_authorization_id": authorization_id,
@@ -641,8 +954,10 @@ def build_block_resolution_candidate(
         ),
         "authorization_id": authorization_id,
         "decision": "authorized",
-        "actions": ["resume-blocked-program"],
-        "scope": ["restore only the states recorded by the blocked context"],
+        "actions": ALLOCATION_ACTIONS if allocation_request else ["resume-blocked-program"],
+        **extension,
+        "scope": (["restore implementing and complete only the exact allocated JSON review reports", *supplement["report_paths"].values()]
+                  if supplement is not None else ["restore only the states recorded by the blocked context"]),
         "constraints": ["persist resolution evidence before resumed status"],
         "excluded": [
             "create-local-commit",
@@ -749,7 +1064,9 @@ def build_block_resolution_candidate(
         },
     )
     resolution_record = {
-        "schema_version": BLOCK_RESOLUTION_RECORD_SCHEMA,
+        "schema_version": BLOCK_RESOLUTION_RECORD_SCHEMA_V2 if versioned else BLOCK_RESOLUTION_RECORD_SCHEMA,
+        **extension,
+        **({"blocked_context": dict(context), "blocked_status_sequence": status["state_sequence"]} if versioned else {}),
         "resolution_id": resolution_id,
         "block_id": context["block_id"],
         "blocked_context_sha256": base_seed["blocked_context_sha256"],
@@ -771,7 +1088,8 @@ def build_block_resolution_candidate(
         program_state=context["prior_program_state"],
         current_increment_state=context["prior_increment_state"],
         block_resolution_binding={
-            "schema_version": BLOCK_RESOLUTION_BINDING_SCHEMA,
+            "schema_version": BLOCK_RESOLUTION_BINDING_SCHEMA_V2 if versioned else BLOCK_RESOLUTION_BINDING_SCHEMA,
+            **({"recovery_kind": recovery_kind} if versioned else {}),
             "block_id": context["block_id"],
             "resolution_id": resolution_id,
             "resolution_sha256": resolution_sha256,
@@ -795,6 +1113,14 @@ def build_block_resolution_candidate(
             "checkpoint_id": checkpoint_id,
         },
     )
+    if supplement is not None:
+        resumed["review_allocation_binding"] = {
+            "schema_version": REVIEW_ALLOCATION_BINDING_SCHEMA,
+            "increment_id": status["current_increment_id"],
+            "resolution_id": resolution_id, "resolution_sha256": resolution_sha256,
+            "action_authorization_id": authorization_id, "action_authorization_sha256": action_sha256,
+            "supplement_sha256": _sha256_bytes(_canonical_json_bytes(supplement)),
+        }
     return BlockResolutionCandidate(
         prompt=prompt,
         continuation_checkpoint_id=checkpoint_id,
@@ -812,11 +1138,14 @@ def _candidate_from_prompt(
     submitted_prompt: str,
     observation: RepositoryObservation,
 ) -> BlockResolutionCandidate:
-    command = parse_exact_prompt(
-        submitted_prompt, BLOCK_RESOLUTION_COMMAND_SCHEMA
-    )
+    try:
+        command = parse_exact_prompt(submitted_prompt, BLOCK_RESOLUTION_COMMAND_SCHEMA)
+    except ValueError:
+        command = parse_exact_prompt(submitted_prompt, BLOCK_RESOLUTION_COMMAND_SCHEMA_V2)
     value = {
-        "schema_version": BLOCK_RESOLUTION_CANDIDATE_SCHEMA,
+        "schema_version": (BLOCK_RESOLUTION_CANDIDATE_SCHEMA_V2
+                           if command.get("recovery_kind") == "allocate-review-reports"
+                           else BLOCK_RESOLUTION_CANDIDATE_SCHEMA),
         "block_id": command.get("block_id"),
         "criterion_results": command.get("criterion_results"),
         "evidence_bindings": command.get("evidence_bindings"),
@@ -903,8 +1232,15 @@ def validate_block_resolution_history(
     except (KeyError, OSError, TypeError, ValueError) as error:
         return (str(error),)
     issues: list[str] = []
+    versioned = binding.get("schema_version") == BLOCK_RESOLUTION_BINDING_SCHEMA_V2
+    if versioned:
+        try:
+            if validated_review_allocation_supplement(root, status) is None:
+                raise ValueError("versioned resolution requires its review allocation")
+        except (KeyError, OSError, TypeError, ValueError) as error:
+            issues.append(str(error))
     if (
-        binding.get("schema_version") != BLOCK_RESOLUTION_BINDING_SCHEMA
+        binding.get("schema_version") != (BLOCK_RESOLUTION_BINDING_SCHEMA_V2 if versioned else BLOCK_RESOLUTION_BINDING_SCHEMA)
         or binding.get("block_id") != context.get("block_id")
         or binding.get("restored_program_state")
         != context.get("prior_program_state")
@@ -916,8 +1252,15 @@ def validate_block_resolution_history(
         issues.append("status-current block resolution must exist exactly once")
     else:
         record = resolution_matches[0]
+        if versioned:
+            try:
+                _require_exact_record_bytes(
+                    _role_path(root, manifest, "block_resolutions"), record, "resolution_id"
+                )
+            except (OSError, TypeError, ValueError) as error:
+                issues.append(str(error))
         if (
-            record.get("schema_version") != BLOCK_RESOLUTION_RECORD_SCHEMA
+            record.get("schema_version") != (BLOCK_RESOLUTION_RECORD_SCHEMA_V2 if versioned else BLOCK_RESOLUTION_RECORD_SCHEMA)
             or _sha256_bytes(_canonical_json_line(record))
             != binding.get("resolution_sha256")
             or record.get("block_id") != binding.get("block_id")
@@ -933,6 +1276,13 @@ def validate_block_resolution_history(
             != binding.get("restored_increment_state")
         ):
             issues.append("block-resolution ledger binding differs")
+        if versioned and (
+            record.get("blocked_context") != context
+            or record.get("recovery_kind") != binding.get("recovery_kind")
+            or record.get("blocked_context_sha256") != _sha256_bytes(_canonical_json_bytes(dict(context)))
+            or (binding.get("recovery_kind") == "resume-blocked-program" and record.get("review_allocation_binding") != status.get("review_allocation_binding"))
+        ):
+            issues.append("versioned block-resolution provenance differs")
     if len(action_matches) != 1:
         issues.append("block-resolution action must exist exactly once")
     else:
@@ -942,9 +1292,16 @@ def validate_block_resolution_history(
             else ACTION_AUTHORIZATION_SCHEMA
         )
         action = action_matches[0]
+        if versioned:
+            try:
+                _require_exact_record_bytes(
+                    _role_path(root, manifest, "action_authorizations"), action, "authorization_id"
+                )
+            except (OSError, TypeError, ValueError) as error:
+                issues.append(str(error))
         if (
             action.get("schema_version") != expected_action_schema
-            or action.get("actions") != ["resume-blocked-program"]
+            or action.get("actions") != (ALLOCATION_ACTIONS if versioned and binding.get("recovery_kind") == "allocate-review-reports" else ["resume-blocked-program"])
             or _sha256_bytes(_canonical_json_line(action))
             != binding.get("action_authorization_sha256")
         ):
@@ -1007,6 +1364,15 @@ def _completed_receipt(
     issues = validate_block_resolution_history(root, status, observation)
     if issues:
         raise ValueError("; ".join(issues))
+    if binding.get("schema_version") == BLOCK_RESOLUTION_BINDING_SCHEMA_V2:
+        if (status.get("state_sequence") != binding.get("blocked_status_sequence", -1) + 1
+            or status.get("program_state") != binding.get("restored_program_state")
+            or status.get("current_increment_state") != binding.get("restored_increment_state")):
+            raise ValueError("submitted recovery prompt belongs to an earlier transition")
+        manifest = _load_manifest_status(root)[0]
+        baseline, *_ = _execution_contract(root, manifest, status)
+        _validate_evidence_bindings(Path(observation.path), baseline, tuple(
+            EvidenceBinding(**item) for item in status["blocked_context"]["evidence_bindings"]))
     status_path = _load_manifest_status(root)[2]
     return StateTransitionReceipt(
         prior_sha256=str(binding["blocked_status_sha256"]),
@@ -1036,6 +1402,7 @@ def persist_blocked_resolution(
     candidate = _candidate_from_prompt(root, submitted_prompt, normalized)
     action_path = _role_path(root, manifest, "action_authorizations")
     resolution_path = _role_path(root, manifest, "block_resolutions")
+    _preflight_versioned_resolution(action_path, resolution_path, candidate)
     _append_or_adopt(
         action_path,
         candidate.action_record,
@@ -1133,7 +1500,7 @@ def inspect_blocked_recovery(
     matching_actions = [
         record
         for record in actions
-        if record.get("actions") == ["resume-blocked-program"]
+        if record.get("actions") in (["resume-blocked-program"], ALLOCATION_ACTIONS)
         and record.get("block_id") == context.get("block_id")
     ]
     matching_resolutions = [
@@ -1155,7 +1522,7 @@ def inspect_blocked_recovery(
         )
     action = matching_actions[0]
     candidate_value = {
-        "schema_version": BLOCK_RESOLUTION_CANDIDATE_SCHEMA,
+        "schema_version": (BLOCK_RESOLUTION_CANDIDATE_SCHEMA_V2 if action.get("actions") == ALLOCATION_ACTIONS else BLOCK_RESOLUTION_CANDIDATE_SCHEMA),
         "block_id": context["block_id"],
         "criterion_results": action.get("criterion_results"),
         "evidence_bindings": action.get("evidence_bindings"),
@@ -1163,6 +1530,10 @@ def inspect_blocked_recovery(
     try:
         candidate = build_block_resolution_candidate(
             root, candidate_value, observation
+        )
+        _preflight_versioned_resolution(
+            _role_path(root, manifest, "action_authorizations"),
+            _role_path(root, manifest, "block_resolutions"), candidate,
         )
     except (KeyError, OSError, TypeError, ValueError) as error:
         return BlockedRecoveryInspection(

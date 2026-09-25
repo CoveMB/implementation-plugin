@@ -2,17 +2,21 @@
 
 Use this procedure only after the current source, approved program, workspace, exact-file plan, and separate review/write authorization validate. Freeze the proposed logical diff before opening review and preserve every accepted or user-owned path outside the plan.
 
-The evidence validator is [`review_coordination.py`](../scripts/review_coordination.py). The production writer is [`program_review.py`](../scripts/program_review.py). It derives the status-current evidence and packet paths only from immutable increment storage, resolves the three raw report paths only from the exact plan, validates the full bundle in memory, and then persists evidence → packet → `verified` status → `awaiting-diff-approval` status. It never accepts caller-selected evidence or packet paths. These mechanisms do not establish reviewer identity, independence, expertise, or review quality.
+The evidence validator is [`review_coordination.py`](../scripts/review_coordination.py). The production writer is [`program_review.py`](../scripts/program_review.py). It derives the status-current evidence and packet paths only from immutable increment storage, resolves all required and risk-selected raw report paths from the exact plan or its validated increment-bound review allocation supplement, validates the full bundle in memory, and then persists evidence → packet → `verified` status → `awaiting-diff-approval` status. It never accepts caller-selected evidence or packet paths. These mechanisms do not establish reviewer identity, independence, expertise, or review quality.
 
 ## Required and risk-triggered scopes
 
 Persist separate initial reports for requirements and scope, architecture and boundaries, and test adequacy and evidence validity. Do not merge these scopes into one report.
 
-Classify every canonical risk predicate from the actual frozen diff. Add only the specialist scopes whose predicates are materially touched. Each touched or not-touched decision needs current evidence and rationale; a missing, duplicated, unknown, or misbound predicate fails closed.
+Anticipate material risks when preparing the exact map and allocate each declared report as Create. The shared declaration parser rejects unknown scopes, duplicates, unsafe paths, and missing base declarations before plan persistence. Do not allocate all specialists speculatively.
+
+Classify every canonical risk predicate from the actual frozen diff. The writer derives selection from the architecture report and requires exact equality with declared scopes, then loads reports in canonical order. Add only the specialist scopes whose predicates are materially touched. Each touched or not-touched decision needs current evidence and rationale; a missing, duplicated, unknown, or misbound predicate fails closed.
 
 ## Raw report preservation
 
 Write each initial raw report before reconciliation at its exact-plan-declared path. The raw report binds the current program and increment and records its persistence time, scope, reviewer role, assurance status, and findings. The production writer independently derives its path and digest, rejects a missing, symlinked, unsafe, undeclared, stale, or replayed report, and never rewrites it.
+
+A [review allocation recovery supplement](state-authorization.md#review-allocation-recovery) selects the exact fresh report set while retaining the original reports byte-for-byte. Review and remediation use the same selected-scope loader and all normal freshness and finding checks. Allocation approval supplies no assessment, timestamp, verification result, or reviewer assurance.
 
 ## Truthful independence
 

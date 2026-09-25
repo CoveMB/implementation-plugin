@@ -664,7 +664,7 @@ class ExactPlanMaterializationTests(unittest.TestCase):
             )
             candidate = ACTIVATION._build_plan_candidate(
                 program_root,
-                exact_plan_bytes(program_root, successor_observation),
+                _exact_plan_bytes(program_root, successor_observation),
                 successor_observation,
             )
             rollover = json.loads(

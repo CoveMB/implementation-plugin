@@ -72,13 +72,18 @@ and unsupported descriptor operations stop before mutation.
 
 ## 4. Prepare Review and Diff Disposition
 
-After the exact implementation delta reaches reviewing state, prepare the
-required raw reports, review evidence, review packet, and fresh verification.
+Before implementation, declare one exact Create path for each anticipated
+review scope. At review, the architecture risk predicates select the required
+specialists; the declarations and completed reports must match that selection.
+Persist all selected reports, reconcile findings, and run fresh verification
+before preparing the review evidence and packet. See the canonical
+[review contract](../skills/implementing-staged-plans/references/review-coordination.md).
 
 ```text
 Use $implementing-staged-plans to prepare the typed review transaction for
 LIBRARY-001 LIBRARY-INDEX. Reconcile the exact requirements, architecture, and
-test-evidence reports. Stop at the exact diff disposition.
+test-evidence reports and every risk-selected specialist report. Stop at the
+exact diff disposition.
 ```
 
 Questions about the diff do not accept it. Keep the status unchanged until the
@@ -136,6 +141,23 @@ writes blocked status. Recovery uses the exact `blocked-recovery` prompt and
 restores only the recorded prior states after its action and resolution records
 are durable. Plan A's `reviewing -> remediating -> reviewing` path remains
 separate.
+
+For an existing blocked v1 increment whose report allocation is incomplete,
+use the opt-in [review allocation recovery](../skills/implementing-staged-plans/references/state-authorization.md#review-allocation-recovery)
+preview. It names exact fresh JSON reports inside the already approved report
+class and retains the original plan, baseline, reports, and product evidence.
+Ordinary resume grants no report allocation. Supply truthful evidence for each
+original recovery criterion; the preview leaves assessments, reconciliation,
+and fresh verification pending. Submit the exact allocation command only after
+reviewing those paths and criteria, then complete the reports through the
+normal review writer and stop at diff approval.
+
+The allocation survives later blocks and ordinary resumes of that increment.
+Accepted rollover archives its provenance, retains the predecessor reports,
+and requires the successor plan to Preserve them. The successor receives no
+active report extension from its predecessor. Terminal v1 closure validates
+the same effective contract. Installation and recovery of an actual blocked
+program are separate operations; local regression success proves neither.
 
 ## 9. Close a Final Program
 

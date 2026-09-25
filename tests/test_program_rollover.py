@@ -38,6 +38,142 @@ def accepted_continuation_program(domain: str):
 
 
 class ProgramRolloverTests(unittest.TestCase):
+    def test_specialist_acceptance_rollover_and_successor_preparation(self):
+        from tests.test_blocked_recovery import (
+            ACTIVATION, BLOCKED, RECOVERY_RISKS, reviewed_specialist_program,
+        )
+        from tests.program_bootstrap_support import _exact_plan_bytes
+
+        for recovery in (False, True):
+            with self.subTest(recovery=recovery):
+                fixture, root, observation = reviewed_specialist_program(recovery=recovery)
+                self.addCleanup(fixture.close)
+                status = json.loads((root / "state/status.json").read_text())
+                allocation = status.get("review_allocation_binding")
+                reports = {p: v for p, v in repository_snapshot(fixture.repository).items()
+                           if p.startswith("reviews/") and p.endswith(".json")}
+                self.assertEqual(self.discover(fixture)["disposition"], "increment-acceptance-retry-ready")
+                DIFF.render_diff_disposition_prompt(root)
+                stop_prompt = "Accept and stop.\n\n" + DIFF.build_diff_acceptance_candidate(root, observation).prompt
+                DIFF.persist_accept_stop(root, stop_prompt, observation)
+                prompt = CONTINUATION.render_accepted_state_continuation_prompt(root)
+                ROLLOVER.persist_increment_rollover(root, prompt, observation)
+                status = json.loads((root / "state/status.json").read_text())
+                self.assertNotIn("review_allocation_binding", status)
+                self.assertIsNone(BLOCKED.validated_review_allocation_supplement(root, status))
+                records = [json.loads(line) for line in (root / "state/rollovers.jsonl").read_text().splitlines()]
+                self.assertEqual(records[-1].get("review_allocation_binding"), allocation)
+                inherited = ROLLOVER.validated_inherited_paths(root, status, observation)
+                self.assertTrue(set(reports).issubset(inherited))
+                self.assertEqual(self.discover(fixture)["disposition"], "resume")
+                observation = ACTIVATION.inspect_repository(fixture.repository, fixture.head).observation
+                plan = _exact_plan_bytes(root, observation, RECOVERY_RISKS)
+                invalid = plan.replace("- `reviews/ARCHIVE-VERIFY/specialist-provider.json` — exact owned path.\n".encode(), b"")
+                before = repository_snapshot(fixture.repository)
+                with self.assertRaises(ValueError):
+                    ACTIVATION.prepare_exact_plan(root, invalid, observation)
+                self.assertEqual(repository_snapshot(fixture.repository), before)
+                prepared = ACTIVATION.prepare_exact_plan(root, plan, observation)
+                ACTIVATION.materialize_exact_plan(root, prepared.plan_prompt, observation)
+                self.assertEqual(self.discover(fixture)["disposition"], "resume")
+                self.assertEqual({p: repository_snapshot(fixture.repository)[p] for p in reports}, reports)
+
+    def test_archived_supplement_and_reports_reject_tampering_in_successor(self):
+        from tests.test_blocked_recovery import ACTIVATION, reviewed_specialist_program
+        from tests.program_bootstrap_support import _exact_plan_bytes, canonical_json
+
+        fixture, root, observation = reviewed_specialist_program(recovery=True)
+        self.addCleanup(fixture.close)
+        stop_prompt = "Accept and stop.\n\n" + DIFF.build_diff_acceptance_candidate(root, observation).prompt
+        DIFF.persist_accept_stop(root, stop_prompt, observation)
+        prompt = CONTINUATION.render_accepted_state_continuation_prompt(root)
+        ROLLOVER.persist_increment_rollover(root, prompt, observation)
+        observation = ACTIVATION.inspect_repository(fixture.repository, fixture.head).observation
+        plan = _exact_plan_bytes(root, observation)
+        omitted = plan.replace("- `reviews/requirements.json` — exact owned path.\n".encode(), b"")
+        before = repository_snapshot(fixture.repository)
+        with self.assertRaisesRegex(ValueError, "Preserve retained"):
+            ACTIVATION.prepare_exact_plan(root, omitted, observation)
+        self.assertEqual(repository_snapshot(fixture.repository), before)
+        prepared = ACTIVATION.prepare_exact_plan(root, plan, observation)
+        ACTIVATION.materialize_exact_plan(root, prepared.plan_prompt, observation)
+        ACTIVATION.advance_execution_state(root, "implementing", observation)
+        status_path = root / "state/status.json"
+        rollover_path = root / "state/rollovers.jsonl"
+        status = json.loads(status_path.read_text())
+        rollover = json.loads(rollover_path.read_text())
+        fresh_report = next(fixture.repository.glob("reviews/recovery-*/specialist-provider.json"))
+        targets = {
+            "old-report": fixture.repository / "reviews/requirements.json",
+            "new-report": fresh_report,
+            "origin-resolution": root / "state/block-resolutions.jsonl",
+            "missing-archive": rollover_path,
+            "downgraded-archive": rollover_path,
+        }
+        for label, target in targets.items():
+            with self.subTest(label=label):
+                original = target.read_bytes()
+                status_bytes = status_path.read_bytes()
+                try:
+                    if label.endswith("archive"):
+                        changed = dict(rollover)
+                        if label == "missing-archive":
+                            changed.pop("review_allocation_binding")
+                        else:
+                            changed["schema_version"] = "implementation-increment-rollover/v1"
+                        target.write_bytes(ROLLOVER._canonical_json_line(changed))
+                        changed_status = json.loads(status_bytes)
+                        changed_status["rollover_binding"]["rollover_sha256"] = ROLLOVER.sha256_file(target)
+                        status_path.write_bytes(canonical_json(changed_status))
+                    else:
+                        target.write_bytes(original + b" ")
+                    current = json.loads(status_path.read_text())
+                    before = repository_snapshot(fixture.repository)
+                    with self.assertRaises(ValueError):
+                        ROLLOVER.validated_inherited_paths(root, current, observation)
+                    self.assertNotEqual(self.discover(fixture)["disposition"], "resume")
+                    with self.assertRaises(ValueError):
+                        CONTINUATION.render_accepted_state_continuation_prompt(root)
+                    self.assertEqual(repository_snapshot(fixture.repository), before)
+                finally:
+                    target.write_bytes(original)
+                    status_path.write_bytes(status_bytes)
+        self.assertEqual(self.discover(fixture)["disposition"], "resume")
+
+    def test_supplemented_rollover_prefixes_are_discoverable_and_exact(self):
+        from tests.test_blocked_recovery import reviewed_specialist_program
+
+        for boundary in ("action-authorization", "successor-grant", "handoff",
+                         "successor-brief", "rollover-record", "successor-status"):
+            with self.subTest(boundary=boundary):
+                fixture, root, observation = reviewed_specialist_program(recovery=True)
+                self.addCleanup(fixture.close)
+                stop_prompt = "Accept and stop.\n\n" + DIFF.build_diff_acceptance_candidate(root, observation).prompt
+                DIFF.persist_accept_stop(root, stop_prompt, observation)
+                prompt = CONTINUATION.render_accepted_state_continuation_prompt(root)
+                original_resolutions = (root / "state/block-resolutions.jsonl").read_bytes()
+
+                def interrupt(label):
+                    if label == boundary:
+                        raise RuntimeError("injected rollover interruption")
+
+                with mock.patch.object(ROLLOVER, "_after_persist", side_effect=interrupt):
+                    with self.assertRaisesRegex(RuntimeError, "injected"):
+                        ROLLOVER.persist_increment_rollover(root, prompt, observation)
+                expected = (
+                    "resume" if boundary == "successor-status" else
+                    "accepted-state-continuation-retry-ready"
+                    if boundary in {"action-authorization", "successor-grant"} else
+                    "accepted-state-rollover-retry-ready"
+                )
+                self.assertEqual(self.discover(fixture)["disposition"], expected)
+                ROLLOVER.persist_increment_rollover(root, prompt, observation)
+                complete = repository_snapshot(fixture.repository)
+                ROLLOVER.persist_increment_rollover(root, prompt, observation)
+                self.assertEqual(repository_snapshot(fixture.repository), complete)
+                self.assertEqual((root / "state/block-resolutions.jsonl").read_bytes(), original_resolutions)
+                self.assertEqual(self.discover(fixture)["disposition"], "resume")
+
     def discover(self, fixture) -> dict[str, object]:
         return run_program_discovery(fixture.repository)
 

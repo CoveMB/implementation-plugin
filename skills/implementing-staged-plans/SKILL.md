@@ -75,7 +75,7 @@ The v2 continuation and rollover families use result-bound action-v3 authority, 
 
 ## Resolve a Blocked Program
 
-Only the typed blocked transaction may enter or leave blocked state. Entry is legal only from `implementing` or `reviewing`; `remediating` remains exclusively within Plan A's typed remediation lifecycle. The sink derives the resume context and persists status atomically. Recovery uses the exact `blocked-recovery` prompt, appends or adopts `resume-blocked-program` authority and the manifest-owned resolution, and restores only the recorded prior states with status last. Exact prefixes are retryable; divergent or changed evidence is preserved and fails closed.
+Only the typed blocked transaction may enter or leave blocked state. Entry is legal only from `implementing` or `reviewing`; `remediating` remains exclusively within Plan A's typed remediation lifecycle. The sink derives the resume context and persists status atomically. Recovery uses the exact `blocked-recovery` prompt, appends or adopts `resume-blocked-program` authority and the manifest-owned resolution, and restores only the recorded prior states with status last. Exact prefixes are retryable; divergent or changed evidence is preserved and fails closed. The sole post-start report allocation exception is [Review allocation recovery](references/state-authorization.md#review-allocation-recovery): its separately approved typed supplement preserves the original plan, baseline, and reports and survives later blocks and ordinary resumes. It is not general re-planning or completion of review work.
 
 ## Close a Final Program
 

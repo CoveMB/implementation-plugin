@@ -138,7 +138,8 @@ REVIEW_RISK_SCOPES = {
 
 
 def raw_review_report(
-    scope: str, increment_id: str = "ARCHIVE-INDEX"
+    scope: str, increment_id: str = "ARCHIVE-INDEX",
+    touched_predicates: tuple[str, ...] = (),
 ) -> dict[str, object]:
     """Return one deterministic raw first-increment review report fixture."""
     value: dict[str, object] = {
@@ -160,10 +161,12 @@ def raw_review_report(
         value["risk_predicates"] = [
             {
                 "predicate": predicate,
-                "touched": False,
+                "touched": predicate in touched_predicates,
                 "specialist_scope": specialist,
-                "evidence": f"the exact delta does not touch {predicate}",
-                "rationale": "no specialist scope selected",
+                "evidence": (f"the synthetic delta touches {predicate}" if predicate in touched_predicates
+                             else f"the exact delta does not touch {predicate}"),
+                "rationale": ("synthetic specialist assessment required" if predicate in touched_predicates
+                              else "no specialist scope selected"),
             }
             for predicate, specialist in REVIEW_RISK_SCOPES.items()
         ]
@@ -241,12 +244,16 @@ def write_raw_review_reports(
     repository: Path,
     increment_id: str = "ARCHIVE-INDEX",
     relative_directory: str = "reviews",
+    touched_predicates: tuple[str, ...] = (),
 ) -> None:
     reviews = Path(repository) / relative_directory
     reviews.mkdir(parents=True, exist_ok=True)
-    for scope in ("requirements", "architecture", "test-evidence"):
+    from review_coordination import REQUIRED_REVIEW_SCOPES, RISK_REVIEW_SCOPES
+
+    scopes = (*REQUIRED_REVIEW_SCOPES, *(scope for predicate, scope in RISK_REVIEW_SCOPES.items() if predicate in touched_predicates))
+    for scope in scopes:
         (reviews / f"{scope}.json").write_bytes(
-            canonical_json(raw_review_report(scope, increment_id))
+            canonical_json(raw_review_report(scope, increment_id, touched_predicates))
         )
 
 
@@ -1036,7 +1043,7 @@ class BootstrapFixture:
         self.write_json("state/status.json", status)
 
 
-def _exact_plan_bytes(program_root: Path, observation: object) -> bytes:
+def _exact_plan_bytes(program_root: Path, observation: object, touched_predicates: tuple[str, ...] = ()) -> bytes:
     """Build the deterministic application-path plan used by lifecycle tests."""
     from program_activation import required_future_lifecycle_writes
 
@@ -1081,6 +1088,9 @@ def _exact_plan_bytes(program_root: Path, observation: object) -> bytes:
         scope: f"{review_root}/{scope}.json"
         for scope in ("architecture", "requirements", "test-evidence")
     }
+    from review_coordination import RISK_REVIEW_SCOPES
+
+    raw_review_paths.update({scope: f"{review_root}/{scope}.json" for predicate, scope in RISK_REVIEW_SCOPES.items() if predicate in touched_predicates})
     product_paths = {
         "archive-output.txt",
         *raw_review_paths.values(),
@@ -1124,6 +1134,13 @@ def _exact_plan_bytes(program_root: Path, observation: object) -> bytes:
         if allocation.get("operation") == "Modify"
         and allocation["path"] in inherited_present
     }
+    from repository_preparation import matching_operation_allocations
+
+    allocations = manifest.get("setup_semantics", {}).get("operation_envelope", {}).get("allocations", [])
+    retained = {
+        path for path in inherited_present
+        if matching_operation_allocations(allocations, increment_id, "Preserve", path)
+    }
     product_paths -= set(delete)
     create = sorted(
         {
@@ -1137,9 +1154,9 @@ def _exact_plan_bytes(program_root: Path, observation: object) -> bytes:
             *(
                 path
                 for path in inherited_present
-                if not setup_v2
-                or path in product_paths
-                or path in explicit_modify
+                if path not in retained and (
+                    not setup_v2 or path in product_paths or path in explicit_modify
+                )
             ),
             *(item.path for item in required if item.disposition == "Modify"),
         }
@@ -1148,6 +1165,7 @@ def _exact_plan_bytes(program_root: Path, observation: object) -> bytes:
         {
             *(item.path for item in required if item.disposition == "Preserve"),
             *( [] if setup_v2 else ["catalog.txt"] ),
+            *retained,
         }
     )
     source = status["source_binding"]
@@ -1205,6 +1223,7 @@ def _exact_plan_bytes(program_root: Path, observation: object) -> bytes:
             f"- requirements: `{raw_review_paths['requirements']}`",
             f"- architecture: `{raw_review_paths['architecture']}`",
             f"- test-evidence: `{raw_review_paths['test-evidence']}`",
+            *[f"- {scope}: `{raw_review_paths[scope]}`" for predicate, scope in RISK_REVIEW_SCOPES.items() if predicate in touched_predicates],
             "",
             "## Commit boundaries",
             "One logical local commit boundary; no commit authority is granted.",
