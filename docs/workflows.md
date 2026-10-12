@@ -1,8 +1,11 @@
 # Common workflows
 
 These examples use a fictional program called `LIBRARY-001`. Replace every
-identifier and path with the persisted records in your repository. A request
-selects a route; it does not override state or grant an unnamed action.
+identifier and path with the persisted records in your repository. The free-form
+prompts below use the native Codex plugin spelling; follow
+[Invocation](reference.md#invocation) to select the installed skill or use another
+installation route. Keep generated exact commands and direct replies unchanged.
+A request selects a route; it does not override state or grant an unnamed action.
 
 ## 1. Create a New Program
 
@@ -10,7 +13,7 @@ Use this route only when discovery finds no controlling manifest and you
 explicitly want to create a program proposal.
 
 ```text
-Use $implementing-staged-plans to create a new repository-backed program from
+Use $implementation-plugin:implementing-staged-plans to create a new repository-backed program from
 docs/library-search-plan.md in /work/library-catalog. Inspect the repository
 freshly. Publish only the creation control plane and print the short program
 start summary once in the conversation: numbered increments, workspace, approval scope, limits, detail links, and one start action. Create no recap or summary file. Stop before starting.
@@ -54,7 +57,7 @@ Prepare the exact-file plan and execution baseline before changing product
 files.
 
 ```text
-Use $implementing-staged-plans to prepare the exact-file plan for LIBRARY-001
+Use $implementation-plugin:implementing-staged-plans to prepare the exact-file plan for LIBRARY-001
 LIBRARY-INDEX under approval:standard. Preserve existing work. Stop for the
 exact plan approval before product modification.
 ```
@@ -80,7 +83,7 @@ before preparing the review evidence and packet. See the canonical
 [review contract](../skills/implementing-staged-plans/references/review-coordination.md).
 
 ```text
-Use $implementing-staged-plans to prepare the typed review transaction for
+Use $implementation-plugin:implementing-staged-plans to prepare the typed review transaction for
 LIBRARY-001 LIBRARY-INDEX. Reconcile the exact requirements, architecture, and
 test-evidence reports and every risk-selected specialist report. Stop at the
 exact diff disposition.
@@ -167,7 +170,7 @@ Unavailable selection cannot authorize closure. PLUG-002's accepted-chain and
 terminal Delete closure/disposal work remains separate.
 
 ```text
-Use $implementing-staged-plans to prepare closure for the accepted final
+Use $implementation-plugin:implementing-staged-plans to prepare closure for the accepted final
 increment of LIBRARY-001. Reconcile all requirements and fresh program evidence,
 write only the manifest-owned closure artifacts, and stop for exact closure
 approval.

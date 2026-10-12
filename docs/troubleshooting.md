@@ -34,6 +34,11 @@ copied twice, or the host has not reloaded its skill inventory.
 
 - In Codex, run `codex plugin list` and confirm
   `implementation-plugin@implementation-workflows` is installed and enabled.
+- Check refreshed native skill discovery for
+  `implementation-plugin:implementing-staged-plans` and its installed path.
+  This explicit-only skill may be absent from the implicit catalog. Discovery
+  confirms availability, not instruction loading; see
+  [native skill selection](reference.md#native-skill-selection).
 - In the Claude CLI, run `claude plugin list`. In an interactive session, open
   `/plugin`; in the VS Code extension, open `/plugins`.
 - For a standalone skill, confirm that
@@ -41,23 +46,33 @@ copied twice, or the host has not reloaded its skill inventory.
   the host's skill directory.
 - Reload or start a new session after changing plugin or skill files.
 
-**Next action:** Install the plugin after adding its marketplace, or move the
-complete skill directory to the correct project or personal location. If a
-standalone destination already exists, do not copy another directory over it.
-Compare the copies first, and keep the original until the new installation is
-confirmed.
+**Next action:** If installation is missing, install the plugin after adding
+its marketplace, or move the complete standalone skill directory to the correct
+project or personal location. If a standalone destination already exists,
+compare the copies first and preserve the original. If the native skill is
+discovered and enabled but its instructions are absent, diagnose host selection
+and delivery before changing the installation or program bindings.
 
 ## The invocation name in an example does not work
 
-**Likely cause:** Plugin and standalone installations use different invocation
-names in Claude Code. Codex uses its skill name in either form.
+**Likely cause:** Native plugin and standalone installations have different
+names. A tool-created task can also carry the text without supplying the
+explicit-only skill instructions.
 
-**Safe checks:** Compare your installation with the [invocation table](reference.md).
-In Claude Code, use `/plugin` or `/help` to see the names currently loaded.
+**Safe checks:** Compare the selected name and origin with the
+[invocation table](reference.md#invocation). A working bare token may select a
+standalone copy. In Claude Code, use `/plugin` or `/help` to see the names
+currently loaded.
 
-**Next action:** Use `$implementing-staged-plans` in Codex,
-`/implementation-plugin:implementing-staged-plans` for the Claude plugin, or
-`/implementing-staged-plans` for a standalone Claude skill.
+**Next action:** For native Codex free-form requests, select
+`implementation-plugin:implementing-staged-plans` and use
+`$implementation-plugin:implementing-staged-plans`. Standalone Codex keeps
+`$implementing-staged-plans`; Claude plugin and standalone names remain
+`/implementation-plugin:implementing-staged-plans` and
+`/implementing-staged-plans`. Preserve generated exact commands as explained in
+[exact program commands](reference.md#exact-program-commands). If instructions
+still do not load, report the host-delivery limitation; if they load but a
+program binding is stale, use the corresponding recovery section below.
 
 ## The marketplace is configured, but the plugin cannot be installed
 

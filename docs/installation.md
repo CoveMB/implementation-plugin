@@ -28,9 +28,9 @@ an installation command or marketplace file.
 
 | Host | Route | Availability | Persistence | Invocation |
 | --- | --- | --- | --- | --- |
-| Codex app | Public plugin marketplace | Conditional on directory publication | Installed plugin | `$implementing-staged-plans` |
-| Codex app and CLI | Repository marketplace | Ready locally; remote after the catalog is published | Installed plugin | `$implementing-staged-plans` |
-| Codex app and CLI | Local marketplace path | Available from a checkout | Installed plugin | `$implementing-staged-plans` |
+| Codex app | Public plugin marketplace | Conditional on directory publication | Installed plugin | `$implementation-plugin:implementing-staged-plans` |
+| Codex app and CLI | Repository marketplace | Ready locally; remote after the catalog is published | Installed plugin | `$implementation-plugin:implementing-staged-plans` |
+| Codex app and CLI | Local marketplace path | Available from a checkout | Installed plugin | `$implementation-plugin:implementing-staged-plans` |
 | Codex | Project standalone skill | Available by copying the skill directory | Current repository | `$implementing-staged-plans` |
 | Codex | Personal standalone skill | Available by copying the skill directory | Current user | `$implementing-staged-plans` |
 | Codex | `$skill-installer` | Available when the source repository is accessible | Current user | `$implementing-staged-plans` |
@@ -44,6 +44,13 @@ an installation command or marketplace file.
 | Claude Code | Personal standalone skill | Available by copying the skill directory | Current user | `/implementing-staged-plans` |
 
 ## Install as a Codex plugin
+
+The native installed skill identity is
+`implementation-plugin:implementing-staged-plans`; free-form requests use
+`$implementation-plugin:implementing-staged-plans`. Installed and enabled status
+does not establish that the host supplied its instructions to a task. Select
+and verify the installed skill through the host using the
+[invocation guidance](reference.md#invocation).
 
 ### From the repository marketplace
 
@@ -94,8 +101,11 @@ Install. Public-directory discovery is a separate publication step; including a
 marketplace catalog in this repository does not list it automatically.
 
 For a custom repository marketplace, register the catalog with the CLI first.
-The app and CLI use the same plugin package identity, so the installed skill is
-invoked as `$implementing-staged-plans`.
+The app and CLI use the same plugin package identity. Select the installed
+`implementation-plugin:implementing-staged-plans` skill; its free-form spelling
+is `$implementation-plugin:implementing-staged-plans`. Follow the
+[invocation guidance](reference.md#invocation) before submitting an exact program
+command.
 
 ## Install as a standalone Codex skill
 

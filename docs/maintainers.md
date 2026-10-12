@@ -187,6 +187,23 @@ They do not prove:
 Record each stronger claim only after running the relevant approved test or
 action and preserving its direct evidence.
 
+Keep these native activation evidence levels separate:
+
+| Claim | Required evidence | What it does not establish |
+| --- | --- | --- |
+| Installed bytes match | Compare the selected installed root with the exact source revision; record the comparison scope | Enabled discovery or instruction loading |
+| Native skill is enabled and discoverable | Refreshed discovery identifies `implementation-plugin:implementing-staged-plans`, its installed path, and enabled state | Instructions supplied to a task |
+| Native instructions loaded | Host evidence identifies the selected installed skill instructions in the receiving task | Exact command delivery, retention into another turn, or program authority |
+| Lifecycle behavior works | Separately authorized disposable-program evidence covers the actual submitted text digest, direct consent, action, and resulting state | Other hosts, routes, or untested lifecycle actions |
+
+Use the [invocation guidance](reference.md#invocation) when evaluating native
+selection and exact command transport. Text-only delegated tasks and assistant
+loading claims do not establish host injection. Desktop picker byte preservation
+and separate-turn retention remain unverified; deterministic tests cannot close
+those gaps. Neither selection nor instruction loading replaces the current
+summary and later direct consent required by `combined-start/v1`. Release and
+installation remain separately authorized actions.
+
 ## Release-readiness checklist
 
 - Re-read the canonical skill and all platform manifests.

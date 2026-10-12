@@ -61,17 +61,23 @@ codex plugin marketplace add /absolute/path/to/implementation-plugin
 codex plugin add implementation-plugin@implementation-workflows
 ```
 
-Open the target repository in Codex and start with a concrete program and
+Open the target repository in Codex, select the installed
+`implementation-plugin:implementing-staged-plans` skill through the host, and
+verify that its instructions were supplied. Start with a concrete program and
 manifest path:
 
 ```text
-$implementing-staged-plans
+$implementation-plugin:implementing-staged-plans
 
 Orient to program LIBRARY-001 using
 implementation-programs/LIBRARY-001/manifest.json. The approved plan is
 docs/library-search-plan.md. Use approval:standard and advance only the next
 legal action.
 ```
+
+A text mention alone, including one in a tool-created task, does not prove the
+host loaded the skill. See [Invocation](docs/reference.md#invocation) for native
+selection, other installation routes, and unchanged exact-command transport.
 
 The first response may be a read-only orientation or a request for the smallest
 missing approval. Code changes are not guaranteed merely because the skill was

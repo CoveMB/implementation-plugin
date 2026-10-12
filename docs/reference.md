@@ -16,16 +16,54 @@ implemented workflow differ.
 
 ## Invocation
 
-The command depends on how the skill was installed:
+For free-form requests, the invocation depends on how the skill was installed:
 
 | Installation | Invoke with |
 | --- | --- |
-| Codex plugin or standalone skill | `$implementing-staged-plans` |
+| Native Codex plugin | `$implementation-plugin:implementing-staged-plans` |
+| Codex standalone skill | `$implementing-staged-plans` |
 | Claude Code plugin | `/implementation-plugin:implementing-staged-plans` |
 | Claude Code standalone skill | `/implementing-staged-plans` |
 
 Follow the invocation with a target program or manifest, the action you want,
 the desired approval mode when creating new state, and any explicit stop.
+
+### Native skill selection
+
+The discovered native plugin identity is
+`implementation-plugin:implementing-staged-plans`. Select that installed skill
+through the host and verify its name, installed path, and supplied instructions.
+A bare-name request may select a standalone copy; that does not verify the
+native plugin. The skill is explicit-only, so absence from an implicit catalog
+does not by itself mean the installed plugin is unavailable.
+
+Installed/enabled discovery and instruction loading are separate evidence.
+Tool-created tasks may omit explicit-only instructions even when their text
+names the skill. Neither a text mention nor an assistant's acknowledgement proves
+host injection. The [app-server skill-selection API](https://learn.chatgpt.com/docs/app-server#skills)
+documents a separate `skill` input item for instruction injection alongside the
+text input. Its availability does not establish desktop picker behavior.
+
+### Exact program commands
+
+Generated launch, legacy first-start, continuation, recovery, and closure
+commands must be submitted unchanged, including any bare
+`$implementing-staged-plans` token, wrapper, whitespace, and JSON envelope. Do
+not substitute the qualified spelling, prepend activation text, or allow a
+picker's default prompt to change those bytes.
+
+Native selection must supply the installed instructions while preserving the
+complete command text. Verify the actual submitted UTF-8 text digest, not only
+what the composer displays. Desktop picker byte preservation and instruction
+retention after a separate activation-only turn remain unverified; neither is
+an established receiving procedure. If the host cannot demonstrably supply the
+skill and preserve the command, stop and report that limitation without
+rewriting program state.
+
+Loading skill instructions grants no program-action authority. For
+`combined-start/v1`, a fresh task must still rediscover and present the current
+summary before a later direct **Start the first increment** reply; selecting the
+skill or supplying an opening handoff cannot replace that decision.
 
 ## Core terms
 
